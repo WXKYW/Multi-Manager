@@ -1,6 +1,7 @@
 package cloudflare
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -17,10 +18,12 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -71,10 +74,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(parts) == 4 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets":
 		s.r2Buckets(w, r, parts[1])
+	case len(parts) == 4 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "metrics":
+		s.r2Metrics(w, r, parts[1])
 	case len(parts) == 5 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets":
 		s.deleteR2Bucket(w, r, parts[1], parts[4])
 	case len(parts) == 6 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects":
 		s.r2Objects(w, r, parts[1], parts[4])
+	case len(parts) == 7 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[6] == "folder-download":
+		s.r2FolderDownload(w, r, parts[1], parts[4])
 	case len(parts) == 7 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects":
 		s.r2ObjectMutation(w, r, parts[1], parts[4], parts[6])
 	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "download-info":
@@ -2870,6 +2877,34 @@ func (s *Service) r2Objects(w http.ResponseWriter, r *http.Request, accountID, b
 	})
 }
 
+func (s *Service) r2Metrics(w http.ResponseWriter, r *http.Request, accountID string) {
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/metrics"
+	payload, err := s.cfRequest(r.Context(), http.MethodGet, path, auth, nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	result := objectValue(payload["result"])
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":          true,
+		"standard":         result["standard"],
+		"infrequentAccess": result["infrequentAccess"],
+	})
+}
+
 func (s *Service) r2ObjectMutation(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
 	switch r.Method {
 	case http.MethodDelete:
@@ -2990,6 +3025,140 @@ func (s *Service) r2ObjectDownload(w http.ResponseWriter, r *http.Request, accou
 	w.Header().Set("Cache-Control", "private, max-age=60")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
+}
+
+func (s *Service) r2FolderDownload(w http.ResponseWriter, r *http.Request, accountID, bucketName string) {
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	prefix := r.URL.Query().Get("prefix")
+	// 打包时每个对象全量读入内存再写入 zip，内存占用与最大单对象成正比；
+	// 超过上限的对象跳过并记录，避免超大对象拖垮进程。
+	const maxObjectBytes = 512 << 20
+	type objectEntry struct {
+		key  string
+		size int64
+	}
+	var objects []objectEntry
+	cursor := ""
+	for {
+		query := url.Values{"limit": {"1000"}}
+		if prefix != "" {
+			query.Set("prefix", prefix)
+		}
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+		path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects"
+		if len(query) > 0 {
+			path += "?" + query.Encode()
+		}
+		payload, err := s.cfRequest(r.Context(), http.MethodGet, path, auth, nil)
+		if err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		for _, item := range arrayValue(payload["result"]) {
+			if obj, ok := item.(map[string]interface{}); ok {
+				if key, ok := obj["key"].(string); ok && key != "" {
+					objects = append(objects, objectEntry{key: key, size: int64(numberValue(obj["size"]))})
+				}
+			}
+		}
+		resInfo := objectValue(payload["result_info"])
+		cursor, _ = resInfo["cursor"].(string)
+		if cursor == "" {
+			break
+		}
+	}
+	sort.Slice(objects, func(i, j int) bool { return objects[i].key < objects[j].key })
+
+	folderName := bucketName
+	if base := strings.TrimSuffix(prefix, "/"); base != "" {
+		folderName = base
+		if idx := strings.LastIndex(base, "/"); idx >= 0 {
+			folderName = base[idx+1:]
+		}
+	}
+	if folderName == "" {
+		folderName = bucketName
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": folderName + ".zip"}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	ctx := r.Context()
+	downloaded, skipped, failed := 0, 0, 0
+	for _, object := range objects {
+		if object.size > maxObjectBytes {
+			skipped++
+			applog.Warn(ctx, "cloudflare", "r2 folder download skipped oversized object", "bucket", bucketName, "key", object.key, "size_bytes", object.size, "max_bytes", maxObjectBytes)
+			continue
+		}
+		path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(object.key)
+		raw, _, err := s.cfRawRequest(ctx, http.MethodGet, path, auth, "*/*", "", nil)
+		if err != nil {
+			failed++
+			applog.Warn(ctx, "cloudflare", "r2 folder download object failed", "bucket", bucketName, "key", object.key, "error", err.Error())
+			continue
+		}
+		rel := object.key
+		if prefix != "" {
+			rel = strings.TrimPrefix(object.key, prefix)
+		}
+		// key 恰好等于 prefix 的对象是目录标记（空对象），打包无意义且会产生空名称条目。
+		if rel == "" {
+			skipped++
+			continue
+		}
+		// R2 对象 key 可含任意字符（含 ../ 与 / 前缀），直接作为 zip 条目名会在
+		// 解压时逃逸目标目录（zip-slip）。拒绝此类条目，跳过并记录。
+		if !zipEntryNameSafe(rel) {
+			skipped++
+			applog.Warn(ctx, "cloudflare", "r2 folder download skipped unsafe entry name", "bucket", bucketName, "key", object.key, "entry", rel)
+			continue
+		}
+		header := &zip.FileHeader{Name: rel, Method: zip.Deflate}
+		header.SetModTime(time.Now())
+		entry, err := zw.CreateHeader(header)
+		if err != nil {
+			return
+		}
+		if _, err := entry.Write(raw); err != nil {
+			return
+		}
+		downloaded++
+	}
+	if skipped > 0 || failed > 0 {
+		applog.Warn(ctx, "cloudflare", "r2 folder download completed with skips", "bucket", bucketName, "prefix", prefix, "downloaded", downloaded, "skipped", skipped, "failed", failed)
+	}
+}
+
+// zipEntryNameSafe 报告相对路径能否安全作为 zip 条目名：
+// 拒绝绝对路径（/ 开头）与任何为 ".." 的路径段（/ 与 \ 均视为分隔符），
+// 防止解压时条目逃逸目标目录。
+func zipEntryNameSafe(rel string) bool {
+	if rel == "" || strings.HasPrefix(rel, "/") {
+		return false
+	}
+	for _, segment := range strings.FieldsFunc(rel, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) r2ObjectPreview(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {

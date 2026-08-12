@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"database/sql"
@@ -512,5 +513,34 @@ func TestCompactHistoryEndpointRewritesLargePayloads(t *testing.T) {
 	}
 	if len(compactWebhook) >= len(webhookPayload) {
 		t.Fatalf("expected webhook payload to shrink: before=%d after=%d", len(webhookPayload), len(compactWebhook))
+	}
+}
+
+func TestPublicPageIconID(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DBName: "test.db"}
+	service := New(cfg)
+	defer service.Stop()
+	db, err := service.open(t.Context())
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO github_public_pages (slug, domain, title, public, cache_seconds, config_json)
+		VALUES ('fav-slug', 'fav.example.com', 'Fav Test', 1, 300, '{"publicIconId":"site-custom"}')`); err != nil {
+		t.Fatalf("insert public page: %v", err)
+	}
+
+	iconID, found, err := service.PublicPageIconID(ctx, "fav-slug", false)
+	if err != nil || !found || iconID != "site-custom" {
+		t.Fatalf("custom slug lookup = (%q, %v, %v), want (site-custom, true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "fav.example.com", true)
+	if err != nil || !found || iconID != "site-custom" {
+		t.Fatalf("custom domain lookup = (%q, %v, %v), want (site-custom, true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "missing-slug", false)
+	if err != nil || found {
+		t.Fatalf("missing slug lookup = (%q, %v, %v), want ('', false, nil)", iconID, found, err)
 	}
 }

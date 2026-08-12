@@ -7,11 +7,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 func TestMiddlewarePreservesWebSocketHijacker(t *testing.T) {
+	var buf bytes.Buffer
+	previous := Logger()
+	SetLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer func() {
+		SetLogger(previous)
+	}()
+
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -41,6 +49,13 @@ func TestMiddlewarePreservesWebSocketHijacker(t *testing.T) {
 	}
 	if string(message) != "ok" {
 		t.Fatalf("message = %q, want ok", message)
+	}
+
+	// 服务端 handler 在独立 goroutine 返回，defer 日志与测试结束存在竞态；
+	// 等待日志落盘到本测试的 buffer，避免其延迟写入后续测试的日志 buffer。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !strings.Contains(buf.String(), `"msg":"http request"`) {
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

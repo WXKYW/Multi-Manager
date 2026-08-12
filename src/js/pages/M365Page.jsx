@@ -7,9 +7,10 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Popover, Tabs } from '@cloudflare/kumo';
+import { Badge, Meter, Popover, Tabs, Toolbar } from '@cloudflare/kumo';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
   AppCard,
@@ -18,9 +19,11 @@ import {
   DataTableFrame,
   EmptyState,
   PageStack,
-  PageToolbar,
+  ResponsiveSearchInput,
   SectionCard,
   StatusBadge,
+  TabBarOverflowActions,
+  stickyTabsBaseClass,
 } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
@@ -31,6 +34,7 @@ import {
   Download,
   Folder,
   Globe,
+  Key,
   Plus,
   RefreshCw,
   Search,
@@ -100,7 +104,7 @@ const defaultInviteCodeGeneratorForm = {
   quantity: 1,
 };
 
-const workspaceHeightClass = '';
+const workspaceHeightClass = 'min-h-0 flex-1';
 const panelBodyClass = 'flex min-h-0 flex-1 flex-col';
 const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
 const tableFrameClass = 'flex h-0 min-h-0 flex-1 flex-col overflow-hidden';
@@ -120,8 +124,6 @@ const publicResourceCardClass =
   'flex h-full min-h-[15rem] flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base';
 const publicResourceCardHeaderClass =
   'flex items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/10 px-3.5 py-3';
-const publicResourceCardPillClass =
-  'inline-flex max-w-40 shrink-0 items-center rounded-full border border-kumo-line bg-kumo-recessed/35 px-2.5 py-1 text-[11px] font-medium text-kumo-strong';
 const publicResourceCardGridClass = 'grid flex-1 grid-cols-2 gap-2 p-3';
 const publicResourceCardFieldClass = 'rounded-lg border border-kumo-line bg-kumo-recessed/15 p-2.5';
 const publicResourceCardActionBarClass =
@@ -564,6 +566,7 @@ function getRegistrationResultText(record) {
 }
 
 function M365Page() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const accountImportInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState('tenants');
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
@@ -1246,12 +1249,7 @@ function M365Page() {
   };
 
   const deleteAccount = async account => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '租户',
-      resourceName: account.name,
-      message: `删除租户“${account.name}”后，其本地缓存与配置将一并移除。`,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`m365-account-delete:${account.id}`, `删除租户「${account.name}」`)) return;
     try {
       await requestJSON(`/api/m365/accounts/${account.id}`, { method: 'DELETE' });
       toast.success('租户已删除');
@@ -1658,13 +1656,7 @@ function M365Page() {
   };
 
   const removeGroupMember = async member => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '组成员',
-      resourceName: member.userPrincipalName || member.displayName,
-      message: `确定将成员“${member.displayName || member.userPrincipalName}”从组中移除吗？`,
-      confirmText: '移除',
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`m365-group-member-remove:${member.id}`, `移除组成员「${member.displayName || member.userPrincipalName}」`)) return;
     try {
       await requestJSON(
         `/api/m365/accounts/${selectedAccountId}/groups/${selectedGroupId}/members/${member.id}`,
@@ -1803,12 +1795,7 @@ function M365Page() {
   };
 
   const deletePublicPage = async page => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '公开页',
-      resourceName: page.name,
-      message: `删除公开页“${page.name}”后，关联邀请码将立即失效。`,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`m365-public-page-delete:${page.id}`, `删除公开页「${page.name}」`)) return;
     try {
       await requestJSON(`/api/m365/public-pages/${page.id}`, { method: 'DELETE' });
       toast.success('公开页配置已删除');
@@ -1879,47 +1866,32 @@ function M365Page() {
     }
   }, [requestJSON, selectedAccountId]);
 
-  const renderToolbarSelector = ['users', 'groups'].includes(activeTab) ? (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
-      <span className="shrink-0 text-xs font-medium text-kumo-subtle">租户</span>
-      <Select
-        aria-label="Microsoft 365 租户"
-        size="sm"
-        className="w-32 sm:w-48"
-        value={selectedAccountId}
-        onValueChange={setSelectedAccountId}
-        items={accountSelectItems}
-      />
-    </div>
-  ) : null;
-
   const renderTenants = () => (
     <SectionCard
       className="flex min-h-0 flex-1 flex-col"
       bodyClassName={panelBodyClass}
       title="租户管理"
-      description="管理租户凭据与连通性"
       icon={<Cloud className="h-4 w-4" />}
       action={
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            shape="square"
-            variant="secondary"
-            title="导出租户"
-            aria-label="导出租户"
-            icon={<Upload className="h-3.5 w-3.5" />}
-            onClick={exportAccounts}
-          />
-          <Button
-            size="sm"
-            shape="square"
-            variant="secondary"
-            title="导入租户"
-            aria-label="导入租户"
-            icon={<Download className="h-3.5 w-3.5" />}
-            onClick={openImportAccounts}
-          />
+          <Toolbar size="sm" aria-label="导出导入租户" className="shrink-0">
+            <Toolbar.Button
+              title="导出租户"
+              aria-label="导出租户"
+              icon={<Upload className="h-3.5 w-3.5" />}
+              onClick={exportAccounts}
+            >
+              <span className="hidden sm:inline">导出</span>
+            </Toolbar.Button>
+            <Toolbar.Button
+              title="导入租户"
+              aria-label="导入租户"
+              icon={<Download className="h-3.5 w-3.5" />}
+              onClick={openImportAccounts}
+            >
+              <span className="hidden sm:inline">导入</span>
+            </Toolbar.Button>
+          </Toolbar>
           <Button
             size="sm"
             variant="primary"
@@ -2032,9 +2004,8 @@ function M365Page() {
                       shape="square"
                       title="校验"
                       aria-label="校验"
-                      icon={
-                        <RefreshCw className={cx('h-3.5 w-3.5', verifying && 'animate-spin')} />
-                      }
+                      loading={verifying}
+                      icon={<RefreshCw className="h-3.5 w-3.5" />}
                       onClick={() => verifyAccount(account)}
                     />
                     <Button size="sm" variant="secondary" onClick={() => openEditAccount(account)}>
@@ -2042,7 +2013,7 @@ function M365Page() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="destructive"
+                      variant={isArmed(`m365-account-delete:${account.id}`) ? 'destructive' : 'secondary-destructive'}
                       shape="square"
                       title="删除"
                       aria-label="删除"
@@ -2085,7 +2056,6 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="公开页"
-        description="管理公开页与邀请码"
         icon={<Globe className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -2131,9 +2101,9 @@ function M365Page() {
               value={publicTab}
               onValueChange={setPublicTab}
               tabs={[
-                { value: 'pages', label: '公开页配置' },
-                { value: 'codes', label: '邀请码批次' },
-                { value: 'registrations', label: '注册记录' },
+                { value: 'pages', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />公开页配置</span> },
+                { value: 'codes', label: <span className="inline-flex items-center gap-1.5"><Key className="h-3.5 w-3.5" />邀请码批次</span> },
+                { value: 'registrations', label: <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />注册记录</span> },
               ]}
               className="w-fit max-w-full"
               listClassName="w-fit max-w-full"
@@ -2198,11 +2168,13 @@ function M365Page() {
                               </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-3">
-                              <span
-                                className={publicResourceCardPillClass}
-                                title={inviteCodeSummary}
-                              >
-                                <span className="truncate">{inviteCodeSummary}</span>
+                              <span title={inviteCodeSummary}>
+                                <Badge
+                                  variant="outline"
+                                  className="max-w-40 !px-2.5 !py-1 !text-[11px] font-medium !text-kumo-strong"
+                                >
+                                  <span className="truncate">{inviteCodeSummary}</span>
+                                </Badge>
                               </span>
                               <div
                                 className="flex items-center"
@@ -2283,7 +2255,7 @@ function M365Page() {
                             </Button>
                             <Button
                               size="sm"
-                              variant="destructive"
+                              variant={isArmed(`m365-public-page-delete:${page.id}`) ? 'destructive' : 'secondary-destructive'}
                               className="basis-0 !justify-center text-center"
                               style={{ flex: 1 }}
                               onClick={() => deletePublicPage(page)}
@@ -2348,8 +2320,13 @@ function M365Page() {
                                   </StatusBadge>
                                 </div>
                               </div>
-                              <span className={publicResourceCardPillClass} title={batchLabel}>
-                                <span className="truncate">{batchLabel}</span>
+                              <span title={batchLabel}>
+                                <Badge
+                                  variant="outline"
+                                  className="max-w-40 !px-2.5 !py-1 !text-[11px] font-medium !text-kumo-strong"
+                                >
+                                  <span className="truncate">{batchLabel}</span>
+                                </Badge>
                               </span>
                             </div>
 
@@ -2623,7 +2600,6 @@ function M365Page() {
         className="shrink-0"
         bodyClassName={panelBodyClass}
         title="SKU 库存"
-        description="查看许可证库存"
         icon={<Database className="h-4 w-4" />}
         action={
           <Button
@@ -2660,10 +2636,10 @@ function M365Page() {
                 totalUnits > 0 ? clampPercent((consumedUnits / totalUnits) * 100) : 0;
               const progressTone =
                 usagePct >= 90
-                  ? 'bg-kumo-danger'
+                  ? '!bg-kumo-danger'
                   : usagePct >= 70
-                    ? 'bg-kumo-warning'
-                    : 'bg-kumo-brand';
+                    ? '!bg-kumo-warning'
+                    : '!bg-kumo-brand';
               const lifecycleText = getSkuLifecycleText(sku);
               return (
                 <div
@@ -2694,12 +2670,12 @@ function M365Page() {
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                       {lifecycleText ? (
-                        <span
-                          className="rounded-full border border-kumo-line/70 bg-kumo-recessed/30 px-2 py-0.5 text-[11px] font-medium leading-5 text-kumo-subtle"
-                          title={lifecycleText}
+                        <Badge
+                          variant="outline"
+                          className="border-kumo-line/70 bg-kumo-recessed/30 !px-2 !py-0.5 !text-[11px] font-medium leading-5 !text-kumo-subtle"
                         >
                           {lifecycleText}
-                        </span>
+                        </Badge>
                       ) : null}
                       <StatusBadge
                         tone={usagePct >= 90 ? 'danger' : usagePct >= 70 ? 'warning' : 'success'}
@@ -2709,15 +2685,15 @@ function M365Page() {
                     </div>
                   </div>
 
-                  <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-kumo-recessed/80">
-                    <div
-                      className={cx(
-                        'h-full rounded-full transition-[width] duration-300',
-                        progressTone
-                      )}
-                      style={{ width: `${usagePct}%` }}
-                    />
-                  </div>
+                  <Meter
+                    label=""
+                    value={usagePct}
+                    max={100}
+                    showValue={false}
+                    className="mt-2.5"
+                    trackClassName="!h-1.5 bg-kumo-recessed/80"
+                    indicatorClassName={progressTone}
+                  />
                 </div>
               );
             })}
@@ -2727,25 +2703,17 @@ function M365Page() {
 
       <SectionCard
         title="用户与许可证"
-        description="管理用户和许可证"
         icon={<Users className="h-4 w-4" />}
         bodyPadding="none"
         action={
           <div className="flex items-center gap-2">
-            <Input
-              aria-label="搜索用户"
-              size="sm"
+            <ResponsiveSearchInput
               value={userSearch}
               onChange={event => setUserSearch(event.target.value)}
+              onSearch={loadUsers}
               placeholder="搜索显示名或 UPN"
-            />
-            <Button
-              size="sm"
-              variant="secondary"
-              shape="square"
-              icon={<Search className="h-3.5 w-3.5" />}
-              onClick={loadUsers}
-              aria-label="搜索"
+              ariaLabel="搜索用户"
+              className="sm:w-56"
             />
             <Button
               size="sm"
@@ -2859,9 +2827,12 @@ function M365Page() {
                         >
                           <span className="min-w-0 flex-1 truncate">{assignedSkuSummary}</span>
                           {assignedSkuLabels.length > 1 ? (
-                            <span className="shrink-0 rounded-full border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-0.5 text-[10px] text-kumo-subtle">
-                              {assignedSkuLabels.length} 项
-                            </span>
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-kumo-line/70 bg-kumo-recessed/20 !px-2 !py-0.5 !text-[10px] !text-kumo-subtle"
+                          >
+                            {assignedSkuLabels.length} 项
+                          </Badge>
                           ) : null}
                         </div>
                       </Table.Cell>
@@ -2913,7 +2884,6 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="组管理"
-        description="管理组与许可证"
         icon={<Folder className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -3067,7 +3037,7 @@ function M365Page() {
                                 <div className="flex justify-end">
                                   <Button
                                     size="sm"
-                                    variant="destructive"
+                                    variant={isArmed(`m365-group-member-remove:${member.id}`) ? 'destructive' : 'secondary-destructive'}
                                     onClick={() => removeGroupMember(member)}
                                   >
                                     移除
@@ -3091,7 +3061,7 @@ function M365Page() {
 
   return (
     <PageStack viewport className={workspaceHeightClass}>
-      <PageToolbar>
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -3134,18 +3104,33 @@ function M365Page() {
             },
           ]}
         />
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Shield className="h-3.5 w-3.5" />}
-            onClick={() => setShowPermissionDialog(true)}
-          >
-            权限说明
-          </Button>
-          {renderToolbarSelector}
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
+          <TabBarOverflowActions
+            items={[
+              {
+                key: 'permission',
+                label: '权限说明',
+                icon: <Shield className="h-3.5 w-3.5" />,
+                onClick: () => setShowPermissionDialog(true),
+              },
+              ...(['users', 'groups'].includes(activeTab)
+                ? [
+                    {
+                      key: 'tenant',
+                      type: 'select',
+                      label: '租户',
+                      icon: <Cloud className="h-3.5 w-3.5" />,
+                      value: selectedAccountId,
+                      onValueChange: setSelectedAccountId,
+                      disabled: false,
+                      options: accountSelectItems,
+                    },
+                  ]
+                : []),
+            ]}
+          />
         </div>
-      </PageToolbar>
+      </div>
 
       {activeTab === 'tenants' && renderTenants()}
       {activeTab === 'users' && renderUsers()}
@@ -3642,8 +3627,8 @@ function M365Page() {
                 />
                 <div className="rounded-lg border border-kumo-line/80 bg-kumo-recessed/10 p-3">
                   <div className="text-sm font-medium text-kumo-strong">目标租户与域名</div>
-                  <div className="mt-1 text-xs text-kumo-subtle">
-                    先勾选租户，再在下方展开该租户的全部域名做收缩选择。未取消的域名都会被允许注册。
+                  <div className="text-xs text-kumo-subtle">
+                    先勾选租户，再展开其全部域名做收缩选择。未取消的域名都会被允许注册。
                   </div>
                   <div className="mt-3 grid gap-2">
                     {accounts.map(account => {
@@ -3712,7 +3697,7 @@ function M365Page() {
                             <div className="mt-2 border-t border-kumo-line/60 pt-2">
                               {accountDomains.length === 0 ? (
                                 <div className="text-[11px] text-kumo-subtle">
-                                  当前租户还没有读取到可选域名，请先校验租户连接。
+                                  当前租户未读取到可选域名，请先校验租户连接。
                                 </div>
                               ) : (
                                 <div className="grid gap-1">

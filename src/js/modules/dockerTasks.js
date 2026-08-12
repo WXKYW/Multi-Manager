@@ -56,7 +56,7 @@ export const summarizeDockerTaskMessage = (task = {}) => {
     }
     return updateCount > 0 ? `发现 ${updateCount} 个可更新容器` : `已检查 ${results.length} 个容器`;
   }
-  return `返回 ${results.length} 条结果`;
+  return `共 ${results.length} 条结果`;
 };
 
 export const formatDockerPruneResult = (action, data = {}) => {

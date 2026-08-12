@@ -34,6 +34,7 @@ services:
       - SECURE_COOKIES=true
       - ADMIN_PASSWORD=<CHANGE_ME>
       - JWT_SECRET=<CHANGE_ME_TO_A_LONG_RANDOM_STRING>
+      - ENCRYPTION_KEY=<CHANGE_ME_TO_ANOTHER_LONG_RANDOM_STRING>
     restart: unless-stopped
 ```
 
@@ -47,6 +48,7 @@ docker run -d --name api-monitor \
   -e SECURE_COOKIES=true \
   -e ADMIN_PASSWORD=<CHANGE_ME> \
   -e JWT_SECRET=<CHANGE_ME_TO_A_LONG_RANDOM_STRING> \
+  -e ENCRYPTION_KEY=<CHANGE_ME_TO_ANOTHER_LONG_RANDOM_STRING> \
   --restart unless-stopped \
   iwvw/api-monitor:latest
 ```
@@ -71,21 +73,77 @@ npm run backend-go:build
 
 ## 配置
 
-可通过环境变量或 `.env` 配置。发布部署至少建议设置：
+可通过环境变量或 `.env` 文件配置。下表标注了必选与可选变量；未设置时使用默认值。
 
-| 变量 | 说明 |
+### 生产必填
+
+| 变量 | 必选 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `ADMIN_PASSWORD` | 首次部署必选 | - | 初始化管理员密码，仅首次初始化 / 设置密码时使用；一旦设置不可通过环境变量之外的方式修改 |
+| `JWT_SECRET` | 生产必选 | - | 启动安全校验项，`APP_ENV=production` 时要求至少 32 字符的长随机串 |
+| `ENCRYPTION_KEY` | 生产必选 | - | 敏感凭据（API 密钥、托管凭据等）AES 加密主密钥，生产要求至少 32 字符；变更会导致已加密数据无法解密，请妥善保管 |
+
+### 核心配置（均可选）
+
+| 变量 | 必选 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `PORT` | 可选 | `3000` | 服务端口（`GO_PORT` 优先于 `PORT`） |
+| `GO_PORT` | 可选 | - | 服务端口覆盖值，优先于 `PORT` |
+| `GO_HOST` | 可选 | `0.0.0.0` | 监听地址 |
+| `APP_ENV` | 可选 | `development` | `development` 或 `production`；生产模式启用更严格的安全默认值（未设置时回退 `NODE_ENV`） |
+| `NODE_ENV` | 可选 | `development` | `APP_ENV` 未设置时的回退值 |
+| `DATA_DIR` | 可选 | `./data` | 数据目录（SQLite、备份、上传等） |
+| `DB_NAME` | 可选 | `data.db` | SQLite 数据库文件名，位于 `DATA_DIR` 下 |
+| `DIST_DIR` | 可选 | `./dist` | 前端构建产物目录 |
+| `PUBLIC_DIR` | 可选 | `./public` | 静态资源目录 |
+| `NODE_LEGACY_URL` | 可选 | - | 旧 Node sidecar 后端地址（迁移期兼容用，当前版本无需设置） |
+
+### 安全与网络（均可选）
+
+| 变量 | 必选 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `SECURE_COOKIES` | 可选 | 生产 `true`，开发 `false` | 会话 Cookie 是否仅通过 HTTPS 发送 |
+| `ALLOW_LOCAL_SHELL_TASKS` | 可选 | 非生产 `true` | 是否允许后台任务直接执行本机 Shell；生产默认关闭 |
+| `TRUSTED_PROXY_CIDRS` | 可选 | - | 允许提供真实客户端 IP 的反向代理 IP/CIDR 列表，逗号分隔 |
+| `CORS_ALLOWED_ORIGINS` | 可选 | - | 允许跨域访问 API 的 Origin 白名单，逗号分隔 |
+| `DEMO_MODE` | 可选 | `false` | 设为 `true` 启用演示模式（禁止修改密码等写操作） |
+
+### 云厂商 API 端点覆盖（均可选，默认直连官方）
+
+| 变量 | 默认值 |
 | --- | --- |
-| `PORT` | 服务端口，默认 `3000` |
-| `DATA_DIR` | 数据目录，默认 `./data` |
-| `DB_NAME` | SQLite 数据库文件名，默认 `data.db` |
-| `ADMIN_PASSWORD` | 初始化管理员密码，仅首次初始化使用 |
-| `JWT_SECRET` | 会话密钥，建议使用长随机字符串 |
-| `LOG_LEVEL` | 日志级别：`DEBUG`、`INFO`、`WARN`、`ERROR` |
-| `APP_ENV` | `development` 或 `production`；生产模式启用更严格的安全默认值 |
-| `SECURE_COOKIES` | 是否仅通过 HTTPS 发送会话 Cookie；生产默认 `true` |
-| `ALLOW_LOCAL_SHELL_TASKS` | 是否允许后台直接执行本机 Shell；生产默认 `false` |
-| `TRUSTED_PROXY_CIDRS` | 允许提供真实客户端 IP 的反向代理 IP/CIDR 列表 |
-| `CORS_ALLOWED_ORIGINS` | 允许跨域访问 API 的 Origin 白名单，逗号分隔 |
+| `CLOUDFLARE_API_BASE_URL` | `https://api.cloudflare.com` |
+| `ALIYUN_DNS_ENDPOINT` / `ALIYUN_ECS_ENDPOINT` / `ALIYUN_SWAS_ENDPOINT` / `ALIYUN_CMS_ENDPOINT` | 阿里云各产品官方端点 |
+| `TENCENT_DNSPOD_ENDPOINT` / `TENCENT_CVM_ENDPOINT` / `TENCENT_LIGHTHOUSE_ENDPOINT` / `TENCENT_MONITOR_ENDPOINT` | 腾讯云各产品官方端点 |
+| `FLY_GRAPHQL_URL` / `FLY_MACHINES_URL` / `FLY_LOGS_URL` | Fly.io 官方 API 端点 |
+| `KOYEB_API_BASE_URL` | `https://app.koyeb.com` |
+| `M365_GRAPH_BASE_URL` / `M365_LOGIN_BASE_URL` | Microsoft 365 官方端点 |
+
+通常无需设置；仅在内网隔离 / 自定义网关 / 镜像代理场景覆盖使用。
+
+### 进阶调优（均可选，默认即可用）
+
+| 变量 | 必选 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `API_MONITOR_MEMORY_GUARD` | 可选 | 默认开启 | 内存守卫总开关，设为 `false`/`off` 关闭 |
+| `API_MONITOR_MEMORY_LIMIT_MB` | 可选 | 未设置时取 cgroup 内存限制的 70% | 内存使用上限（MB），超过触发主动 GC |
+| `API_MONITOR_MEMORY_GC_TRIGGER_RATIO` | 可选 | `0.85` | 内存使用达到上限的比例（`0 < x <= 1`）时触发 GC |
+| `API_MONITOR_MEMORY_CHECK_SECONDS` | 可选 | `15` | 内存检查周期（秒） |
+| `API_MONITOR_UPTIME_HEARTBEAT_RETENTION_DAYS` | 可选 | - | 可用性监测心跳历史保留天数 |
+| `API_MONITOR_AGENT_PRESENCE_MODE` | 可选 | - | Agent 在线状态判定模式 |
+| `API_MONITOR_AGENT_OFFLINE_AFTER_MS` / `API_MONITOR_AGENT_SUSPECT_AFTER_MS` / `API_MONITOR_AGENT_STARTUP_GRACE_MS` / `API_MONITOR_AGENT_RECOVERY_SAMPLES` | 可选 | - | Agent 在线状态判定调参 |
+| `API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS` | 可选 | - | Agent 指标持久化间隔（毫秒） |
+| `API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS` | 可选 | - | Agent 网络质量采集持久化间隔（毫秒） |
+
+### Agent（Rust，由安装脚本自动写入，通常无需手动设置）
+
+| 变量 | 必选 | 说明 |
+| --- | --- | --- |
+| `API_MONITOR_SERVER` | Agent 必填 | 后端服务地址 |
+| `API_MONITOR_KEY` | Agent 必填 | Agent 配对密钥 |
+| `API_MONITOR_SERVER_ID` | 可选 | 所属主机实例 ID |
+| `API_MONITOR_SING_BOX_BIN` | 可选 | sing-box 运行时二进制路径（托管代理用） |
+| `API_MONITOR_DOCKER_REGISTRY_MIRRORS` | 可选 | Docker Hub 镜像加速地址，逗号分隔 |
 
 ## 技术栈
 

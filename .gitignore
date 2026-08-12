@@ -110,3 +110,4 @@ api-monitor.code-workspace
 # 文档归档（仅保留核心文档）
 # ====================
 docs/archive/
+.zcode/

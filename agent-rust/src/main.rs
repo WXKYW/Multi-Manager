@@ -552,11 +552,14 @@ async fn run_client(
                             let mut host_timer = tokio::time::interval(Duration::from_millis(
                                 cfg.host_info_interval,
                             ));
+                            let mut upgrade_timer = tokio::time::interval(Duration::from_secs(2));
 
                             // Prevent tick stacking
                             state_timer
                                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                             host_timer
+                                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                            upgrade_timer
                                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                             state_timer.tick().await;
                             host_timer.tick().await;
@@ -581,6 +584,14 @@ async fn run_client(
                                         let host_info = collector_loop.lock().await.collect_host_info(VERSION).await;
                                         if auth_tx.send_normal(format_event(EVENT_AGENT_HOST_INFO, &host_info)).await.is_err() {
                                             break;
+                                        }
+                                    }
+                                    _ = upgrade_timer.tick() => {
+                                        // 后台自更新脚本完成后会写结果文件，读取并上报给面板
+                                        if let Some(status) = take_upgrade_status_file() {
+                                            if auth_tx.send_normal(format_event(EVENT_AGENT_UPGRADE_STATUS, &status)).await.is_err() {
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -639,6 +650,17 @@ async fn run_client(
                         {
                             let manager = remote_desktop_clone.clone();
                             manager.stop(&payload.session_id).await;
+                        }
+                    } else if event == EVENT_DASHBOARD_SERVER_ACTION {
+                        // 服务器动作（重启/关机等），由面板 /api/server/action 下发
+                        if let Some(action) = data.get("action").and_then(|v| v.as_str()) {
+                            let action = action.to_string();
+                            tokio::spawn(async move {
+                                match handle_server_action(&action).await {
+                                    Ok(msg) => println!("[Action] {}: {}", action, msg),
+                                    Err(err) => eprintln!("[Action] {} 执行失败: {}", action, err),
+                                }
+                            });
                         }
                     } else if event == EVENT_DASHBOARD_TASK {
                         if let Ok(task) = serde_json::from_value::<TaskPayload>(data) {
@@ -1237,6 +1259,34 @@ async fn run_client(
 
 // Helpers
 
+// handle_server_action 处理面板下发的服务器动作（reboot/restart/shutdown）。
+async fn handle_server_action(action: &str) -> Result<String, String> {
+    let command: &str = match action {
+        "reboot" | "restart" => {
+            if cfg!(target_os = "windows") {
+                "shutdown /r /t 0"
+            } else {
+                "shutdown -r now"
+            }
+        }
+        "shutdown" => {
+            if cfg!(target_os = "windows") {
+                "shutdown /s /t 0"
+            } else {
+                "shutdown -h now"
+            }
+        }
+        other => return Err(format!("不支持的动作: {}", other)),
+    };
+    // Linux 下 Agent 可能非 root：先直接执行，失败再尝试 sudo
+    let result = execute_command(command, 15).await;
+    if result.is_err() && !cfg!(target_os = "windows") {
+        execute_command(&format!("sudo {}", command), 15).await
+    } else {
+        result
+    }
+}
+
 async fn execute_command(command: &str, timeout_secs: u64) -> Result<String, String> {
     if command.is_empty() {
         return Err("命令不能为空".to_string());
@@ -1440,6 +1490,25 @@ fn normalized_agent_arch() -> String {
     }
 }
 
+// upgrade_result_file_path 后台自更新脚本写入结果文件的固定路径。
+fn upgrade_result_file_path() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        std::env::temp_dir().join("api-monitor-agent-upgrade-result.json")
+    } else {
+        PathBuf::from("/tmp/api-monitor-agent-upgrade-result.json")
+    }
+}
+
+// take_upgrade_status_file 读取自更新结果文件（脚本下载/替换成功或失败后写入），
+// 读后删除，返回 {state, version|error} 供主循环上报面板。
+fn take_upgrade_status_file() -> Option<serde_json::Value> {
+    let path = upgrade_result_file_path();
+    let raw = fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let _ = fs::remove_file(&path);
+    Some(value)
+}
+
 fn schedule_self_update(download_url: &str) -> Result<(), String> {
     let exe_path =
         std::env::current_exe().map_err(|e| format!("获取当前 Agent 路径失败: {}", e))?;
@@ -1609,7 +1678,10 @@ fn schedule_self_update_windows(
         .ok_or_else(|| "无法获取 Agent 安装目录".to_string())?;
     let script_path =
         std::env::temp_dir().join(format!("api-monitor-agent-upgrade-{}.ps1", timestamp_ms));
-    let temp_agent = install_dir.join("api-monitor-agent.exe.download");
+    // 注意：下载临时文件名必须以 .exe 结尾。PowerShell 5.1 无法直接运行
+    // 非 .exe 后缀的文件（如 .download），`& $TempAgentPath --version` 会报
+    // "Cannot run a document in the middle of a pipeline"，导致自更新中止。
+    let temp_agent = install_dir.join("api-monitor-agent.new.exe");
     let launch_vbs = install_dir.join("launch.vbs");
     let agent_pid = std::process::id();
 
@@ -1623,13 +1695,25 @@ $TempAgentPath = {temp_agent}
 $DownloadUrl = {download_url}
 $LaunchVbs = {launch_vbs}
 $AgentPid = {agent_pid}
+$ResultPath = Join-Path $env:TEMP "api-monitor-agent-upgrade-result.json"
+
+function Write-UpgradeResult([string]$state, [string]$detail) {{
+    $payload = @{{ state = $state; error = $detail }}
+    if ($state -eq "succeeded") {{
+        Remove-Item $payload.error -ErrorAction SilentlyContinue
+        $payload = @{{ state = $state; version = $detail }}
+    }}
+    try {{
+        Set-Content -Path $ResultPath -Value ($payload | ConvertTo-Json -Compress) -Encoding UTF8 -ErrorAction SilentlyContinue
+    }} catch {{}}
+}}
 
 try {{
     if (Test-Path $TempAgentPath) {{
         Remove-Item -Path $TempAgentPath -Force -ErrorAction SilentlyContinue
     }}
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempAgentPath -UseBasicParsing
-    & $TempAgentPath --version | Out-Host
+    $newVersion = (& $TempAgentPath --version 2>&1 | Select-Object -Last 1)
 
     Start-Sleep -Seconds 2
     $running = Get-Process -Id $AgentPid -ErrorAction SilentlyContinue
@@ -1668,8 +1752,10 @@ try {{
     }} else {{
         Start-Process -FilePath $AgentPath -ArgumentList "-b" -WindowStyle Hidden
     }}
+    Write-UpgradeResult "succeeded" "$newVersion"
     Write-Host "API Monitor Agent self-update completed"
 }} catch {{
+    Write-UpgradeResult "failed" $_.Exception.Message
     Write-Host "API Monitor Agent self-update failed: $_"
     exit 1
 }} finally {{
@@ -1721,6 +1807,7 @@ fn schedule_self_update_unix(
         r#"#!/bin/sh
 set -eu
 LOG="/tmp/api-monitor-agent-upgrade.log"
+RESULT_FILE="/tmp/api-monitor-agent-upgrade-result.json"
 exec >>"$LOG" 2>&1
 echo "API Monitor Agent self-update started at $(date -Is)"
 AGENT_PATH={agent_path}
@@ -1732,24 +1819,29 @@ cleanup() {{
 }}
 trap cleanup EXIT
 
+write_result_failed() {{
+    msg="$1"
+    printf '{{"state":"failed","error":"%s"}}' "$msg" > "$RESULT_FILE" 2>/dev/null || true
+}}
+
 if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL"
+    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1; }}
 elif command -v wget >/dev/null 2>&1; then
-    wget -O "$TMP_AGENT" "$DOWNLOAD_URL"
+    wget -O "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1; }}
 else
-    echo "Error: curl or wget is required for self-update"
+    write_result_failed "curl 与 wget 均不可用"
     exit 1
 fi
 
 chmod +x "$TMP_AGENT"
-"$TMP_AGENT" --version
+NEW_VERSION="$("$TMP_AGENT" --version 2>/dev/null | tail -n 1 || true)"
 
 if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
 elif command -v sudo >/dev/null 2>&1; then
     SUDO="sudo"
 else
-    echo "Error: self-update needs root or sudo to replace $AGENT_PATH"
+    write_result_failed "自更新需要 root 或 sudo 权限"
     exit 1
 fi
 
@@ -1764,6 +1856,8 @@ fi
 
 sleep 1
 $SUDO install -m 0755 "$TMP_AGENT" "$AGENT_PATH"
+
+printf '{{"state":"succeeded","version":"%s"}}' "$NEW_VERSION" > "$RESULT_FILE" 2>/dev/null || true
 
 if [ "$HAS_SYSTEMD_SERVICE" = "1" ]; then
     $SUDO systemctl daemon-reload || true

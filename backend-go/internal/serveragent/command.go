@@ -15,6 +15,12 @@ type DangerousPattern struct {
 
 var dangerousPatterns = []DangerousPattern{
 	{regexp.MustCompile(`(?i)\brm\s+-[^\n;|&]*r[^\n;|&]*f\b`), "递归强制删除文件"},
+	// 单参数内 r/f 任意组合（-fr / -rfv / -vfr 等）
+	{regexp.MustCompile(`(?i)\brm\s+(?:-[a-z]*[rR][a-z]*f[a-z]*|-[a-z]*f[a-z]*[rR][a-z]*)`), "递归强制删除文件"},
+	// GNU 长参数形式（--recursive + --force，顺序任意）
+	{regexp.MustCompile(`(?i)\brm\s+--(?:recursive|force)\b[^\n]*(?:--(?:recursive|force)\b)`), "递归强制删除文件"},
+	// 短参数与长参数混合（-r --force / -f --recursive，顺序任意）
+	{regexp.MustCompile(`(?i)\brm\s+(?:-[a-z]*r\b[^\n;|&]*--force\b|--force\b[^\n;|&]*-[a-z]*r\b|-[a-z]*f\b[^\n;|&]*--recursive\b|--recursive\b[^\n;|&]*-[a-z]*f\b)`), "递归强制删除文件"},
 	{regexp.MustCompile(`(?i)\bdd\s+if=.*\bof=`), "直接写入磁盘或块设备"},
 	{regexp.MustCompile(`(?i)\bmkfs(?:\.[a-z0-9]+)?\b`), "格式化文件系统"},
 	{regexp.MustCompile(`(?i)\b(shutdown|reboot|poweroff|halt)\b`), "重启或关闭主机"},

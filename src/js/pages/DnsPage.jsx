@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChartPalette, ClipboardText, LayerCard, Popover, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, LayerCard, Popover, Tabs, TimeseriesChart, Toolbar } from '@cloudflare/kumo';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
@@ -24,16 +24,19 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { AppCard, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, PageStack, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import {
+  AlertTriangle,
   ArrowLeft,
   Box,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Cloud,
   Copy,
@@ -328,6 +331,7 @@ function parseJsonInput(input, fallbackKey) {
 }
 
 function DnsPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const { theme } = useStore();
   const isDarkMode = theme === 'dark';
   const [activeTab, setActiveTab] = useState('dns');
@@ -348,6 +352,10 @@ function DnsPage() {
   const [r2CurrentPrefix, setR2CurrentPrefix] = useState('');
   const [r2BucketSearch, setR2BucketSearch] = useState('');
   const [r2ObjectSearch, setR2ObjectSearch] = useState('');
+  const [r2DirCache, setR2DirCache] = useState({});
+  const [r2ExpandedPrefixes, setR2ExpandedPrefixes] = useState([]);
+  const [r2DirErrors, setR2DirErrors] = useState({});
+  const [r2Metrics, setR2Metrics] = useState(null);
   const r2UploadInputRef = useRef(null);
   const [tunnels, setTunnels] = useState([]);
   const [sslInfo, setSslInfo] = useState(null);
@@ -683,12 +691,15 @@ function DnsPage() {
   const loadR2Buckets = useCallback(async () => {
     if (!selectedAccountId) {
       setR2Buckets([]);
+      setR2Metrics(null);
       return;
     }
     setLoadingKey('r2', true);
     try {
       const data = await cfApi(`/accounts/${selectedAccountId}/r2/buckets`);
       setR2Buckets(data.buckets || []);
+      const metrics = await cfApi(`/accounts/${selectedAccountId}/r2/metrics`).catch(() => null);
+      setR2Metrics(metrics || null);
     } catch (error) {
       toast.error(`加载 R2 存储桶失败：${error.message}`);
     } finally {
@@ -696,17 +707,92 @@ function DnsPage() {
     }
   }, [cfApi, selectedAccountId, setLoadingKey]);
 
-  const loadR2Objects = useCallback(async (bucketName = r2SelectedBucket?.name, prefix = r2CurrentPrefix) => {
-    if (!selectedAccountId || !bucketName) return;
-    setLoadingKey('r2Objects', true);
+  const r2MetricsTotals = useMemo(() => {
+    let bytes = 0;
+    let objects = 0;
+    ['standard', 'infrequentAccess'].forEach((storageClass) => {
+      const group = r2Metrics?.[storageClass];
+      if (!group) return;
+      ['uploaded', 'published'].forEach((state) => {
+        const entry = group?.[state];
+        if (!entry) return;
+        bytes += Number(entry.payloadSize || 0) + Number(entry.metadataSize || 0);
+        objects += Number(entry.objects || 0);
+      });
+    });
+    return { bytes, objects };
+  }, [r2Metrics]);
+
+  const r2CacheKey = useCallback((bucketName, prefix) => `${selectedAccountId}|${bucketName}|${prefix}`, [selectedAccountId]);
+
+  const fetchR2Dir = useCallback(async (bucketName, prefix, { force = false } = {}) => {
+    const key = r2CacheKey(bucketName, prefix);
+    const cached = r2DirCache[key];
+    if (cached && !force) return cached;
+    const params = new URLSearchParams({ delimiter: '/', limit: '1000' });
+    if (prefix) params.set('prefix', prefix);
     try {
-      const params = new URLSearchParams({ delimiter: '/', limit: '1000' });
-      if (prefix) params.set('prefix', prefix);
       const data = await cfApi(
         `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${params.toString()}`
       );
-      setR2Objects(data.objects || []);
-      setR2Prefixes(data.delimited_prefixes || []);
+      const entry = { objects: data.objects || [], prefixes: data.delimited_prefixes || [] };
+      setR2DirCache((prev) => ({ ...prev, [key]: entry }));
+      setR2DirErrors((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return entry;
+    } catch (error) {
+      // 失败态单独记录，UI 显示「加载失败」行并可重试，避免永久 loading 占位。
+      setR2DirErrors((prev) => ({ ...prev, [key]: true }));
+      throw error;
+    }
+  }, [cfApi, r2CacheKey, r2DirCache, selectedAccountId]);
+
+  const retryR2Dir = useCallback((prefix) => {
+    const bucketName = r2SelectedBucket?.name;
+    if (!bucketName || !selectedAccountId) return;
+    const key = r2CacheKey(bucketName, prefix);
+    setR2DirErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    fetchR2Dir(bucketName, prefix, { force: true }).catch((error) => toast.error(`加载目录「${prefix}」失败：${error.message}`));
+  }, [fetchR2Dir, r2CacheKey, r2SelectedBucket, selectedAccountId]);
+
+  const clearR2BucketCache = useCallback((bucketName) => {
+    setR2DirCache((prev) => Object.fromEntries(
+      Object.entries(prev).filter(([key]) => !key.startsWith(`${selectedAccountId}|${bucketName}|`))
+    ));
+    setR2DirErrors((prev) => Object.fromEntries(
+      Object.entries(prev).filter(([key]) => !key.startsWith(`${selectedAccountId}|${bucketName}|`))
+    ));
+  }, [selectedAccountId]);
+
+  const toggleR2FolderExpanded = useCallback((prefix) => {
+    setR2ExpandedPrefixes((prev) => (prev.includes(prefix) ? prev.filter((p) => p !== prefix) : [...prev, prefix]));
+  }, []);
+
+  const loadR2Objects = useCallback(async (bucketName = r2SelectedBucket?.name, prefix = r2CurrentPrefix, { force = false } = {}) => {
+    if (!selectedAccountId || !bucketName) return;
+    const cached = r2DirCache[r2CacheKey(bucketName, prefix)];
+    if (cached && !force) {
+      setR2Objects(cached.objects);
+      setR2Prefixes(cached.prefixes);
+      if ((prefix || '') !== r2CurrentPrefix) setR2ObjectSearch('');
+      setR2CurrentPrefix(prefix || '');
+      setSelectedR2Objects([]);
+      return;
+    }
+    setLoadingKey('r2Objects', true);
+    try {
+      const entry = await fetchR2Dir(bucketName, prefix, { force });
+      setR2Objects(entry.objects);
+      setR2Prefixes(entry.prefixes);
       if ((prefix || '') !== r2CurrentPrefix) setR2ObjectSearch('');
       setR2CurrentPrefix(prefix || '');
       setSelectedR2Objects([]);
@@ -715,7 +801,18 @@ function DnsPage() {
     } finally {
       setLoadingKey('r2Objects', false);
     }
-  }, [cfApi, r2CurrentPrefix, r2SelectedBucket, selectedAccountId, setLoadingKey]);
+  }, [cfApi, fetchR2Dir, r2CacheKey, r2CurrentPrefix, r2DirCache, r2SelectedBucket, selectedAccountId, setLoadingKey]);
+
+  useEffect(() => {
+    const bucketName = r2SelectedBucket?.name;
+    if (!bucketName || !selectedAccountId) return;
+    r2ExpandedPrefixes.forEach((prefix) => {
+      const key = r2CacheKey(bucketName, prefix);
+      if (!r2DirCache[key] && !r2DirErrors[key]) {
+        fetchR2Dir(bucketName, prefix).catch((error) => toast.error(`加载目录「${prefix}」失败：${error.message}`));
+      }
+    });
+  }, [fetchR2Dir, r2CacheKey, r2DirCache, r2DirErrors, r2ExpandedPrefixes, r2SelectedBucket, selectedAccountId]);
 
   const loadTunnels = useCallback(async () => {
     if (!selectedAccountId) {
@@ -812,7 +909,7 @@ function DnsPage() {
   };
 
   const deleteAccount = async (account) => {
-    if (!(await dialog.confirm(`确定要删除 Cloudflare 账号“${account.name}”吗？`))) return;
+    if (!confirmPress(`account:${account.id}`, `删除 Cloudflare 账号「${account.name}」`)) return;
     try {
       await cfApi(`/accounts/${account.id}`, { method: 'DELETE' });
       toast.success('账号已删除');
@@ -937,7 +1034,7 @@ function DnsPage() {
 
   const deleteZone = async (zone = selectedZone) => {
     if (!zone || !selectedAccountId) return;
-    if (!(await dialog.confirm(`确定要从 Cloudflare 删除域名“${zone.name}”吗？此操作不可恢复。`))) return;
+    if (!confirmPress(`zone:${zone.id}`, `删除域名「${zone.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${zone.id}`, { method: 'DELETE' });
       toast.success('域名已删除');
@@ -954,7 +1051,7 @@ function DnsPage() {
       toast.warning('请先选择域名');
       return;
     }
-    if (!(await dialog.confirm(`确定要清除“${selectedZone?.name}”的全部 CDN 缓存吗？`))) return;
+    if (!confirmPress(`zone-cache:${selectedZoneId}`, `清除「${selectedZone?.name}」的 CDN 缓存`)) return;
     setLoadingKey('purge', true);
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/purge`, {
@@ -1037,7 +1134,7 @@ function DnsPage() {
   };
 
   const deleteRecord = async (record) => {
-    if (!(await dialog.confirm(`确定要删除记录“${record.name}”吗？`))) return;
+    if (!confirmPress(`record:${record.id}`, `删除记录「${record.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/records/${record.id}`, {
         method: 'DELETE',
@@ -1051,7 +1148,7 @@ function DnsPage() {
 
   const batchDeleteRecords = async () => {
     if (selectedRecordIds.length === 0) return;
-    if (!(await dialog.confirm(`确定要删除选中的 ${selectedRecordIds.length} 条 DNS 记录吗？`))) return;
+    if (!confirmPress('batch-records', `删除选中的 ${selectedRecordIds.length} 条 DNS 记录`)) return;
     setLoadingKey('batchDeleteRecords', true);
     try {
       await Promise.all(selectedRecords.map((record) => cfApi(
@@ -1141,7 +1238,7 @@ function DnsPage() {
   };
 
   const deleteTemplate = async (template) => {
-    if (!(await dialog.confirm(`确定要删除模板“${template.name}”吗？`))) return;
+    if (!confirmPress(`template:${template.id}`, `删除模板「${template.name}」`)) return;
     try {
       await cfApi(`/templates/${template.id}`, { method: 'DELETE' });
       toast.success('模板已删除');
@@ -1213,7 +1310,7 @@ function DnsPage() {
   };
 
   const deleteWorker = async (worker) => {
-    if (!(await dialog.confirm(`确定要删除 Worker“${worker.name}”吗？`))) return;
+    if (!confirmPress(`worker:${worker.id}`, `删除 Worker「${worker.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/workers/${encodeURIComponent(worker.name)}`, {
         method: 'DELETE',
@@ -1285,7 +1382,7 @@ function DnsPage() {
   };
 
   const deleteWorkerRoute = async (route) => {
-    if (!(await dialog.confirm(`确定要删除路由“${route.pattern}”吗？`))) return;
+    if (!confirmPress(`worker-route:${route.id}`, `删除路由「${route.pattern}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/workers/routes/${route.id}`, {
         method: 'DELETE',
@@ -1335,7 +1432,7 @@ function DnsPage() {
   };
 
   const deleteWorkerDomain = async (domain) => {
-    if (!(await dialog.confirm(`确定要删除 Worker 域名“${domain.hostname}”吗？`))) return;
+    if (!confirmPress(`worker-domain:${domain.id}`, `删除 Worker 域名「${domain.hostname}」`)) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/workers/${encodeURIComponent(workerDomainState.worker.name)}/domains/${domain.id}`,
@@ -1363,7 +1460,7 @@ function DnsPage() {
   };
 
   const deletePagesProject = async (project) => {
-    if (!(await dialog.confirm(`确定要删除 Pages 项目“${project.name}”吗？`))) return;
+    if (!confirmPress(`pages-project:${project.id}`, `删除 Pages 项目「${project.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/pages/${encodeURIComponent(project.name)}`, {
         method: 'DELETE',
@@ -1390,7 +1487,7 @@ function DnsPage() {
   };
 
   const deletePagesDeployment = async (deployment) => {
-    if (!(await dialog.confirm(`确定要删除该 Pages 部署吗？`))) return;
+    if (!confirmPress(`pages-deployment:${deployment.id}`, '删除该 Pages 部署')) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/pages/${encodeURIComponent(pagesDeployState.project.name)}/deployments/${deployment.id}`,
@@ -1438,7 +1535,7 @@ function DnsPage() {
   };
 
   const deletePagesDomain = async (domain) => {
-    if (!(await dialog.confirm(`确定要删除 Pages 域名“${domain.name}”吗？`))) return;
+    if (!confirmPress(`pages-domain:${domain.id}`, `删除 Pages 域名「${domain.name}」`)) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/pages/${encodeURIComponent(pagesDomainState.project.name)}/domains/${encodeURIComponent(domain.name)}`,
@@ -1474,7 +1571,7 @@ function DnsPage() {
   };
 
   const deleteR2Bucket = async (bucket) => {
-    if (!(await dialog.confirm(`确定要删除 R2 存储桶“${bucket.name}”吗？`))) return;
+    if (!confirmPress(`r2-bucket:${bucket.name}`, `删除 R2 存储桶「${bucket.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucket.name)}`, {
         method: 'DELETE',
@@ -1494,6 +1591,8 @@ function DnsPage() {
   const selectR2Bucket = async (bucket) => {
     setR2SelectedBucket(bucket);
     setR2CurrentPrefix('');
+    setR2ExpandedPrefixes([]);
+    setR2DirErrors({});
     await loadR2Objects(bucket.name, '');
   };
 
@@ -1529,6 +1628,7 @@ function DnsPage() {
         return uploadR2Object(key, file, file.type || 'application/octet-stream');
       }));
       toast.success(`已上传 ${files.length} 个文件`);
+      clearR2BucketCache(r2SelectedBucket.name);
       await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
     } catch (error) {
       toast.error(`上传 R2 对象失败：${error.message}`);
@@ -1550,6 +1650,7 @@ function DnsPage() {
       toast.success('文件夹已创建');
       setR2FolderForm({ name: '' });
       setModal({ type: null, data: null });
+      clearR2BucketCache(r2SelectedBucket.name);
       await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
     } catch (error) {
       toast.error(`创建文件夹失败：${error.message}`);
@@ -1558,30 +1659,70 @@ function DnsPage() {
     }
   };
 
-  const deleteR2Object = async (objectKey) => {
-    if (!(await dialog.confirm(`确定要删除对象“${objectKey}”吗？`))) return;
-    try {
-      await cfApi(
-        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
-        { method: 'DELETE' }
+  const listAllR2Keys = async (bucketName, prefix) => {
+    const keys = [];
+    let cursor = '';
+    do {
+      const params = new URLSearchParams({ prefix, limit: '1000' });
+      if (cursor) params.set('cursor', cursor);
+      const data = await cfApi(
+        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${params.toString()}`
       );
-      toast.success('R2 对象已删除');
+      (data.objects || []).forEach((object) => {
+        const key = object.key || object.name;
+        if (key) keys.push(key);
+      });
+      cursor = data.cursor || '';
+    } while (cursor);
+    return keys;
+  };
+
+  const deleteR2KeysChunked = async (bucketName, keys, chunkSize = 25) => {
+    for (let i = 0; i < keys.length; i += chunkSize) {
+      await Promise.all(keys.slice(i, i + chunkSize).map((key) => cfApi(
+        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+        { method: 'DELETE' }
+      )));
+    }
+  };
+
+  const deleteR2Object = async (objectKey) => {
+    const isFolder = String(objectKey).endsWith('/');
+    if (!confirmPress(`r2-object:${objectKey}`, isFolder ? `删除目录「${objectKey}」及其全部内容？` : `删除对象「${objectKey}」？`)) return;
+    try {
+      if (isFolder) {
+        const keys = await listAllR2Keys(r2SelectedBucket.name, objectKey);
+        await deleteR2KeysChunked(r2SelectedBucket.name, keys);
+      } else {
+        await cfApi(
+          `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
+          { method: 'DELETE' }
+        );
+      }
+      toast.success(isFolder ? `目录「${objectKey}」已删除` : 'R2 对象已删除');
+      clearR2BucketCache(r2SelectedBucket.name);
       loadR2Objects();
     } catch (error) {
-      toast.error(`删除 R2 对象失败：${error.message}`);
+      toast.error(`删除 R2 ${isFolder ? '目录' : '对象'}失败：${error.message}`);
     }
   };
 
   const batchDeleteR2Objects = async () => {
     if (selectedR2Objects.length === 0) return;
-    if (!(await dialog.confirm(`确定要删除选中的 ${selectedR2Objects.length} 个 R2 对象吗？`))) return;
+    if (!confirmPress('batch-r2-objects', `删除选中的 ${selectedR2Objects.length} 个 R2 对象（含目录全部内容）`)) return;
     setLoadingKey('batchDeleteR2', true);
     try {
-      await Promise.all(selectedR2Objects.map((objectKey) => cfApi(
-        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
-        { method: 'DELETE' }
-      )));
+      const folderKeys = selectedR2Objects.filter((key) => String(key).endsWith('/'));
+      const fileKeys = selectedR2Objects.filter((key) => !String(key).endsWith('/'));
+      if (fileKeys.length > 0) {
+        await deleteR2KeysChunked(r2SelectedBucket.name, fileKeys);
+      }
+      for (const folderKey of folderKeys) {
+        const keys = await listAllR2Keys(r2SelectedBucket.name, folderKey);
+        await deleteR2KeysChunked(r2SelectedBucket.name, keys);
+      }
       toast.success('选中的 R2 对象已删除');
+      clearR2BucketCache(r2SelectedBucket.name);
       loadR2Objects();
     } catch (error) {
       toast.error(`批量删除 R2 对象失败：${error.message}`);
@@ -1592,6 +1733,10 @@ function DnsPage() {
 
   const downloadR2Object = async (objectKey) => {
     window.open(`/api/cloudflare${r2ObjectApiPath(objectKey, '/download')}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const downloadR2Folder = (prefix) => {
+    window.open(`/api/cloudflare/accounts/${encodeURIComponent(selectedAccountId)}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/folder-download?prefix=${encodeURIComponent(prefix)}`, '_blank', 'noopener,noreferrer');
   };
 
   const r2ObjectPreviewUrl = (objectKey) => (
@@ -1651,7 +1796,7 @@ function DnsPage() {
   };
 
   const deleteTunnel = async (tunnel) => {
-    if (!(await dialog.confirm(`确定要删除 Tunnel“${tunnel.name}”吗？`))) return;
+    if (!confirmPress(`tunnel:${tunnel.id}`, `删除 Tunnel「${tunnel.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/tunnels/${tunnel.id}`, { method: 'DELETE' });
       toast.success('Tunnel 已删除');
@@ -1769,14 +1914,44 @@ function DnsPage() {
       })),
   ], [r2CurrentPrefix, r2Objects, r2Prefixes]);
 
+  const r2TreeRows = useMemo(() => {
+    const bucketName = r2SelectedBucket?.name;
+    const rows = [];
+    const walk = (prefix, depth) => {
+      const entry = bucketName ? r2DirCache[r2CacheKey(bucketName, prefix)] : null;
+      if (!entry) {
+        if (bucketName && r2DirErrors[r2CacheKey(bucketName, prefix)]) {
+          rows.push({ key: `r2-error:${prefix}`, prefix, name: '', isFolder: false, isError: true, depth });
+          return;
+        }
+        rows.push({ key: `r2-loading:${prefix}`, prefix, name: '', isFolder: false, isLoading: true, depth });
+        return;
+      }
+      entry.prefixes.forEach((subPrefix) => {
+        rows.push({ key: subPrefix, name: subPrefix.slice(prefix.length).replace(/\/$/, ''), isFolder: true, depth });
+        if (r2ExpandedPrefixes.includes(subPrefix)) walk(subPrefix, depth + 1);
+      });
+      entry.objects.forEach((object) => {
+        const objectKey = object.key || object.name;
+        if (String(objectKey || '').endsWith('/.keep')) return;
+        rows.push({ ...object, key: objectKey, name: (objectKey || '').slice(prefix.length) || objectKey, isFolder: false, depth });
+      });
+    };
+    r2Rows.forEach((row) => {
+      rows.push({ ...row, depth: 0 });
+      if (row.isFolder && r2ExpandedPrefixes.includes(row.key)) walk(row.key, 1);
+    });
+    return rows;
+  }, [r2CacheKey, r2DirCache, r2DirErrors, r2ExpandedPrefixes, r2Rows, r2SelectedBucket]);
+
   const filteredR2Rows = useMemo(() => {
     const keyword = r2ObjectSearch.trim().toLowerCase();
-    if (!keyword) return r2Rows;
-    return r2Rows.filter((row) => String(row.name || row.key || '').toLowerCase().includes(keyword));
-  }, [r2ObjectSearch, r2Rows]);
+    if (!keyword) return r2TreeRows;
+    return r2TreeRows.filter((row) => String(row.name || row.key || '').toLowerCase().includes(keyword));
+  }, [r2ObjectSearch, r2TreeRows]);
 
-  const r2VisibleObjectKeys = useMemo(
-    () => filteredR2Rows.filter((row) => !row.isFolder).map((row) => row.key),
+  const r2VisibleKeys = useMemo(
+    () => filteredR2Rows.filter((row) => !row.isLoading && !row.isError).map((row) => row.key),
     [filteredR2Rows]
   );
 
@@ -1791,9 +1966,7 @@ function DnsPage() {
   );
   const isViewportWorkspaceTab = ['dns', 'r2'].includes(activeTab);
   const pageShellClassName = 'dns-workspace min-h-full max-w-full md:h-full md:min-h-0 md:flex-1';
-  const contentAreaClassName = isViewportWorkspaceTab
-    ? 'flex min-w-0 flex-col md:min-h-0 md:flex-1'
-    : 'min-w-0';
+  const contentAreaClassName = 'flex min-w-0 flex-col';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1812,8 +1985,8 @@ function DnsPage() {
   };
 
   return (
-    <PageStack viewport={isViewportWorkspaceTab} className={pageShellClassName}>
-      <PageToolbar>
+    <PageStack viewport className="dns-workspace min-h-full max-w-full">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -1821,36 +1994,42 @@ function DnsPage() {
           tabs={CLOUDFLARE_TABS}
         />
 
-        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
-          {!['accounts', 'templates'].includes(activeTab) && (
-            <Select size="sm"
-              aria-label="选择 Cloudflare 账号"
-              value={selectedAccountId || null}
-              onValueChange={(value) => setSelectedAccountId(value ? String(value) : '')}
-              placeholder="选择账号"
-              className="min-w-0 flex-1 sm:w-48 sm:flex-none"
-              items={accounts.map((account) => ({
-                value: String(account.id),
-                label: account.name,
-              }))}
-            />
-          )}
-          <Button size="sm"
-            shape="square"
-            variant="secondary"
-            onClick={refreshCurrentTab}
-            aria-label="刷新当前 Cloudflare 数据"
-            title="刷新"
-            icon={<RefreshCw className={`h-4 w-4 ${Object.values(loading).some(Boolean) ? 'animate-spin' : ''}`} />}
-          />
-        </div>
-      </PageToolbar>
+        <TabBarOverflowActions
+          items={[
+            ...(!['accounts', 'templates'].includes(activeTab)
+              ? [
+                  {
+                    key: 'account',
+                    type: 'select',
+                    label: '账号',
+                    icon: <Cloud className="h-3.5 w-3.5" />,
+                    value: selectedAccountId || '',
+                    onValueChange: (value) => setSelectedAccountId(value ? String(value) : ''),
+                    disabled: false,
+                    options: [
+                      ...accounts.map((account) => ({
+                        value: String(account.id),
+                        label: account.name,
+                      })),
+                    ],
+                  },
+                ]
+              : []),
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className="h-4 w-4" />,
+              onClick: refreshCurrentTab,
+              loading: Object.values(loading).some(Boolean),
+            },
+          ]}
+        />
+      </div>
 
       <div className={contentAreaClassName}>
         {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
           <SectionCard
             title="Cloudflare 账号"
-            description="管理 DNS、Workers、Pages、R2、Tunnel"
             icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="xl"
           >
@@ -1865,8 +2044,8 @@ function DnsPage() {
         ) : (
           <>
           {activeTab === 'dns' && (
-            <div className="dns-split grid min-w-0 gap-3 md:min-h-0 md:flex-1">
-              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
+            <div className="dns-split grid min-w-0 gap-3">
+              <section className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-[70px] lg:max-h-[calc(100vh-82px)] lg:overflow-y-auto lg:overscroll-contain lg:self-start">
               <div className="flex min-h-8 shrink-0 flex-col gap-2 pl-px sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <Button size="sm" variant="secondary" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
@@ -1874,10 +2053,10 @@ function DnsPage() {
                   </Button>
                   {selectedZone && (
                     <>
-                      <Button size="sm" variant="secondary" onClick={purgeZoneCache} disabled={loading.purge} icon={<Shield className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
+                      <Button size="sm" variant={isArmed(`zone-cache:${selectedZoneId}`) ? 'destructive' : 'secondary-destructive'} onClick={purgeZoneCache} disabled={loading.purge} icon={<Shield className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
                         清除缓存
                       </Button>
-                      <Button size="sm" variant="secondary-destructive" onClick={() => deleteZone(selectedZone)} icon={<Trash className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
+                      <Button size="sm" variant={isArmed(`zone:${selectedZone.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteZone(selectedZone)} icon={<Trash className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
                         删除域名
                       </Button>
                     </>
@@ -1912,7 +2091,7 @@ function DnsPage() {
                 ))}
               </div>
 
-              <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:flex">
+              <div className="dns-table-frame hidden max-w-full md:flex">
                 <div className="dns-table-scroll scrollbar-thin">
                 <Table layout="fixed" className="w-full text-xs">
                   <colgroup>
@@ -2027,7 +2206,7 @@ function DnsPage() {
                             }} aria-label={zone.id === selectedZoneId ? `已选择 ${zone.name}` : `管理 ${zone.name}`} title={zone.id === selectedZoneId ? '已选择' : '管理'}>
                               {zone.id === selectedZoneId ? <Check className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
                             </Button>
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={(event) => {
+                            <Button size="sm" shape="square" variant={isArmed(`zone:${zone.id}`) ? 'destructive' : 'secondary-destructive'} onClick={(event) => {
                               event.stopPropagation();
                               deleteZone(zone);
                             }} aria-label={`删除 ${zone.name}`} title="删除">
@@ -2044,7 +2223,7 @@ function DnsPage() {
 
               </section>
 
-              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
+              <section className="flex min-w-0 flex-col gap-2">
               <div className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-kumo-subtle">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
@@ -2176,14 +2355,16 @@ function DnsPage() {
                       <Button size="sm" onClick={() => openRecordModal()} icon={<Plus className="h-4 w-4" />}>
                         添加记录
                       </Button>
-                      <Button shape="square" size="sm" variant="secondary" onClick={exportRecords} icon={<Upload className="h-4 w-4" />}>
-                        {/* 导出 */}
-                      </Button>
-                      <Button shape="square" size="sm" variant="secondary" onClick={() => openImportModal('records')} icon={<Download className="h-4 w-4" />}>
-                        {/* 导入 */}
-                      </Button>
+                      <Toolbar size="sm" aria-label="导出导入 DNS 记录" className="shrink-0">
+                        <Toolbar.Button onClick={exportRecords} aria-label="导出 DNS 记录" icon={<Upload className="h-3.5 w-3.5" />}>
+                          <span className="hidden sm:inline">导出</span>
+                        </Toolbar.Button>
+                        <Toolbar.Button onClick={() => openImportModal('records')} aria-label="导入 DNS 记录" icon={<Download className="h-3.5 w-3.5" />}>
+                          <span className="hidden sm:inline">导入</span>
+                        </Toolbar.Button>
+                      </Toolbar>
                       {selectedRecordIds.length > 0 && (
-                        <Button size="sm" variant="secondary-destructive" onClick={batchDeleteRecords} icon={<Trash className="h-4 w-4" />}>
+                        <Button size="sm" variant={isArmed('batch-records') ? 'destructive' : 'secondary-destructive'} onClick={batchDeleteRecords} icon={<Trash className="h-4 w-4" />}>
                           删除 {selectedRecordIds.length}
                         </Button>
                       )}
@@ -2224,14 +2405,14 @@ function DnsPage() {
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             <Button size="sm" shape="square" variant="secondary" onClick={() => openRecordModal(record)} aria-label={`编辑 ${record.name}`} title="编辑" icon={<Edit className="h-3.5 w-3.5" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`record:${record.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
                           </div>
                         </div>
                       </LayerCard>
                     ))}
                   </div>
 
-                  <div className="dns-table-frame order-2 hidden min-h-0 max-w-full flex-1 md:flex md:order-none">
+                  <div className="dns-table-frame order-2 hidden max-w-full md:flex md:order-none">
                     <div className="dns-table-scroll scrollbar-thin">
                     <Table layout="fixed" className="w-full text-xs" style={{ minWidth: recordColWidths.reduce((sum, width) => sum + width, 0) }}>
                       <colgroup>
@@ -2301,7 +2482,7 @@ function DnsPage() {
                             <Table.Cell className="!px-2 !py-1.5 text-center">
                               <div className="inline-flex gap-1">
                                 <Button size="sm" shape="square" variant="secondary" onClick={() => openRecordModal(record)} aria-label={`编辑 ${record.name}`} title="编辑" icon={<Edit className="h-3.5 w-3.5" />} />
-                                <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
+                                <Button size="sm" shape="square" variant={isArmed(`record:${record.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
                               </div>
                             </Table.Cell>
                           </Table.Row>
@@ -2368,7 +2549,7 @@ function DnsPage() {
                           <Button size="sm" variant="secondary" onClick={() => openWorkerDomainsModal(worker)}>域名</Button>
                           <Button size="sm" variant="secondary" onClick={() => openWorkerAnalyticsModal(worker)}>统计</Button>
                           <Button size="sm" variant="secondary" onClick={() => toggleWorkerSubdomain(worker, true)}>启用</Button>
-                          <Button size="sm" variant="secondary-destructive" onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" variant={isArmed(`worker:${worker.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2421,7 +2602,7 @@ function DnsPage() {
                         <div className="inline-flex flex-wrap justify-end gap-2">
                           <Button size="sm" variant="secondary" onClick={() => openPagesDeploymentsModal(project)}>部署</Button>
                           <Button size="sm" variant="secondary" onClick={() => openPagesDomainsModal(project)}>域名</Button>
-                          <Button size="sm" variant="secondary-destructive" onClick={() => deletePagesProject(project)} aria-label={`删除 ${project.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" variant={isArmed(`pages-project:${project.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePagesProject(project)} aria-label={`删除 ${project.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2437,7 +2618,12 @@ function DnsPage() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-kumo-strong">存储桶</div>
-                    <div className="text-xs text-kumo-subtle">{r2Buckets.length} 个 Bucket</div>
+                    <div className="text-xs text-kumo-subtle">
+                      {r2Buckets.length} 个 Bucket
+                      {r2Metrics && (r2MetricsTotals.bytes > 0 || r2MetricsTotals.objects > 0) && (
+                        <span> · 已用 {formatBytes(r2MetricsTotals.bytes)} · {r2MetricsTotals.objects.toLocaleString()} 个对象</span>
+                      )}
+                    </div>
                   </div>
                   <Button
                     size="sm"
@@ -2450,17 +2636,12 @@ function DnsPage() {
                   />
                 </div>
 
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-                  <Input
-                    size="sm"
-                    aria-label="搜索 R2 存储桶"
-                    value={r2BucketSearch}
-                    onChange={(event) => setR2BucketSearch(event.target.value)}
-                    placeholder="搜索存储桶"
-                    className="pl-8"
-                  />
-                </div>
+                <ResponsiveSearchInput
+                  value={r2BucketSearch}
+                  onChange={(event) => setR2BucketSearch(event.target.value)}
+                  placeholder="搜索存储桶"
+                  ariaLabel="搜索 R2 存储桶"
+                />
 
                 <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
                   {loading.r2 ? Array.from({ length: 5 }).map((_, index) => (
@@ -2478,26 +2659,28 @@ function DnsPage() {
                     return (
                       <div
                         key={bucket.name}
-                        className={`rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/60'}`}
+                        className={`group rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10 shadow-sm' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/50 hover:bg-kumo-recessed/40'}`}
                       >
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="h-auto w-full min-w-0 items-start justify-start gap-2 px-0 py-0 text-left"
+                          className="h-auto w-full min-w-0 items-start justify-start gap-2 px-0 py-0 text-left bg-transparent! hover:bg-transparent! active:bg-transparent! data-[active=true]:bg-transparent! data-[selected=true]:bg-transparent! focus-visible:bg-transparent!"
                           onClick={() => selectR2Bucket(bucket)}
                         >
                           <Box className={`mt-0.5 h-4 w-4 shrink-0 ${isSelected ? 'text-kumo-brand' : 'text-kumo-subtle'}`} />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-kumo-strong">{bucket.name}</span>
-                            <span className="mt-1 block truncate text-xs text-kumo-subtle">{formatDate(bucket.creation_date || bucket.created_at)}</span>
+                            <span className={`block truncate text-sm font-medium ${isSelected ? 'text-kumo-brand' : 'text-kumo-strong'}`}>{bucket.name}</span>
+                            <span className="mt-1 block truncate text-xs text-kumo-subtle" title={`创建于 ${formatDate(bucket.creation_date || bucket.created_at)}`}>
+                              {formatDate(bucket.creation_date || bucket.created_at)}
+                            </span>
                           </span>
                         </Button>
                         <div className="mt-2 flex items-center justify-between gap-2">
                           <Badge variant={bucket.public_url_base ? 'success' : 'outline'} className="text-[10px] leading-4">
                             {bucket.public_url_base ? '公开访问' : '私有'}
                           </Badge>
-                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant={isArmed(`r2-bucket:${bucket.name}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </div>
                     );
@@ -2586,9 +2769,9 @@ function DnsPage() {
                               上一级
                             </Button>
                           )}
-                          <Button size="sm" shape="square" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix)} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => { clearR2BucketCache(r2SelectedBucket.name); loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix, { force: true }); }} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
                           {selectedR2Objects.length > 0 && (
-                            <Button size="sm" variant="secondary-destructive" onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
+                            <Button size="sm" variant={isArmed('batch-r2-objects') ? 'destructive' : 'secondary-destructive'} onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
                               删除 {selectedR2Objects.length}
                             </Button>
                           )}
@@ -2602,15 +2785,12 @@ function DnsPage() {
                           <Badge variant="outline">{formatBytes(r2ObjectTotalBytes)}</Badge>
                           {selectedR2Objects.length > 0 && <Badge variant="info">已选择 {selectedR2Objects.length}</Badge>}
                         </div>
-                        <div className="relative w-full max-w-md">
-                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-                          <Input
-                            size="sm"
-                            aria-label="搜索当前 R2 目录"
+                        <div className="w-full max-w-md">
+                          <ResponsiveSearchInput
                             value={r2ObjectSearch}
                             onChange={(event) => setR2ObjectSearch(event.target.value)}
                             placeholder="搜索当前目录"
-                            className="pl-8"
+                            ariaLabel="搜索当前 R2 目录"
                           />
                         </div>
                       </div>
@@ -2622,9 +2802,9 @@ function DnsPage() {
                           <Table.Header variant="compact">
                             <Table.Row>
                               <Table.CheckHead
-                                checked={r2VisibleObjectKeys.length > 0 && r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
-                                indeterminate={selectedR2Objects.length > 0 && !r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
-                                onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleObjectKeys : [])}
+                                checked={r2VisibleKeys.length > 0 && r2VisibleKeys.every((key) => selectedR2Objects.includes(key))}
+                                indeterminate={selectedR2Objects.length > 0 && !r2VisibleKeys.every((key) => selectedR2Objects.includes(key))}
+                                onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleKeys : [])}
                                 aria-label="全选当前可见 R2 对象"
                               />
                               <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
@@ -2643,11 +2823,11 @@ function DnsPage() {
                             ) : filteredR2Rows.map((row) => (
                               <Table.Row
                                 key={row.key}
-                                className="cursor-pointer hover:bg-kumo-recessed/35"
-                                onClick={() => (row.isFolder ? loadR2Objects(r2SelectedBucket.name, row.key) : previewR2Object(row.key))}
-                                title={row.isFolder ? '打开目录' : '预览文件'}
+                                className={`cursor-pointer hover:bg-kumo-recessed/35 ${row.isLoading ? 'opacity-70' : ''}`}
+                                onClick={() => { if (row.isLoading || row.isError) return; if (row.isFolder) toggleR2FolderExpanded(row.key); else previewR2Object(row.key); }}
+                                title={row.isError ? '目录加载失败' : (row.isFolder ? '展开目录' : '预览文件')}
                               >
-                                {row.isFolder ? (
+                                {(row.isLoading || row.isError) ? (
                                   <Table.Cell />
                                 ) : (
                                   <Table.CheckCell
@@ -2658,32 +2838,71 @@ function DnsPage() {
                                   />
                                 )}
                                 <Table.Cell>
-                                  <Button
-                                    type="button"
-                                    size="xs"
-                                    variant="ghost"
-                                    className={`h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
-                                      else previewR2Object(row.key);
-                                    }}
-                                    title={row.key}
-                                  >
-                                    {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
-                                    <span className="truncate">{row.name || row.key}</span>
-                                  </Button>
+                                  <div className="flex min-w-0 items-center gap-1" style={{ marginLeft: row.depth * 18 }}>
+                                    {row.isError ? (
+                                      <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        className="h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left bg-transparent! hover:bg-transparent! active:bg-transparent! focus-visible:bg-transparent!"
+                                        onClick={(event) => { event.stopPropagation(); retryR2Dir(row.prefix); }}
+                                        aria-label={`重试加载目录 ${row.prefix}`}
+                                        title={`重试加载 ${row.prefix}`}
+                                      >
+                                        <AlertTriangle className="h-4 w-4 shrink-0 text-kumo-warning" />
+                                        <span className="truncate text-kumo-danger">加载失败，点击重试</span>
+                                      </Button>
+                                    ) : row.isLoading ? (
+                                      <span className="inline-flex items-center gap-2 px-1 text-xs text-kumo-subtle"><SkeletonLine className="h-3.5 w-3.5" />加载中…</span>
+                                    ) : (
+                                      <>
+                                    {row.isFolder && (
+                                      <Button
+                                        type="button"
+                                        size="xs"
+                                        shape="square"
+                                        variant="ghost"
+                                        className="h-6 w-6 shrink-0 bg-transparent! text-kumo-subtle hover:bg-transparent! active:bg-transparent! hover:text-kumo-brand! focus-visible:bg-transparent!"
+                                        onClick={(event) => { event.stopPropagation(); toggleR2FolderExpanded(row.key); }}
+                                        aria-label={r2ExpandedPrefixes.includes(row.key) ? `折叠目录 ${row.name}` : `展开目录 ${row.name}`}
+                                        title={r2ExpandedPrefixes.includes(row.key) ? '折叠目录' : '展开目录'}
+                                      >
+                                        {r2ExpandedPrefixes.includes(row.key) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                      </Button>
+                                    )}
+                                    <Button
+                                      type="button"
+                                      size="xs"
+                                      variant="ghost"
+                                      className={`h-auto min-w-0 flex-1 justify-start gap-2 px-0 py-0 text-left bg-transparent! hover:bg-transparent! active:bg-transparent! focus-visible:bg-transparent! ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand!' : 'text-kumo-strong'}`}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        if (row.isLoading) return;
+                                        if (row.isFolder) toggleR2FolderExpanded(row.key);
+                                        else previewR2Object(row.key);
+                                      }}
+                                      title={row.key}
+                                    >
+                                      {row.isLoading ? <SkeletonLine className="h-3.5 w-3.5" /> : row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
+                                      <span className="truncate">{row.isLoading ? '加载中…' : (row.name || row.key)}</span>
+                                    </Button>
+                                      </>
+                                    )}
+                                  </div>
                                 </Table.Cell>
                                 <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
                                 <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
                                 <Table.Cell className="text-right">
                                   {row.isFolder ? (
-                                    <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); loadR2Objects(r2SelectedBucket.name, row.key); }}>进入</Button>
+                                    <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
+                                      <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Folder(row.key)} aria-label={`下载目录 ${row.key}`} title="下载目录" icon={<Download className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant={isArmed(`r2-object:${row.key}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteR2Object(row.key)} aria-label={`删除目录 ${row.key}`} title="删除目录" icon={<Trash className="h-4 w-4" />} />
+                                    </div>
                                   ) : (
                                     <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
                                       <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
                                       <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
-                                      <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant={isArmed(`r2-object:${row.key}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                                     </div>
                                   )}
                                 </Table.Cell>
@@ -2743,7 +2962,7 @@ function DnsPage() {
                           <Button size="sm" variant="secondary" onClick={() => openTunnelConfigModal(tunnel)}>配置</Button>
                           <Button size="sm" variant="secondary" onClick={() => openTunnelConnectionsModal(tunnel)}>连接</Button>
                           <Button size="sm" shape="square" variant="secondary" onClick={() => renameTunnel(tunnel)} aria-label={`重命名 ${tunnel.name}`} title="重命名" icon={<Edit className="h-4 w-4" />} />
-                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant={isArmed(`tunnel:${tunnel.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2759,8 +2978,14 @@ function DnsPage() {
               icon={<FileText className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('templates')} aria-label="导入模板" title="导入模板" icon={<Download className="h-4 w-4" />} />
-                <Button size="sm" shape="square" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} aria-label="导出模板" title="导出模板" icon={<Upload className="h-4 w-4" />} />
+                <Toolbar size="sm" aria-label="导出导入模板" className="shrink-0">
+                  <Toolbar.Button onClick={() => openImportModal('templates')} aria-label="导入模板" title="导入模板" icon={<Download className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} aria-label="导出模板" title="导出模板" icon={<Upload className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                </Toolbar>
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
                 </>
               )}
@@ -2796,7 +3021,7 @@ function DnsPage() {
                         <div className="inline-flex gap-2">
                           <Button size="sm" variant="secondary" onClick={() => applyTemplate(template)}>应用</Button>
                           <Button size="sm" shape="square" variant="secondary" onClick={() => openTemplateModal(template)} aria-label={`编辑 ${template.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant={isArmed(`template:${template.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2812,8 +3037,14 @@ function DnsPage() {
               icon={<Settings className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" shape="square" variant="secondary" onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-4 w-4" />} />
-                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('accounts')} aria-label="导入账号" title="导入账号" icon={<Download className="h-4 w-4" />} />
+                <Toolbar size="sm" aria-label="导出导入账号" className="shrink-0">
+                  <Toolbar.Button onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button onClick={() => openImportModal('accounts')} aria-label="导入账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
                 <Button size="sm" variant="primary" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
                 </>
               )}
@@ -2860,7 +3091,7 @@ function DnsPage() {
                           <div className="inline-flex gap-2">
                             <Button size="sm" shape="square" variant="secondary" onClick={() => verifyAccount(account)} aria-label={`验证 ${account.name}`} title="验证" icon={<Shield className="h-4 w-4" />} />
                             <Button size="sm" shape="square" variant="secondary" onClick={() => openAccountModal(account)} aria-label={`编辑 ${account.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteAccount(account)} aria-label={`删除 ${account.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`account:${account.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteAccount(account)} aria-label={`删除 ${account.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -2883,7 +3114,7 @@ function DnsPage() {
                 {modal.data ? '编辑 Cloudflare 账号' : '添加 Cloudflare 账号'}
               </Dialog.Title>
               <Dialog.Description className="text-sm text-kumo-subtle">
-                推荐使用 Cloudflare API Token，邮箱留空；账户 API Token（cfat_）需要额外填写 Account ID。Origin CA Key（v1.0-）已弃用且不可用于这里。
+                推荐使用 API Token，邮箱可留空；账户 Token（cfat_）需额外填 Account ID。Origin CA Key（v1.0-）已弃用。
               </Dialog.Description>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input size="sm" label="备注名称" value={accountForm.name} onChange={(event) => setAccountForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="生产账号" />
@@ -3084,7 +3315,7 @@ function DnsPage() {
                         <Table.Cell className="text-right">
                           <div className="inline-flex gap-2">
                             <Button size="sm" shape="square" variant="secondary" onClick={() => setWorkerRouteState((prev) => ({ ...prev, form: { id: route.id, pattern: route.pattern, script: route.script || workerRouteState.worker?.name || '' } }))} aria-label="编辑 Worker 路由" title="编辑" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteWorkerRoute(route)} aria-label="删除 Worker 路由" title="删除" icon={<Trash className="h-4 w-4" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`worker-route:${route.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorkerRoute(route)} aria-label="删除 Worker 路由" title="删除" icon={<Trash className="h-4 w-4" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -3116,7 +3347,7 @@ function DnsPage() {
                         <Table.Cell>{domain.hostname}</Table.Cell>
                         <Table.Cell>{domain.environment || '-'}</Table.Cell>
                         <Table.Cell>{domain.zoneName || domain.zoneId || '-'}</Table.Cell>
-                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteWorkerDomain(domain)} aria-label={`删除 ${domain.hostname}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
+                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant={isArmed(`worker-domain:${domain.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorkerDomain(domain)} aria-label={`删除 ${domain.hostname}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>
@@ -3157,7 +3388,7 @@ function DnsPage() {
                         <Table.Cell className="text-right">
                           <div className="inline-flex gap-2">
                             {deployment.url && <LinkButton size="sm" shape="square" variant="secondary" href={deployment.url} external aria-label="打开部署地址" title="打开" icon={<ExternalLink className="h-4 w-4" />} />}
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePagesDeployment(deployment)} aria-label="删除部署" title="删除" icon={<Trash className="h-4 w-4" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`pages-deployment:${deployment.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePagesDeployment(deployment)} aria-label="删除部署" title="删除" icon={<Trash className="h-4 w-4" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -3189,7 +3420,7 @@ function DnsPage() {
                         <Table.Cell><Badge variant={statusVariant(domain.status)}>{domain.status || '未知'}</Badge></Table.Cell>
                         <Table.Cell>{domain.validationStatus || '-'}</Table.Cell>
                         <Table.Cell>{formatDate(domain.createdOn)}</Table.Cell>
-                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePagesDomain(domain)} aria-label={`删除 ${domain.name}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
+                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant={isArmed(`pages-domain:${domain.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePagesDomain(domain)} aria-label={`删除 ${domain.name}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>
@@ -3272,10 +3503,10 @@ function DnsPage() {
                 ) : (
                   <div className="flex min-h-[28rem] flex-col items-center justify-center gap-3 p-8 text-center">
                     <FileText className="h-8 w-8 text-kumo-subtle" />
-                    <div>
-                      <div className="font-medium text-kumo-strong">该类型暂不支持内嵌预览</div>
-                      <div className="mt-1 text-sm text-kumo-subtle">可以在新窗口打开，浏览器会按文件类型处理。</div>
-                    </div>
+                      <div>
+                        <div className="font-medium text-kumo-strong">该类型暂不支持内嵌预览</div>
+                        <div className="mt-1 text-sm text-kumo-subtle">可在新窗口打开，由浏览器按文件类型处理。</div>
+                      </div>
                     <Button size="sm" onClick={() => window.open(modal.data?.url, '_blank', 'noopener,noreferrer')} icon={<ExternalLink className="h-4 w-4" />}>
                       打开对象
                     </Button>

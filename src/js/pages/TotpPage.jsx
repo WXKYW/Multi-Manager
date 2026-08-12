@@ -10,14 +10,15 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { DeleteResource, LayerCard, SensitiveInput, Tabs } from '@cloudflare/kumo';
+import { LayerCard, Loader, Meter, SensitiveInput, Tabs, Toolbar } from '@cloudflare/kumo';
 import useStore, { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { buildTotpAccountPayload } from '../modules/totpPayload.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
-import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, cx, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Key,
@@ -195,6 +196,7 @@ const mergeBrandStyleOptions = (...groups) => {
 
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const triggerHaptic = useStore(state => state.triggerHaptic);
   const [totpCurrentTab, setTotpCurrentTab] = useState('accounts');
   const [totpAccounts, setTotpAccounts] = useState([]);
@@ -238,8 +240,6 @@ function TotpPage() {
   const [customBrandIconsLoading, setCustomBrandIconsLoading] = useState(false);
   const [customBrandIconUploading, setCustomBrandIconUploading] = useState(false);
   const [deletingCustomBrandIconId, setDeletingCustomBrandIconId] = useState('');
-  const [pendingDeleteBrandIcon, setPendingDeleteBrandIcon] = useState(null);
-  const [deleteCustomBrandIconError, setDeleteCustomBrandIconError] = useState('');
   const [accountAddTab, setAccountAddTab] = useState('scan');
 
   // QR 扫码状态
@@ -858,7 +858,7 @@ function TotpPage() {
         }
       }
       if (!uploaded) {
-        throw new Error('剪贴板里没有检测到可上传的图标或图片链接');
+        throw new Error('剪贴板中没有可上传的图标或图片链接');
       }
       toast.success(importedFromURL ? '已从链接下载并应用图标' : '已从剪贴板粘贴并应用图标');
     } catch (error) {
@@ -878,17 +878,10 @@ function TotpPage() {
     toast.success(`已选择${option.label}`);
   };
 
-  const requestDeleteCustomBrandIcon = option => {
+  const deleteCustomBrandIcon = async option => {
     if (!option?.customId) return;
-    setDeleteCustomBrandIconError('');
-    setPendingDeleteBrandIcon(option);
-  };
-
-  const deleteCustomBrandIcon = async () => {
-    const option = pendingDeleteBrandIcon;
-    if (!option?.customId) return;
+    if (!confirmPress(`custom-icon-${option.customId}`, `删除自定义图标「${option.label}」`)) return;
     setDeletingCustomBrandIconId(option.customId);
-    setDeleteCustomBrandIconError('');
     try {
       const res = await fetch(`/api/totp/icons/library/${encodeURIComponent(option.customId)}`, {
         method: 'DELETE',
@@ -904,12 +897,9 @@ function TotpPage() {
         prev.map(account => (account.icon === option.icon ? { ...account, icon: '' } : account))
       );
       setAccountForm(prev => (prev.icon === option.icon ? { ...prev, icon: '' } : prev));
-      setPendingDeleteBrandIcon(null);
       toast.success('自定义图标已删除');
     } catch (error) {
-      const message = error.message || '删除图标失败';
-      setDeleteCustomBrandIconError(message);
-      throw error;
+      toast.error(error.message || '删除图标失败');
     } finally {
       setDeletingCustomBrandIconId('');
     }
@@ -961,7 +951,7 @@ function TotpPage() {
   };
 
   const handleDeleteAccount = async account => {
-    if (!(await dialog.confirm(`确定要删除 "${account.issuer}" 的账号吗？`))) {
+    if (!confirmPress(`totp-account-${account.id}`, `删除「${account.issuer}」的账号`)) {
       return;
     }
 
@@ -1129,7 +1119,7 @@ function TotpPage() {
             if (devices && devices.length > 0) {
               await html5QrCode.start(devices[0].id, config, successCallback, () => {});
             } else {
-              throw new Error('未检测到任何摄像头设备');
+              throw new Error('未检测到任何摄像头设备', { cause: err2 });
             }
           }
         }
@@ -1188,7 +1178,7 @@ function TotpPage() {
           toast.success('二维码解析成功');
         }
       } else {
-        setQrError('无法识别二维码或二维码不是有效的 OTP URI');
+        setQrError('无法识别二维码或不是有效的 OTP URI');
       }
       URL.revokeObjectURL(img.src);
     } catch (e) {
@@ -1315,7 +1305,7 @@ function TotpPage() {
   };
 
   const handleDeleteGroup = async group => {
-    if (!(await dialog.confirm(`确定要删除分组 "${group.name}" 吗？分组内的账号不会被删除。`))) {
+    if (!confirmPress(`totp-group-${group.id}`, `删除分组「${group.name}」`)) {
       return;
     }
 
@@ -1454,7 +1444,7 @@ function TotpPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={totpCurrentTab}
@@ -1491,7 +1481,7 @@ function TotpPage() {
         />
 
         {totpCurrentTab === 'accounts' && (
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:flex-1 md:justify-end">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {hasGroupTabs && (
               <Tabs
                 {...TOOL_TABS_PROPS}
@@ -1505,41 +1495,40 @@ function TotpPage() {
               />
             )}
 
-            <div className="relative min-w-40 flex-1 md:max-w-48">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
-                <Search className="w-3.5 h-3.5" />
-              </span>
-              <Input
-                size="sm"
-                aria-label="搜索 TOTP 账号"
-                type="text"
-                placeholder="搜索账号..."
-                value={totpSearchQuery}
-                onChange={e => setTotpSearchQuery(e.target.value)}
-                className="w-full text-kumo-strong text-xs pl-8 pr-3 py-1.5"
-              />
-            </div>
+            <ResponsiveSearchInput
+              value={totpSearchQuery}
+              onChange={e => setTotpSearchQuery(e.target.value)}
+              placeholder="搜索账号..."
+              ariaLabel="搜索 TOTP 账号"
+              className="md:max-w-48"
+            />
 
-            <Button
-              size="sm"
-              variant="primary"
-              icon={<Plus className="w-4 h-4" />}
-              onClick={handleOpenAddAccount}
-            >
-              添加账号
-            </Button>
+            <TabBarOverflowActions
+              items={[
+                {
+                  key: 'add-account',
+                  label: '添加账号',
+                  icon: <Plus className="w-4 h-4" />,
+                  onClick: handleOpenAddAccount,
+                  variant: 'primary',
+                },
+              ]}
+            />
           </div>
         )}
 
         {totpCurrentTab === 'groups' && (
-          <Button
-            size="sm"
-            variant="primary"
-            icon={<Plus className="w-4 h-4" />}
-            onClick={handleOpenAddGroup}
-          >
-            新建分组
-          </Button>
+          <TabBarOverflowActions
+            items={[
+              {
+                key: 'add-group',
+                label: '新建分组',
+                icon: <Plus className="w-4 h-4" />,
+                onClick: handleOpenAddGroup,
+                variant: 'primary',
+              },
+            ]}
+          />
         )}
       </div>
 
@@ -1669,14 +1658,22 @@ function TotpPage() {
                           <Button
                             shape="square"
                             size="sm"
-                            variant="secondary-destructive"
+                            variant={
+                              isArmed(`totp-account-${account.id}`)
+                                ? 'destructive'
+                                : 'secondary-destructive'
+                            }
                             aria-label="删除账号"
                             onClick={e => {
                               e.stopPropagation();
                               handleDeleteAccount(account);
                             }}
                             className="!size-5 !p-0 sm:!size-6"
-                            title="删除"
+                            title={
+                              isArmed(`totp-account-${account.id}`)
+                                ? '再次点击确认删除'
+                                : '删除'
+                            }
                           >
                             <Trash className="h-3 w-3" />
                           </Button>
@@ -1716,16 +1713,19 @@ function TotpPage() {
                             </Button>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_2rem] sm:gap-2">
-                            <div className="h-1.5 overflow-hidden rounded-full bg-kumo-recessed">
-                              <div
-                                className={`h-full rounded-full ${remaining === period ? '' : 'transition-all duration-1000 ease-linear'}`}
-                                style={{
-                                  width: `${ratio}%`,
-                                  background: issuerColor,
-                                }}
-                              />
-                            </div>
+                          <div
+                            className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_2rem] sm:gap-2"
+                            style={{ '--issuer-color': issuerColor }}
+                          >
+                            <Meter
+                              label=""
+                              value={ratio}
+                              max={100}
+                              showValue={false}
+                              className="min-w-0"
+                              trackClassName="!h-1.5 bg-kumo-recessed"
+                              indicatorClassName="[background:var(--issuer-color)]"
+                            />
                             <span className="select-none text-right text-[10px]">{remaining}s</span>
                           </div>
                         )}
@@ -1803,10 +1803,18 @@ function TotpPage() {
                           <Button
                             shape="square"
                             size="sm"
-                            variant="secondary-destructive"
+                            variant={
+                              isArmed(`totp-group-${group.id}`)
+                                ? 'destructive'
+                                : 'secondary-destructive'
+                            }
                             aria-label="删除分组"
                             onClick={() => handleDeleteGroup(group)}
-                            title="删除"
+                            title={
+                              isArmed(`totp-group-${group.id}`)
+                                ? '再次点击确认删除'
+                                : '删除'
+                            }
                             icon={<Trash className="w-3.5 h-3.5" />}
                           />
                         </div>
@@ -1836,7 +1844,7 @@ function TotpPage() {
               <div className="min-w-0 pr-4">
                 <h4 className="text-xs font-semibold leading-5 text-kumo-strong">账号名称打码</h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  对邮箱或长账号名称进行脱敏隐藏保护，避免屏幕泄露。
+                  对邮箱或长账号名称脱敏隐藏，避免屏幕泄露。
                 </p>
               </div>
               <Switch
@@ -1851,7 +1859,7 @@ function TotpPage() {
               <div className="min-w-0 pr-4">
                 <h4 className="text-xs font-semibold leading-5 text-kumo-strong">遮挡实时验证码</h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  隐藏验证码数值，仅在悬浮或点击复制时显示，防止身旁窥屏。
+                  隐藏验证码数值，仅在悬浮或点击复制时显示，防止窥屏。
                 </p>
               </div>
               <Switch
@@ -1867,7 +1875,7 @@ function TotpPage() {
                   允许悬浮显示验证码
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  开启后鼠标悬浮在验证码卡片上时临时显示被遮挡的验证码。
+                  开启后鼠标悬浮验证码卡片时临时显示被遮挡的验证码。
                 </p>
               </div>
               <Switch
@@ -1882,7 +1890,7 @@ function TotpPage() {
               <div className="min-w-0 pr-4">
                 <h4 className="text-xs font-semibold leading-5 text-kumo-strong">按站点分组</h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  将相同站点或服务（如 Google, GitHub）下的账号汇聚在一起分组显示。
+                  将相同站点或服务（如 Google、GitHub）的账号汇聚分组显示。
                 </p>
               </div>
               <Switch
@@ -1929,7 +1937,7 @@ function TotpPage() {
                   解析二维码后自动导入
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  扫码或选取二维码图片后自动读取数据入库，不需要手动核对表单保存。
+                  扫码或选取二维码图片后自动读取数据入库，无需手动核对表单保存。
                 </p>
               </div>
               <Switch
@@ -1946,7 +1954,7 @@ function TotpPage() {
                   锁定默认录入类型
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  开启后添加账号弹窗默认直接使用锁定的选项，不用每次手动选。
+                  开启后添加账号弹窗默认直接使用锁定的选项，无需每次手动选择。
                 </p>
               </div>
               <Switch
@@ -1974,27 +1982,29 @@ function TotpPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0 last:pb-0">
-              <Button
-                size="sm"
-                shape="square"
-                onClick={async () => {
-                  const uris = await dialog.prompt({
-                    message: '请输入批量导入的 otpauth:// 链接列表 (每行一条)',
-                  });
-                  importUrisDirectly(uris || '');
-                }}
-                aria-label="批量导入 URI"
-                title="批量导入 URI"
-                icon={<Download className="w-3.5 h-3.5" />}
-              />
-              <Button
-                size="sm"
-                shape="square"
-                onClick={handleExportAccounts}
-                aria-label="批量导出备份"
-                title="批量导出备份"
-                icon={<Upload className="w-3.5 h-3.5" />}
-              />
+              <Toolbar size="sm" aria-label="批量导入导出" className="shrink-0">
+                <Toolbar.Button
+                  onClick={async () => {
+                    const uris = await dialog.prompt({
+                      message: '请输入批量导入的 otpauth:// 链接列表 (每行一条)',
+                    });
+                    importUrisDirectly(uris || '');
+                  }}
+                  aria-label="批量导入 URI"
+                  title="批量导入 URI"
+                  icon={<Download className="h-3.5 w-3.5" />}
+                >
+                  <span className="hidden sm:inline">导入</span>
+                </Toolbar.Button>
+                <Toolbar.Button
+                  onClick={handleExportAccounts}
+                  aria-label="批量导出备份"
+                  title="批量导出备份"
+                  icon={<Upload className="h-3.5 w-3.5" />}
+                >
+                  <span className="hidden sm:inline">导出</span>
+                </Toolbar.Button>
+              </Toolbar>
               <Button size="sm" onClick={refreshCodes} icon={<RotateCw className="w-3.5 h-3.5" />}>
                 手动刷新验证码
               </Button>
@@ -2011,7 +2021,7 @@ function TotpPage() {
           >
             <div className="space-y-3.5">
               <p className="text-xs text-kumo-subtle leading-relaxed">
-                下载安装 2FA 浏览器插件，在 PC 端登录账号需要验证码时可一键实现自动检索与快捷填充。
+                下载安装 2FA 浏览器插件，在 PC 端登录账号需要验证码时可一键自动检索与快捷填充。
               </p>
 
               <div className="p-3 bg-kumo-recessed/60 border border-kumo-line rounded-lg flex items-start gap-3 mt-3">
@@ -2185,7 +2195,7 @@ function TotpPage() {
                     >
                       {qrParsing ? (
                         <span className="flex items-center gap-2">
-                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <Loader size={16} />
                           <span>解析中...</span>
                         </span>
                       ) : (
@@ -2515,7 +2525,7 @@ function TotpPage() {
                 选择品牌标识样式
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-xs leading-5 text-kumo-subtle">
-                选择系统样式或管理自定义图标；保存账号后会同步到同发行商账号。
+                选择系统样式或管理自定义图标；保存账号后同步到同发行商账号。
               </Dialog.Description>
             </div>
             <Dialog.Close
@@ -2630,13 +2640,21 @@ function TotpPage() {
                         type="button"
                         size="sm"
                         shape="square"
-                        variant="secondary-destructive"
+                        variant={
+                          isArmed(`custom-icon-${option.customId}`)
+                            ? 'destructive'
+                            : 'secondary-destructive'
+                        }
                         icon={<Trash className="size-4" />}
                         aria-label={`删除 ${option.label}`}
-                        title={`删除 ${option.label}`}
+                        title={
+                          isArmed(`custom-icon-${option.customId}`)
+                            ? '再次点击确认删除'
+                            : `删除 ${option.label}`
+                        }
                         loading={deletingCustomBrandIconId === option.customId}
                         disabled={Boolean(deletingCustomBrandIconId)}
-                        onClick={() => requestDeleteCustomBrandIcon(option)}
+                        onClick={() => deleteCustomBrandIcon(option)}
                       />
                     )}
                   </LayerCard>
@@ -2656,23 +2674,6 @@ function TotpPage() {
           </div>
         </Dialog>
       </Dialog.Root>
-
-      <DeleteResource
-        open={Boolean(pendingDeleteBrandIcon)}
-        onOpenChange={open => {
-          if (!open && !deletingCustomBrandIconId) {
-            setPendingDeleteBrandIcon(null);
-            setDeleteCustomBrandIconError('');
-          }
-        }}
-        resourceType="自定义图标"
-        resourceName={pendingDeleteBrandIcon?.label || ''}
-        onDelete={deleteCustomBrandIcon}
-        isDeleting={Boolean(deletingCustomBrandIconId)}
-        deleteButtonText="删除图标"
-        size="sm"
-        errorMessage={deleteCustomBrandIconError}
-      />
 
       {/* ==================== 模态框 2: 新建/编辑分组 ==================== */}
       <Dialog.Root open={showGroupModal} onOpenChange={setShowGroupModal}>

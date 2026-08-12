@@ -55,7 +55,16 @@ func TestBindManagedNodeSubscribersWritesOnlyActiveVLESSUsers(t *testing.T) {
 	}
 	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
 	users := inbound["users"].([]interface{})
-	user := users[0].(map[string]interface{})
+	if len(users) != 2 {
+		t.Fatalf("expected bootstrap + active subscriber, got %d users: %#v", len(users), users)
+	}
+	// users[0] 保留节点 bootstrap 凭据（节点页 client_uri 仍可用）
+	bootstrap := users[0].(map[string]interface{})
+	if bootstrap["uuid"] != "bootstrap" {
+		t.Fatalf("bootstrap credential not preserved: %#v", bootstrap)
+	}
+	// 订阅用户追加在后
+	user := users[1].(map[string]interface{})
 	if user["name"] != "active" || user["uuid"] != "11111111-1111-4111-8111-111111111111" || user["flow"] != "xtls-rprx-vision" {
 		t.Fatalf("unexpected users: %#v", users)
 	}
@@ -79,7 +88,14 @@ func TestBindManagedNodeSubscribersWritesVLESSWebSocketUsersWithoutRealityFlow(t
 	}
 	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
 	users := inbound["users"].([]interface{})
-	user := users[0].(map[string]interface{})
+	if len(users) != 2 {
+		t.Fatalf("expected bootstrap + active subscriber, got %d users: %#v", len(users), users)
+	}
+	// bootstrap 凭据原样保留（含 flow 字段），订阅用户追加在后
+	if users[0].(map[string]interface{})["uuid"] != "bootstrap" {
+		t.Fatalf("bootstrap credential not preserved: %#v", users[0])
+	}
+	user := users[1].(map[string]interface{})
 	if user["name"] != "active" || user["uuid"] != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("unexpected users: %#v", users)
 	}
@@ -98,7 +114,67 @@ func TestBindManagedNodeSubscribersWritesHY2Passwords(t *testing.T) {
 	var root map[string]interface{}
 	_ = json.Unmarshal([]byte(encoded), &root)
 	users := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
-	if users[0].(map[string]interface{})["password"] != "pass-a" {
+	if len(users) != 2 || users[0].(map[string]interface{})["password"] != "bootstrap" {
+		t.Fatalf("bootstrap not preserved: %#v", users)
+	}
+	if users[1].(map[string]interface{})["password"] != "pass-a" {
 		t.Fatalf("unexpected users: %#v", users)
+	}
+}
+
+func seedPlainSubscriberBindingTest(t *testing.T, protocol string) (*sql.DB, string) {
+	t.Helper()
+	db, nodeID := seedSubscriberBindingTest(t, protocol)
+	statements := []string{
+		`UPDATE managed_proxy_nodes SET protocol=? WHERE id=?`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement, protocol, nodeID); err != nil {
+			t.Fatalf("seed plain statement: %v", err)
+		}
+	}
+	return db, nodeID
+}
+
+func TestBindManagedNodeSubscribersWritesSOCKSUsers(t *testing.T) {
+	db, nodeID := seedPlainSubscriberBindingTest(t, "socks")
+	raw := `{"inbounds":[{"type":"socks","listen_port":45654,"users":[{"username":"bootstrap","password":"bootstrap"}]}]}`
+	encoded, count, err := bindManagedNodeSubscribers(context.Background(), db, nodeID, "socks", raw)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	var root map[string]interface{}
+	_ = json.Unmarshal([]byte(encoded), &root)
+	bound := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
+	if len(bound) != 2 || bound[0].(map[string]interface{})["username"] != "bootstrap" {
+		t.Fatalf("bootstrap not preserved: %#v", bound)
+	}
+	user := bound[1].(map[string]interface{})
+	if user["username"] != "11111111-1111-4111-8111-111111111111" || user["password"] != "pass-a" {
+		t.Fatalf("unexpected socks users: %#v", bound)
+	}
+	v2ray := root["experimental"].(map[string]interface{})["v2ray_api"].(map[string]interface{})
+	statsUsers := v2ray["stats"].(map[string]interface{})["users"].([]interface{})
+	if len(statsUsers) != 1 || statsUsers[0] != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("unexpected socks stats users: %#v", statsUsers)
+	}
+}
+
+func TestBindManagedNodeSubscribersWritesHTTPUsers(t *testing.T) {
+	db, nodeID := seedPlainSubscriberBindingTest(t, "http")
+	raw := `{"inbounds":[{"type":"http","listen_port":45654,"users":[{"username":"bootstrap","password":"bootstrap"}]}]}`
+	encoded, count, err := bindManagedNodeSubscribers(context.Background(), db, nodeID, "http", raw)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	var root map[string]interface{}
+	_ = json.Unmarshal([]byte(encoded), &root)
+	bound := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
+	if len(bound) != 2 || bound[0].(map[string]interface{})["username"] != "bootstrap" {
+		t.Fatalf("bootstrap not preserved: %#v", bound)
+	}
+	user := bound[1].(map[string]interface{})
+	if user["username"] != "11111111-1111-4111-8111-111111111111" || user["password"] != "pass-a" {
+		t.Fatalf("unexpected http users: %#v", bound)
 	}
 }

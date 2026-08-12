@@ -8,7 +8,7 @@ import useStore, {
 import { Sidebar, useSidebar } from '@cloudflare/kumo/components/sidebar';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Tabs } from '@cloudflare/kumo';
+import { Loader, Tabs } from '@cloudflare/kumo';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { APP_VERSION } from '../modules/appVersion.js';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
@@ -17,12 +17,8 @@ import {
   Globe,
   Server,
   LogOut,
-  AppWindow,
-  Columns,
   DesktopDisplay,
-  Maximize2,
   Palette,
-  Rectangle,
   Sun,
   Moon,
   Settings,
@@ -55,11 +51,7 @@ const PromptLibraryPage = lazy(() => import('../pages/PromptLibraryPage.jsx'));
 
 const PageLoadingFallback = () => (
   <div className="flex min-h-[240px] items-center justify-center">
-    <div
-      className="h-8 w-8 animate-spin rounded-full border-2 border-kumo-line border-t-kumo-brand"
-      aria-label="Loading"
-      role="status"
-    />
+    <Loader size={32} />
   </div>
 );
 
@@ -92,7 +84,7 @@ class ModuleErrorBoundary extends React.Component {
         <AppCard padding="none" className="w-full max-w-xl p-5">
           <div className="mb-2 text-sm font-bold text-kumo-strong">模块加载失败</div>
           <div className="mb-4 text-xs leading-relaxed text-kumo-subtle">
-            前端资源可能已更新或缓存仍指向旧文件。请重新加载当前页面后再试。
+            前端资源已更新或缓存过期，请重新加载页面。
           </div>
           <div className="mb-4 rounded-md border border-kumo-line bg-kumo-recessed/50 p-3 font-mono text-[11px] leading-relaxed text-kumo-subtle">
             {this.state.error?.message || '未知错误'}
@@ -144,12 +136,6 @@ const getPathModule = pathname => {
   return MODULE_CONFIG[route] ? route : null;
 };
 
-const PAGE_WIDTH_CLASSES = {
-  standard: 'max-w-7xl',
-  wide: 'max-w-[1600px]',
-  full: 'max-w-none',
-};
-
 const renderSidebarStyleIcon = (IconComponent, label) => (
   <span
     title={label}
@@ -171,24 +157,6 @@ const formatAppProcessUptime = seconds => {
   if (minutes > 0) return `${minutes}分钟`;
   return `${totalSeconds}秒`;
 };
-
-const PAGE_WIDTH_OPTIONS = [
-  {
-    value: 'standard',
-    label: renderSidebarStyleIcon(Rectangle, '标准宽度'),
-    className: 'w-full !justify-center !px-0',
-  },
-  {
-    value: 'wide',
-    label: renderSidebarStyleIcon(Columns, '宽屏宽度'),
-    className: 'w-full !justify-center !px-0',
-  },
-  {
-    value: 'full',
-    label: renderSidebarStyleIcon(Maximize2, '全宽'),
-    className: 'w-full !justify-center !px-0',
-  },
-];
 
 const THEME_MODE_OPTIONS = [
   {
@@ -338,12 +306,12 @@ const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
 const SidebarLogoutButton = ({ onLogout }) => {
   return (
     <SidebarTooltipMenuButton
-      label="安全退出"
+      label="退出"
       onClick={onLogout}
       className="text-kumo-danger hover:bg-kumo-danger/10"
       icon={LogOut}
     >
-      安全退出
+      退出
     </SidebarTooltipMenuButton>
   );
 };
@@ -366,8 +334,6 @@ const SidebarBrand = ({ onHome }) => (
 );
 
 const SidebarStyleSwitchItems = ({
-  pageWidthMode,
-  onPageWidthChange,
   themeMode,
   onThemeModeChange,
 }) => {
@@ -387,25 +353,6 @@ const SidebarStyleSwitchItems = ({
 
   return (
     <>
-      <Sidebar.MenuItem>
-        <div className={controlRowClassName} data-sidebar="menu-button">
-          <div className={controlRowInnerClassName}>
-            <span className="h-4 w-4 shrink-0 opacity-40" title="页面宽度" aria-label="页面宽度">
-              <AppWindow className="h-4 w-4" />
-            </span>
-            <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
-              <Tabs
-                {...TOOL_TABS_PROPS}
-                className="w-full min-w-0"
-                listClassName="grid w-full grid-cols-3"
-                value={pageWidthMode}
-                onValueChange={onPageWidthChange}
-                tabs={PAGE_WIDTH_OPTIONS}
-              />
-            </div>
-          </div>
-        </div>
-      </Sidebar.MenuItem>
       <Sidebar.MenuItem>
         <div className={controlRowClassName} data-sidebar="menu-button">
           <div className={controlRowInnerClassName}>
@@ -437,8 +384,6 @@ function MainLayout() {
     setSidebarCollapsed,
     themeMode,
     setThemeMode,
-    pageWidthMode,
-    setPageWidthMode,
     dashboardFooterVisible,
     dashboardFooterRecordNumber,
     appProcessUptimeSeconds,
@@ -451,7 +396,6 @@ function MainLayout() {
     logout,
   } = useStore();
   const [runtimeClock, setRuntimeClock] = useState(() => Date.now());
-  const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
   const displayedAppProcessUptime =
     appProcessUptimeSeconds > 0
       ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
@@ -608,20 +552,39 @@ function MainLayout() {
     };
   }, [triggerHaptic]);
 
-  const responsiveWorkspaceModule = ['dns', 'openai'].includes(mainActiveTab);
-  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'drawio', 'prompts'].includes(mainActiveTab);
-  const mainCanvasClassName = responsiveWorkspaceModule
-    ? 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! md:overflow-hidden scrollbar-thin'
-    : viewportWorkspaceModule
-      ? 'flex-1 overflow-hidden p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6!'
-      : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! scrollbar-thin';
+const viewportWorkspaceModule = ['systemlogs', 'drawio', 'prompts'].includes(mainActiveTab);
+  const stickyHeaderScrollModule = [
+    'server',
+    'github',
+    'settings',
+    'paas',
+    'scheduler',
+    'uptime',
+    'totp',
+    'notification',
+    'filebox',
+    'subscription',
+    'openai',
+    'apidocs',
+    'dns',
+    'oracle',
+    'aliyun',
+    'tencent',
+    'm365',
+  ].includes(mainActiveTab);
+  const mainCanvasClassName =
+    stickyHeaderScrollModule
+      ? 'flex-1 min-w-0 overflow-x-clip px-[var(--app-canvas-gutter-x)] pb-[var(--app-canvas-gutter-bottom)]'
+      : viewportWorkspaceModule
+        ? 'flex-1 overflow-hidden px-[var(--app-canvas-gutter-x)] pt-[var(--app-canvas-gutter-top)] pb-[var(--app-canvas-gutter-bottom)]'
+        : 'flex-1 overflow-x-hidden overflow-y-auto px-[var(--app-canvas-gutter-x)] pt-[var(--app-canvas-gutter-top)] pb-[var(--app-canvas-gutter-bottom)] scrollbar-thin';
   const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
-    responsiveWorkspaceModule
-      ? 'min-h-full md:h-full md:min-h-0'
+    stickyHeaderScrollModule
+      ? 'min-h-full'
       : viewportWorkspaceModule
         ? 'h-full min-h-0'
         : 'min-h-full'
-  } ${pageWidthClass}`;
+  }`;
 
   // 渲染当前模块页
   const renderActivePage = () => {
@@ -683,15 +646,14 @@ function MainLayout() {
               {getModuleName(mainActiveTab)} 模块重构中
             </h2>
             <p className="text-xs text-kumo-subtle max-w-sm leading-relaxed">
-              我们正在使用 React + Kumo + Tailwind v4
-              像素级重构该页面，在此期间原有逻辑将暂时不可用。
+              页面正在使用 React + Kumo + Tailwind v4 重构，原有逻辑暂时不可用。
             </p>
           </AppCard>
         );
     }
   };
 
-  return (
+return (
     <Sidebar.Provider
       mobileBreakpoint={1024}
       defaultOpen={!sidebarCollapsed}
@@ -758,7 +720,7 @@ function MainLayout() {
                 <SidebarModuleSubgroup
                   subgroup={{
                     id: 'global-config',
-                    name: '系统设置',
+                    name: '全局配置',
                     icon: Settings,
                     modules: ['notification', 'apidocs', 'systemlogs', 'settings'].filter(
                       module =>
@@ -770,8 +732,6 @@ function MainLayout() {
                   onNavigate={navigateToModule}
                 />
                 <SidebarStyleSwitchItems
-                  pageWidthMode={pageWidthMode}
-                  onPageWidthChange={setPageWidthMode}
                   themeMode={themeMode}
                   onThemeModeChange={setThemeMode}
                 />
@@ -787,13 +747,21 @@ function MainLayout() {
         </Sidebar>
 
         {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
-        <div className="app-main-panel flex-1 flex flex-col h-full overflow-hidden">
+        <div
+          className={`app-main-panel flex-1 flex flex-col h-full ${
+            stickyHeaderScrollModule ? 'overflow-x-hidden overflow-y-auto scrollbar-thin' : 'overflow-hidden'
+          }`}
+        >
           {/* 顶部导航 */}
-          <header className="app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
+          <header
+            className={`app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6 ${
+              stickyHeaderScrollModule ? 'sticky top-0 z-20' : ''
+            }`}
+          >
             <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
               <Sidebar.Trigger className="lg:hidden" />
 
-              <AppPageHeader
+<AppPageHeader
                 className="flex-row items-center justify-between"
                 spacing="compact"
                 breadcrumbs={
@@ -804,14 +772,9 @@ function MainLayout() {
                   </AppBreadcrumbs>
                 }
               >
-                {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
-                  <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
-                  <span className="hidden min-[520px]:inline">健康</span>
-                  <span className="min-[520px]:hidden">正常</span>
-                </div> */}
               </AppPageHeader>
             </div>
-          </header>
+            </header>
 
           {/* 主内容画布 */}
           <main className={mainCanvasClassName}>
@@ -862,7 +825,7 @@ function MainLayout() {
               </div>
             </footer>
           )}
-        </div>
+</div>
       </>
     </Sidebar.Provider>
   );

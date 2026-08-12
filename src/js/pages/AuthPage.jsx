@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
+import { Loader } from '@cloudflare/kumo/components/loader';
 import useStore from '../store.js';
 import {
   clearExplicitLogoutMarker,
@@ -338,7 +339,7 @@ function AuthStatusNotice({ statusKey, message }) {
         <AuthErrorBanner message={message} />
       ) : status ? (
         <div className="flex w-full items-center gap-2.5 rounded-lg border border-kumo-brand/35 bg-kumo-brand/10 p-3 text-kumo-brand">
-          <RefreshCw className="size-4 shrink-0 animate-spin" />
+          <Loader size={16} className="shrink-0 text-kumo-brand" />
           <div className="text-xs font-bold leading-tight">{status}</div>
         </div>
       ) : null}
@@ -474,12 +475,12 @@ function AuthPage() {
     setSetupError('');
 
     if (!newPassword || newPassword.length < 6) {
-      setSetupError('密码长度至少 6 位。');
+      setSetupError('密码长度至少 6 位');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setSetupError('两次输入的密码不一致。');
+      setSetupError('两次输入的密码不一致');
       return;
     }
 
@@ -493,14 +494,14 @@ function AuthPage() {
       const result = await response.json();
 
       if (!result.success) {
-        setSetupError(result.error || '设置密码失败。');
+        setSetupError(result.error || '设置密码失败');
         return;
       }
 
       setLoginPassword(newPassword);
       await verifyPassword(false);
     } catch (error) {
-      setSetupError('设置失败，请检查网络连接。');
+      setSetupError('设置失败，请检查网络');
     } finally {
       setSetupLoading(false);
     }

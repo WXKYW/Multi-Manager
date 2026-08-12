@@ -20,6 +20,7 @@ import (
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
+	"github.com/iwvw/api-monitor/backend-go/internal/publicpageicon"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
 )
@@ -354,6 +355,21 @@ func (s *Service) publicPageByDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	setPublicPageCacheControl(w, page, summary)
 	response.OK(w, payload)
+}
+
+// PublicPageIconID 返回公开页配置的自定义图标 ID（未设置时为空字符串），
+// 供服务端 favicon 解析端点使用；lookup 为 slug 或域名。
+func (s *Service) PublicPageIconID(ctx context.Context, lookup string, byDomain bool) (string, bool, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer db.Close()
+	arg := normalizeGitHubPublicSlug(lookup, "github")
+	if byDomain {
+		arg = normalizeGitHubPublicDomain(lookup)
+	}
+	return publicpageicon.LookupIconID(ctx, db, `github_public_pages`, arg, byDomain)
 }
 
 func (s *Service) publicPageRepositoryBySlug(w http.ResponseWriter, r *http.Request, slug, repoText string) {

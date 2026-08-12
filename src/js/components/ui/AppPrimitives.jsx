@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Input } from '@cloudflare/kumo/components/input';
+import { Select } from '@cloudflare/kumo/components/select';
+import { DropdownMenu, Popover } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Table } from '@cloudflare/kumo/components/table';
 import { LayerCard } from '@cloudflare/kumo';
 import { Info } from '../IconsCore.jsx';
+import { MoreVertical, Search } from '../Icons.jsx';
 import { resolveTableColumns } from '../../modules/tableLayout.js';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-6 sm:pb-8';
 export const viewportPageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-0';
 export const pageToolbarClass =
   'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
+export const stickyTabsBaseClass =
+  'sticky top-0 z-30 flex min-h-(--app-header-height) items-center bg-[var(--app-main-surface)] px-[var(--app-tab-gutter-x)] -mx-[var(--app-canvas-gutter-x)]';
 export const sectionCardHeaderClass =
   'flex min-h-[52px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-elevated px-4 py-2.5 sm:min-h-[56px] sm:flex-row sm:flex-wrap sm:items-center sm:py-3.5';
 export const sectionCardTitleClass =
@@ -43,6 +49,201 @@ const pillToneClass = {
 
 export function cx(...parts) {
   return parts.filter(Boolean).join(' ');
+}
+
+export function TabBarOverflowActions({
+  items = [],
+  className = '',
+  buttonClassName = '',
+  menuClassName = 'w-60',
+}) {
+  const wideActions = (
+    <div
+      className={cx(
+        'hidden min-w-0 shrink-0 flex-wrap items-center justify-end gap-2 md:flex',
+        className
+      )}
+    >
+      {items.map(item => {
+        if (item.type === 'select') {
+          return (
+            <Select
+              key={item.key}
+              size="sm"
+              aria-label={item.label}
+              value={item.value}
+              onValueChange={item.onValueChange}
+              disabled={item.disabled}
+              items={item.options}
+              className={cx('min-w-0 flex-1 max-w-56', item.selectClassName)}
+            />
+          );
+        }
+        return (
+          <Button
+            key={item.key}
+            size="sm"
+            variant={item.variant || 'secondary'}
+            icon={item.icon}
+            onClick={item.onClick}
+            disabled={item.disabled}
+            loading={item.loading}
+            title={item.title || item.label}
+            className={item.buttonClassName}
+          >
+            {item.label}
+          </Button>
+        );
+      })}
+    </div>
+  );
+
+  const renderMenuItem = item => {
+    if (item.type === 'select') {
+      return (
+        <DropdownMenu.Sub key={item.key}>
+          <DropdownMenu.SubTrigger className="flex items-center gap-2 px-2 py-1.5 text-sm">
+            {item.icon}
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span className="max-w-28 truncate text-xs text-kumo-subtle">
+              {item.options.find(option => String(option.value) === String(item.value))?.label || ''}
+            </span>
+          </DropdownMenu.SubTrigger>
+          <DropdownMenu.SubContent className="w-56">
+            <DropdownMenu.RadioGroup
+              value={item.value}
+              onValueChange={item.onValueChange}
+            >
+              {item.options.map(option => (
+                <DropdownMenu.RadioItem key={option.value} value={option.value}>
+                  {option.label}
+                </DropdownMenu.RadioItem>
+              ))}
+            </DropdownMenu.RadioGroup>
+          </DropdownMenu.SubContent>
+        </DropdownMenu.Sub>
+      );
+    }
+    return (
+      <DropdownMenu.Item
+        key={item.key}
+        icon={item.icon}
+        onClick={item.onClick}
+        disabled={item.disabled}
+        variant={item.danger ? 'danger' : 'default'}
+      >
+        {item.label}
+      </DropdownMenu.Item>
+    );
+  };
+
+  const menuItems = items.map(renderMenuItem);
+
+  if (items.length === 0) return null;
+
+  return (
+    <>
+      {wideActions}
+      <div className="shrink-0 md:hidden">
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={
+              <Button
+                size="sm"
+                shape="square"
+                variant="secondary"
+                icon={<MoreVertical className="h-4 w-4" />}
+                aria-label="更多操作"
+                title="更多操作"
+                className={cx('h-9 w-9 shrink-0 !rounded-lg', buttonClassName)}
+              />
+            }
+          />
+          <DropdownMenu.Content align="end" side="bottom" className={menuClassName}>
+            {menuItems}
+          </DropdownMenu.Content>
+        </DropdownMenu>
+      </div>
+    </>
+  );
+}
+
+export function ResponsiveSearchInput({
+  value,
+  onChange,
+  onSearch,
+  placeholder = '搜索...',
+  ariaLabel = '搜索',
+  className = '',
+  inputClassName = '',
+}) {
+  const wideInput = (
+    <div className={cx('relative', inputClassName)}>
+      <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
+        <Search className="w-3.5 h-3.5" />
+      </span>
+      <Input
+        size="sm"
+        type="text"
+        aria-label={ariaLabel}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        onKeyDown={onSearch ? (e) => {
+          if (e.key === 'Enter') onSearch();
+        } : undefined}
+        className="w-full pl-8"
+      />
+    </div>
+  );
+
+  return (
+    <>
+      <div className={cx('hidden md:block', className)}>{wideInput}</div>
+      <div className="md:hidden">
+        <Popover>
+          <Popover.Trigger
+            render={
+              <Button
+                size="sm"
+                shape="square"
+                variant="secondary"
+                icon={<Search className="h-4 w-4" />}
+                aria-label={ariaLabel}
+                title={ariaLabel}
+                className="shrink-0"
+              />
+            }
+          />
+          <Popover.Content side="bottom" align="end" className="w-64">
+            <div className="flex flex-col gap-2">
+              <div className="relative">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
+                  <Search className="w-3.5 h-3.5" />
+                </span>
+                <Input
+                  size="sm"
+                  type="text"
+                  aria-label={ariaLabel}
+                  placeholder={placeholder}
+                  value={value}
+                  onChange={onChange}
+                  onKeyDown={onSearch ? (e) => {
+                    if (e.key === 'Enter') onSearch();
+                  } : undefined}
+                  className="w-full pl-8"
+                  autoFocus
+                />
+              </div>
+              {onSearch && (
+                <Button size="sm" variant="secondary" onClick={onSearch}>搜索</Button>
+              )}
+            </div>
+          </Popover.Content>
+        </Popover>
+      </div>
+    </>
+  );
 }
 
 function withCompactCardActions(node) {
@@ -378,21 +579,6 @@ export function getHttpStatusPillClass(code, options) {
   if (statusCode >= 200 && statusCode < 300) return getStatusPillClass('success', options);
   if (statusCode === 429 || statusCode >= 400) return getStatusPillClass('danger', options);
   return getStatusPillClass('neutral', options);
-}
-
-export function InlineStatusPill({ tone = 'neutral', children, className = '', ...props }) {
-  return (
-    <span
-      {...props}
-      className={cx(
-        'inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold',
-        getStatusPillClass(tone),
-        className
-      )}
-    >
-      {children}
-    </span>
-  );
 }
 
 export function EmptyState({

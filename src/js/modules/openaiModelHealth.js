@@ -4,7 +4,7 @@ export function modelHealthKey(endpointId, modelId) {
 
 export const DEFAULT_MODEL_HEALTH_CONCURRENCY = 30;
 const MAX_MODEL_HEALTH_CONCURRENCY = 30;
-export const MAX_BATCH_MODEL_HEALTH_TARGETS = 30;
+export const DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS = 6;
 
 export function endpointModelIds(endpoint) {
   const models = Array.isArray(endpoint?.models) ? endpoint.models : [];
@@ -23,14 +23,6 @@ export function modelHealthTargets(endpoints) {
     if (!endpoint?.enabled) return [];
     return endpointModelIds(endpoint).map(modelId => ({ endpointId: endpoint.id, modelId }));
   });
-}
-
-export function limitModelHealthTargets(
-  targets,
-  maxTargets = MAX_BATCH_MODEL_HEALTH_TARGETS
-) {
-  const safeMax = Math.max(1, Math.floor(Number(maxTargets) || MAX_BATCH_MODEL_HEALTH_TARGETS));
-  return (Array.isArray(targets) ? targets : []).slice(0, safeMax);
 }
 
 export function normalizeModelHealthRecord(record, fallbackError = '检测未返回结果') {

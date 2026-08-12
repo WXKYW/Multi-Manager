@@ -1,260 +1,105 @@
 # Kumo Component Registry
 
-Generated documentation for the Kumo registry used by API-Monitor.
-
-This file is generated from `node_modules/@cloudflare/kumo/ai/component-registry.json`. The raw JSON snapshot is stored next to it as `docs/reference/kumo-component-registry.json`.
-
-- Registry version: `1.0.0`
-- Component count: `42`
-- Block count: `3`
-- Package declaration: `@cloudflare/kumo ^2.7.0`
-
-## Important Notes
-
-- Components are runtime components exported by Kumo unless noted by the package itself.
-- Blocks are composite layouts. Current Kumo package docs say blocks are installed via `npx @cloudflare/kumo add <block-name>`; do not assume every block is exported from the barrel.
-- `DeleteResource` is exported by the installed package, while `PageHeader` and `ResourceListPage` are present as block source in this package version.
-- Use Kumo semantic tokens and Kumo props before local styling overrides.
-
-## Category Index
-
-### Other
-
-- [Autocomplete](#autocomplete)
-- [CloudflareLogo](#cloudflarelogo)
-- [DatePicker](#datepicker)
-- [Label](#label)
-- [Link](#link)
-- [SensitiveInput](#sensitiveinput)
-- [Sidebar](#sidebar)
-- [Table](#table)
-- [TableOfContents](#tableofcontents)
-- [DeleteResource](#deleteresource)
-
-### Display
-
-- [Badge](#badge)
-- [Breadcrumbs](#breadcrumbs)
-- [Code](#code)
-- [Collapsible](#collapsible)
-- [Empty](#empty)
-- [LayerCard](#layercard)
-- [Meter](#meter)
-- [Text](#text)
-
-### Feedback
-
-- [Banner](#banner)
-- [Loader](#loader)
-- [Toasty](#toasty)
-
-### Action
-
-- [Button](#button)
-- [ClipboardText](#clipboardtext)
-
-### Input
-
-- [Checkbox](#checkbox)
-- [Combobox](#combobox)
-- [DateRangePicker](#daterangepicker)
-- [Field](#field)
-- [Input](#input)
-- [InputGroup](#inputgroup)
-- [Radio](#radio)
-- [Select](#select)
-- [Switch](#switch)
-
-### Navigation
-
-- [CommandPalette](#commandpalette)
-- [MenuBar](#menubar)
-- [Pagination](#pagination)
-- [Tabs](#tabs)
-
-### Overlay
-
-- [Dialog](#dialog)
-- [DropdownMenu](#dropdownmenu)
-- [Popover](#popover)
-- [Tooltip](#tooltip)
-
-### Layout
-
-- [Grid](#grid)
-- [Surface](#surface)
-- [PageHeader](#pageheader)
-- [ResourceListPage](#resourcelistpage)
-
-## Name Index
-
-- [Autocomplete](#autocomplete)
-- [Badge](#badge)
-- [Banner](#banner)
-- [Breadcrumbs](#breadcrumbs)
-- [Button](#button)
-- [Checkbox](#checkbox)
-- [ClipboardText](#clipboardtext)
-- [CloudflareLogo](#cloudflarelogo)
-- [Code](#code)
-- [Collapsible](#collapsible)
-- [Combobox](#combobox)
-- [CommandPalette](#commandpalette)
-- [DatePicker](#datepicker)
-- [DateRangePicker](#daterangepicker)
-- [DeleteResource](#deleteresource)
-- [Dialog](#dialog)
-- [DropdownMenu](#dropdownmenu)
-- [Empty](#empty)
-- [Field](#field)
-- [Grid](#grid)
-- [Input](#input)
-- [InputGroup](#inputgroup)
-- [Label](#label)
-- [LayerCard](#layercard)
-- [Link](#link)
-- [Loader](#loader)
-- [MenuBar](#menubar)
-- [Meter](#meter)
-- [PageHeader](#pageheader)
-- [Pagination](#pagination)
-- [Popover](#popover)
-- [Radio](#radio)
-- [ResourceListPage](#resourcelistpage)
-- [Select](#select)
-- [SensitiveInput](#sensitiveinput)
-- [Sidebar](#sidebar)
-- [Surface](#surface)
-- [Switch](#switch)
-- [Table](#table)
-- [TableOfContents](#tableofcontents)
-- [Tabs](#tabs)
-- [Text](#text)
-- [Toasty](#toasty)
-- [Tooltip](#tooltip)
-
-## Components
-
-## Autocomplete
-
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Autocomplete - free-form text input with an optional filtered suggestion list.  Unlike Combobox, the input value is not restricted to items in the list. Use Combobox when the selected value must come from the list.  Compound component: `Autocomplete` (Root), `.InputGroup`, `.Content`, `.Item`, `.GroupLabel`, `.Group`, `.Separator`, `.List`, `.Collection`.  `InputGroup` renders the text input with Input component styling. Pass a `size` prop to `InputGroup` to match the Input component sizes.
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `items` | unknown[] | Yes | - | - | Array of items to display in the dropdown |
-| `value` | string \| number \| string[] | No | - | - | The controlled input value |
-| `open` | boolean | No | - | - | Whether the popup is open (controlled) |
-| `children` | ReactNode | No | - | - | Autocomplete content (input group, popup content) |
-| `className` | string | No | - | - | Additional CSS classes |
-| `label` | ReactNode | No | - | - | Label content (enables Field wrapper) |
-| `required` | boolean | No | - | - | Whether the field is required |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content to display next to the label |
-| `description` | ReactNode | No | - | - | Helper text displayed below the field |
-| `error` | string \| object | No | - | - | Error message or validation error object |
-
-**Subcomponents**
-
-### Autocomplete.InputGroup
-
-- Description: InputGroup sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
-| `size` | KumoAutocompleteSize | No | - | - | - |
-| `placeholder` | string | No | - | - | - |
-
-### Autocomplete.Content
-
-- Description: Content sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `align` | AutocompleteBase.Positioner.Props["align"] | No | - | - | - |
-| `alignOffset` | AutocompleteBase.Positioner.Props["alignOffset"] | No | - | - | - |
-| `side` | AutocompleteBase.Positioner.Props["side"] | No | - | - | - |
-| `sideOffset` | AutocompleteBase.Positioner.Props["sideOffset"] | No | - | - | - |
-
-### Autocomplete.Item
-
-- Description: Item sub-component
-
-Props:
-
-- None
-
-### Autocomplete.GroupLabel
-
-- Description: GroupLabel sub-component
-
-Props:
-
-- None
-
-### Autocomplete.Group
-
-- Description: Group sub-component
-
-Props:
-
-- None
-
-### Autocomplete.Separator
-
-- Description: Separator sub-component
-
-Props:
-
-- None
-
-### Autocomplete.List
-
-- Description: List sub-component
-
-Props:
-
-- None
-
-### Autocomplete.Empty
-
-- Description: Empty sub-component (wraps AutocompleteBase)
-- Pass through: Yes, base: `AutocompleteBase.Empty`
-
-Props:
-
-- None
-
-### Autocomplete.Collection
-
-- Description: Collection sub-component (wraps AutocompleteBase)
-- Pass through: Yes, base: `AutocompleteBase.Collection`
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+> Auto-generated component metadata for AI/agent consumption.
+
+---
+
+### Autocomplete
+
+Autocomplete — free-form text input with an optional filtered suggestion list.
+
+**Type:** component
+
+**Import:** `import { Autocomplete } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `items`: unknown[] (required)
+  Array of items to display in the dropdown
+- `value`: string | number | string[]
+  The controlled input value
+- `open`: boolean
+  Whether the popup is open (controlled)
+- `children`: ReactNode
+  Autocomplete content (input group, popup content)
+- `className`: string
+  Additional CSS classes
+- `label`: ReactNode
+  Label content (enables Field wrapper)
+- `required`: boolean
+  Whether the field is required
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label
+- `description`: ReactNode
+  Helper text displayed below the field
+- `error`: string | object
+  Error message or validation error object
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-control`, `bg-kumo-line`, `bg-kumo-overlay`, `border-kumo-line`, `ring-kumo-line`, `text-kumo-default`, `text-kumo-strong`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Autocomplete.InputGroup
+
+InputGroup sub-component
+
+Props:
+- `className`: string
+- `size`: KumoAutocompleteSize
+- `placeholder`: string
+
+#### Autocomplete.Content
+
+Content sub-component
+
+Props:
+- `children`: ReactNode
+- `className`: string
+- `align`: AutocompleteBase.Positioner.Props["align"]
+- `alignOffset`: AutocompleteBase.Positioner.Props["alignOffset"]
+- `side`: AutocompleteBase.Positioner.Props["side"]
+- `sideOffset`: AutocompleteBase.Positioner.Props["sideOffset"]
+
+#### Autocomplete.Item
+
+Item sub-component
+
+#### Autocomplete.GroupLabel
+
+GroupLabel sub-component
+
+#### Autocomplete.Group
+
+Group sub-component
+
+#### Autocomplete.Separator
+
+Separator sub-component
+
+#### Autocomplete.List
+
+List sub-component
+
+#### Autocomplete.Empty
+
+Empty sub-component (wraps AutocompleteBase)
+
+#### Autocomplete.Collection
+
+Collection sub-component (wraps AutocompleteBase)
+
+
+**Examples:**
 
 ```tsx
 <Autocomplete items={fruits}>
-      <Autocomplete.InputGroup placeholder="Search fruits..." />
+      <Autocomplete.InputGroup placeholder="Search fruits…" />
       <Autocomplete.Content>
         <Autocomplete.List>
           {(item: string) => (
@@ -267,8 +112,6 @@ Example 1:
     </Autocomplete>
 ```
 
-Example 2:
-
 ```tsx
 <div className="w-80">
       <Autocomplete
@@ -277,7 +120,7 @@ Example 2:
         description="Start typing to filter languages"
         filter={filter}
       >
-        <Autocomplete.InputGroup placeholder="Search a language..." />
+        <Autocomplete.InputGroup placeholder="Search a language…" />
         <Autocomplete.Content>
           <Autocomplete.List>
             {(item: Language) => (
@@ -291,8 +134,6 @@ Example 2:
     </div>
 ```
 
-Example 3:
-
 ```tsx
 <div className="w-80">
       <Autocomplete
@@ -301,7 +142,7 @@ Example 3:
         error={{ message: "Please enter a valid country", match: true }}
         filter={filter}
       >
-        <Autocomplete.InputGroup placeholder="Search countries..." />
+        <Autocomplete.InputGroup placeholder="Search countries…" />
         <Autocomplete.Content>
           <Autocomplete.List>
             {(item: Country) => (
@@ -315,11 +156,9 @@ Example 3:
     </div>
 ```
 
-Example 4:
-
 ```tsx
 <Autocomplete items={servers}>
-      <Autocomplete.InputGroup placeholder="Select region..." />
+      <Autocomplete.InputGroup placeholder="Select region…" />
       <Autocomplete.Content>
         <Autocomplete.List>
           {(group: ServerGroup) => (
@@ -338,8 +177,6 @@ Example 4:
       </Autocomplete.Content>
     </Autocomplete>
 ```
-
-Example 5:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-4">
@@ -394,16 +231,14 @@ Example 5:
     </div>
 ```
 
-Example 6:
-
 ```tsx
-<div className="flex flex-col gap-3 w-80">
+<div className="flex w-80 flex-col gap-3">
       <Autocomplete
         items={fruits}
         value={value}
         onValueChange={(v) => setValue(v)}
       >
-        <Autocomplete.InputGroup placeholder="Type a fruit..." />
+        <Autocomplete.InputGroup placeholder="Type a fruit…" />
         <Autocomplete.Content>
           <Autocomplete.List>
             {(item: string) => (
@@ -416,40 +251,58 @@ Example 6:
       </Autocomplete>
       {value && (
         <p className="text-sm text-kumo-subtle">
-          Value: <span className="text-kumo-default font-medium">{value}</span>
+          Value: <span className="font-medium text-kumo-default">{value}</span>
         </p>
       )}
     </div>
 ```
 
 
-## Badge
+---
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Small status label for categorizing or highlighting content.
+### Badge
 
-**Props**
+Small status label for categorizing or highlighting content.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | primary | `primary`, `secondary`, `error`, `warning`, `success`, `destructive`, `info`, `beta`, `outline`, `red`, `green`, `neutral`, `orange`, `purple`, `teal`, `teal-subtle`, `blue` | Color variant of the badge. Recommended semantic variants: - `"primary"` - Primary badge - `"secondary"` - Secondary badge - `"error"` - Error badge - `"warning"` - Warning badge - `"success"` - Success badge - `"info"` - Info badge  Additional token variants: - `"red"`, `"orange"`, `"green"`, `"teal"`, `"blue"`, `"purple"`, `"neutral"` - `"teal-subtle"`, `"neutral-subtle"` - `"inverted"` - `"outline"` - Bordered badge with transparent background - `"beta"` - Dashed-border badge for beta/experimental features |
-| `appearance` | enum | No | filled | `filled`, `dot` | Visual appearance of the badge. - `"filled"` - Filled background using the variant color (default) - `"dot"` - Outlined badge with a colored circle dot. Only `success`,   `warning`, `error`, and `neutral` variants show a dot; other variants   render the badge without a dot. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `children` | ReactNode | No | - | - | Content rendered inside the badge. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Badge } from "@cloudflare/kumo";`
 
-`bg-kumo-badge-blue`, `bg-kumo-badge-inverted`, `bg-kumo-badge-neutral`, `bg-kumo-badge-orange`, `bg-kumo-badge-purple`, `bg-kumo-badge-red`, `bg-kumo-badge-teal`, `bg-kumo-badge-teal-subtle`, `bg-kumo-danger-tint`, `bg-kumo-fill`, `bg-kumo-info-tint`, `bg-kumo-success`, `bg-kumo-success-tint`, `bg-kumo-warning-tint`, `border-kumo-brand`, `border-kumo-fill`, `ring-kumo-hairline`, `text-kumo-badge-inverted`, `text-kumo-badge-neutral-subtle`, `text-kumo-badge-teal-subtle`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-info`, `text-kumo-link`, `text-kumo-success`, `text-kumo-warning`
+**Category:** Display
 
-**Base Styles**
+**Props:**
 
-`inline-flex w-fit flex-none shrink-0 items-center justify-self-start rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap`
+- `variant`: enum [default: primary]
+  - `"primary"`: Primary badge
+  - `"secondary"`: Secondary badge
+  - `"error"`: Error badge
+  - `"warning"`: Warning badge
+  - `"success"`: Success badge
+  - `"destructive"`: Deprecated. Use red instead.
+  - `"info"`: Info badge
+  - `"beta"`: Indicates beta or experimental features
+  - `"outline"`: Bordered badge with transparent background
+  - `"red"`: Red badge
+  - `"green"`: Green badge
+  - `"neutral"`: Neutral badge
+  - `"orange"`: Orange badge
+  - `"purple"`: Purple badge
+  - `"teal"`: Teal badge
+  - `"teal-subtle"`: Subtle teal badge
+  - `"blue"`: Blue badge
+- `appearance`: enum [default: filled]
+  - `"filled"`: Filled badge with background color (default)
+  - `"dot"`: Outlined badge with a colored circle dot indicating status
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `children`: ReactNode
+  Content rendered inside the badge.
 
-**Examples**
+**Colors (kumo tokens used):**
 
-Example 1:
+`bg-kumo-badge-blue`, `bg-kumo-badge-green`, `bg-kumo-badge-inverted`, `bg-kumo-badge-neutral`, `bg-kumo-badge-orange`, `bg-kumo-badge-purple`, `bg-kumo-badge-red`, `bg-kumo-badge-teal`, `bg-kumo-badge-teal-subtle`, `bg-kumo-danger-tint`, `bg-kumo-fill`, `bg-kumo-info-tint`, `bg-kumo-success`, `bg-kumo-success-tint`, `bg-kumo-warning-tint`, `border-kumo-brand`, `border-kumo-fill`, `ring-kumo-hairline`, `text-kumo-badge-inverted`, `text-kumo-badge-neutral-subtle`, `text-kumo-badge-teal-subtle`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-info`, `text-kumo-link`, `text-kumo-success`, `text-kumo-warning`
+
+**Examples:**
 
 ```tsx
 <div className="flex flex-wrap items-center gap-2">
@@ -464,20 +317,17 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <div className="flex flex-wrap items-center gap-2">
       <Badge variant="neutral">Neutral</Badge>
       <Badge variant="red">Red</Badge>
+      <Badge variant="green">Green</Badge>
       <Badge variant="orange">Orange</Badge>
       <Badge variant="teal">Teal</Badge>
       <Badge variant="blue">Blue</Badge>
       <Badge variant="purple">Purple</Badge>
     </div>
 ```
-
-Example 3:
 
 ```tsx
 <p className="flex items-center gap-2">
@@ -486,51 +336,75 @@ Example 3:
     </p>
 ```
 
-Example 4:
-
 ```tsx
 <div className="flex flex-wrap items-center gap-2">
-      <Badge variant="success" appearance="dot">Healthy</Badge>
-      <Badge variant="warning" appearance="dot">Warning</Badge>
-      <Badge variant="error" appearance="dot">Error</Badge>
-      <Badge variant="neutral" appearance="dot">Neutral</Badge>
+      <Badge variant="success" appearance="dot">
+        Healthy
+      </Badge>
+      <Badge variant="warning" appearance="dot">
+        Warning
+      </Badge>
+      <Badge variant="error" appearance="dot">
+        Error
+      </Badge>
+      <Badge variant="neutral" appearance="dot">
+        Neutral
+      </Badge>
     </div>
 ```
 
 
-## Banner
+---
 
-- Type: component
-- Category: Feedback
-- Import path: `@cloudflare/kumo`
-- Description: Full-width message bar for informational, warning, or error notices. Supports structured title/description for i18n, or simple children for basic usage.
+### Banner
 
-**Props**
+Full-width message bar with an optional trailing CTA slot.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `icon` | ReactNode | No | - | - | Icon element rendered before the banner content (e.g. from `@phosphor-icons/react`). |
-| `title` | string | No | - | - | Primary heading text for the banner. Use for i18n string injection. |
-| `description` | ReactNode | No | - | - | Secondary description text displayed below the title. Use for i18n string injection. |
-| `action` | ReactNode | No | - | - | Action slot rendered at the trailing end of the banner (e.g. a CTA button or link). Only used in structured mode (with `title` or `description`). |
-| `text` | string | No | - | - | - |
-| `children` | ReactNode | No | - | - | - |
-| `variant` | enum | No | default | `default`, `alert`, `error`, `secondary` | Visual style of the banner. - `"default"` - Informational blue banner for general messages - `"alert"` - Warning yellow banner for cautionary messages - `"error"` - Error red banner for critical issues - `"secondary"` - Neutral banner for secondary messages |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Banner } from "@cloudflare/kumo";`
 
-`bg-kumo-banner-info`, `bg-kumo-banner-warning`, `bg-kumo-contrast`, `bg-kumo-danger-tint`, `text-kumo-danger`, `text-kumo-info`, `text-kumo-subtle`, `text-kumo-warning`
+**Category:** Feedback
 
-**Base Styles**
+**Props:**
 
-`flex w-full items-start gap-3 rounded-lg px-4 py-3 text-base`
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `id`: string
+- `lang`: string
+- `icon`: ReactNode
+  Icon element rendered before the banner content (e.g. from `@phosphor-icons/react`).
+- `title`: string
+  Primary heading text for the banner. Use for i18n string injection.
+- `description`: ReactNode
+  Secondary description text displayed below the title. Use for i18n string injection.
+- `action`: ReactNode
+  Action slot for a CTA button or link. Compact banners render a Kumo `Link` inline with the description; CTAs render at the trailing end. Use `Banner.Action` for accent-aware CTAs that self-style to the banner variant; other nodes are rendered as-is. Multiple actions can be passed in a Fragment. Only used in structured mode (with `title` or `description`).
+- `text`: string
+- `children`: ReactNode
+- `variant`: enum [default: default]
+  - `"default"`: Informational banner for general messages
+  - `"alert"`: Warning banner for cautionary messages
+  - `"error"`: Error banner for critical issues
+  - `"secondary"`: Neutral banner for secondary messages
+- `size`: enum [default: base]
+  - `"base"`: Default banner size
+  - `"sm"`: Compact banner for dialogs and tight spaces
 
-**Examples**
+**Colors (kumo tokens used):**
 
-Example 1:
+`bg-kumo-contrast`, `bg-kumo-danger-tint`, `bg-kumo-info-tint`, `bg-kumo-warning-tint`, `fill-kumo-danger`, `fill-kumo-info`, `fill-kumo-interact`, `fill-kumo-warning`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-info`, `text-kumo-warning`
+
+**Sub-Components:**
+
+This is a compound component. Use these sub-components:
+
+#### Banner.Action
+
+Action sub-component
+
+
+**Examples:**
 
 ```tsx
 <div className="w-full space-y-3">
@@ -560,8 +434,6 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <Banner
       icon={<Info weight="fill" />}
@@ -569,8 +441,6 @@ Example 2:
       description="A new version is ready to install."
     />
 ```
-
-Example 3:
 
 ```tsx
 <Banner
@@ -581,49 +451,12 @@ Example 3:
     />
 ```
 
-Example 4:
-
-```tsx
-<Banner
-      icon={<WarningCircle weight="fill" />}
-      variant="error"
-      title="Save failed"
-      description="We couldn't save your changes. Please try again."
-    />
-```
-
-Example 5:
-
-```tsx
-<Banner
-      icon={<Info weight="fill" />}
-      variant="secondary"
-      title="Maintenance scheduled"
-      description="This service will be unavailable for 10 minutes."
-    />
-```
-
-Example 6:
-
 ```tsx
 <Banner
       icon={<Info weight="fill" />}
       title="Your changes have been saved."
     />
 ```
-
-Example 7:
-
-```tsx
-<Banner
-      icon={<Warning weight="fill" />}
-      variant="alert"
-      title="Review required"
-      description="Please review your billing information before proceeding."
-    />
-```
-
-Example 8:
 
 ```tsx
 <Banner
@@ -637,123 +470,168 @@ Example 8:
     />
 ```
 
-Example 9:
-
 ```tsx
 <div className="w-full space-y-3">
       <Banner
         icon={<Info weight="fill" />}
         title="Update available"
         description="A new version is ready to install."
-        action={<Button size="sm">Update now</Button>}
+        action={
+          <>
+            <Banner.Action>Update</Banner.Action>
+            <Banner.Action variant="ghost" icon={<X />} aria-label="Dismiss" />
+          </>
+        }
       />
       <Banner
-        icon={<Info weight="fill" />}
-        title="Update available"
-        description="A new version is ready to install."
+        variant="error"
+        icon={<WarningCircle weight="fill" />}
+        title="Save failed"
+        description="We couldn't save your changes. Please try again."
         action={
-          <Button
-            size="sm"
-            variant="ghost"
-            shape="square"
-            icon={X}
-            aria-label="Dismiss"
-          />
+          <>
+            <Banner.Action>Retry</Banner.Action>
+            <Banner.Action variant="ghost" icon={<X />} aria-label="Dismiss" />
+          </>
+        }
+      />
+      <Banner
+        variant="alert"
+        icon={<WarningCircle weight="fill" />}
+        title="Save failed"
+        description="We couldn't save your changes. Please try again."
+        action={
+          <>
+            <Banner.Action>Retry</Banner.Action>
+            <Banner.Action variant="ghost" icon={<X />} aria-label="Dismiss" />
+          </>
+        }
+      />
+      <Banner
+        variant="secondary"
+        icon={<WarningCircle weight="fill" />}
+        title="Save failed"
+        description="We couldn't save your changes. Please try again."
+        action={
+          <>
+            <Banner.Action>Retry</Banner.Action>
+            <Banner.Action variant="ghost" icon={<X />} aria-label="Dismiss" />
+          </>
         }
       />
     </div>
 ```
 
-Example 10:
+```tsx
+<div className="w-full space-y-3">
+      <Banner
+        icon={<Warning weight="fill" />}
+        variant="error"
+        title="Your account is 90 days past due."
+        description="Pay now to avoid interruption."
+        action={
+          <>
+            <Banner.Action>Pay now</Banner.Action>
+            <Banner.Action variant="secondary">Go to billing</Banner.Action>
+          </>
+        }
+      />
+    </div>
+```
 
 ```tsx
 <Banner
-      icon={<Warning weight="fill" />}
-      variant="alert"
-      title="Session expiring"
-      description="Your session will expire in 5 minutes."
+      size="sm"
+      description="A DNS record for puppies.cloudflare.dev already exists in this zone."
+      action={<Link href="#">Manage DNS for puppies.cloudflare.dev</Link>}
+    />
+```
+
+```tsx
+<Banner
+      size="sm"
+      description="A DNS record for puppies.cloudflare.dev already exists in this zone."
       action={
         <>
-          <Button size="sm" variant="secondary">
-            Dismiss
-          </Button>
-          <Button size="sm">Extend session</Button>
+          <Banner.Action>Manage DNS</Banner.Action>
+          <Banner.Action variant="ghost">
+            <X />
+          </Banner.Action>
         </>
       }
     />
 ```
 
-Example 11:
+```tsx
+<Banner
+      size="sm"
+      description="A DNS record for puppies.cloudflare.dev already exists in this zone."
+    />
+```
 
 ```tsx
 <Banner icon={<Info />}>This is a simple banner using children.</Banner>
 ```
 
 
-## Breadcrumbs
+---
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Breadcrumbs component
+### Breadcrumbs
 
-**Props**
+Breadcrumbs component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `size` | enum | No | base | `sm`, `base` | Size of the breadcrumbs. - `"sm"` - Compact breadcrumbs for dense UIs - `"base"` - Default breadcrumbs size |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Breadcrumbs } from "@cloudflare/kumo";`
 
-### Breadcrumbs.Link
+**Category:** Display
 
-- Description: Link sub-component
+**Props:**
 
-Props:
+- `size`: enum [default: base]
+  - `"sm"`: Compact breadcrumbs for dense UIs
+  - `"base"`: Default breadcrumbs size
+- `children`: ReactNode
+- `className`: string
+  Additional CSS classes merged via `cn()`.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `href` | string | Yes | - | - | - |
-| `icon` | React.ReactNode | No | - | - | - |
-
-### Breadcrumbs.Current
-
-- Description: Current sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `loading` | boolean | No | - | - | - |
-| `icon` | React.ReactNode | No | - | - | - |
-
-### Breadcrumbs.Separator
-
-- Description: Separator sub-component
-
-Props:
-
-- None
-
-### Breadcrumbs.Clipboard
-
-- Description: Clipboard sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `text` | string | Yes | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `text-kumo-inactive`, `text-kumo-subtle`, `text-kumo-success`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Breadcrumbs.Link
+
+Link sub-component
+
+Props:
+- `href`: string (required)
+- `icon`: React.ReactNode
+
+#### Breadcrumbs.Current
+
+Current sub-component
+
+Props:
+- `loading`: boolean
+- `icon`: React.ReactNode
+
+#### Breadcrumbs.Separator
+
+Separator sub-component
+
+#### Breadcrumbs.Clipboard
+
+Clipboard sub-component
+
+Props:
+- `text`: string (required)
+
+
+**Examples:**
 
 ```tsx
 <Breadcrumbs>
@@ -764,8 +642,6 @@ Example 1:
       <Breadcrumbs.Current>Breadcrumbs</Breadcrumbs.Current>
     </Breadcrumbs>
 ```
-
-Example 2:
 
 ```tsx
 <Breadcrumbs>
@@ -779,22 +655,6 @@ Example 2:
     </Breadcrumbs>
 ```
 
-Example 3:
-
-```tsx
-<Breadcrumbs>
-      <Breadcrumbs.Link href="#" icon={<House size={16} />}>
-        Home
-      </Breadcrumbs.Link>
-      <Breadcrumbs.Separator />
-      <Breadcrumbs.Link href="#">Docs</Breadcrumbs.Link>
-      <Breadcrumbs.Separator />
-      <Breadcrumbs.Current loading></Breadcrumbs.Current>
-    </Breadcrumbs>
-```
-
-Example 4:
-
 ```tsx
 <Breadcrumbs>
       <Breadcrumbs.Current icon={<House size={16} />}>
@@ -802,8 +662,6 @@ Example 4:
       </Breadcrumbs.Current>
     </Breadcrumbs>
 ```
-
-Example 5:
 
 ```tsx
 <Breadcrumbs>
@@ -815,39 +673,191 @@ Example 5:
 ```
 
 
-## Button
+---
 
-- Type: component
-- Category: Action
-- Import path: `@cloudflare/kumo`
-- Description: Primary action trigger. Supports multiple variants, sizes, shapes, icons, and loading state.
+### BubbleMap
 
-**Props**
+BubbleMap component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `shape` | enum | No | base | `base`, `square`, `circle` | `{"base":"Default rectangular button shape","square":"Square button for icon-only actions","circle":"Circular button for icon-only actions"}` |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | `{"xs":"Extra small button for compact UIs","sm":"Small button for secondary actions","base":"Default button size","lg":"Large button for primary CTAs"}` |
-| `variant` | enum | No | secondary | `primary`, `secondary`, `ghost`, `destructive`, `secondary-destructive`, `outline` | `{"primary":"High-emphasis button for primary actions","secondary":"Default button style for most actions","ghost":"Minimal button with no background","destructive":"Danger button for destructive actions like delete","secondary-destructive":"Secondary button with destructive text for less prominent dangerous actions","outline":"Bordered button with transparent background"}` |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `icon` | ReactNode | No | - | - | Icon from `@phosphor-icons/react` or a React element. Rendered before children. |
-| `loading` | boolean | No | - | - | Shows a loading spinner and disables interaction. |
-| `title` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `disabled` | boolean | No | - | - | - |
-| `name` | string | No | - | - | - |
-| `type` | enum | No | - | `submit`, `reset`, `button` | - |
-| `value` | string \| string[] \| number | No | - | - | - |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { BubbleMap } from "@cloudflare/kumo";`
 
-`bg-kumo-base`, `bg-kumo-brand`, `bg-kumo-brand-hover`, `bg-kumo-danger`, `bg-kumo-tint`, `ring-kumo-brand`, `ring-kumo-focus`, `ring-kumo-hairline`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-subtle`
+**Category:** Data Visualization
 
-**Examples**
+**Props:**
 
-Example 1:
+- `echarts`: typeof echarts (required)
+  The ECharts core instance imported by the consumer (passed in for tree-shaking). Requires `MapChart`, `ScatterChart`, `TooltipComponent`, and a renderer registered via `echarts.use([...])`.
+- `geoJson`: MapGeoJson (required)
+  GeoJSON `FeatureCollection` for the land base.
+- `mapName`: string
+  Optional stable ECharts map registry name. Set this when the same GeoJSON is parsed into new object instances across mounts and should reuse one global ECharts registration.
+- `data`: T[] (required)
+  Raw data rows. Coordinates/value/name are read via the accessors below.
+- `lng`: MapAccessor<T, number> (required)
+  Longitude accessor (key of `T` or `(row) => number`).
+- `lat`: MapAccessor<T, number> (required)
+  Latitude accessor (key of `T` or `(row) => number`).
+- `value`: MapAccessor<T, number> (required)
+  Value accessor — drives bubble size.
+- `name`: MapAccessor<T, string>
+  Optional name accessor — used by the default tooltip.
+- `minRadius`: number
+  Smallest bubble radius in px. Default: `6`.
+- `maxRadius`: number
+  Largest bubble radius in px. Default: `26`.
+- `bubbleSize`: (value: number) => number
+  Explicit bubble radius `(value) => px`. Overrides the default `minRadius`/`maxRadius` scaling.
+- `bubbleColor`: MapStyle<T, string>
+  Bubble fill colour — constant or `(row) => color`. Defaults to the chart blue.
+- `bubbleBorderColor`: MapStyle<T, string>
+  Bubble border colour — constant or `(row) => color`. Default: `transparent`.
+- `bubbleBorderWidth`: MapStyle<T, number>
+  Bubble border width — constant or `(row) => px`. Default: `0`.
+- `center`: [number, number]
+  Map center as `[longitude, latitude]`. Defaults to auto-fit.
+- `zoom`: number
+  Zoom level — multiplies the auto-fit scale. Default: `1.25`.
+- `roam`: boolean
+  Enable drag-to-pan and scroll-to-zoom. Default: `false`.
+- `projection`: MapProjection | null
+  Geographic projection. Defaults to a latitude-clamped Mercator (flat 2D web-map look). Pass another d3-geo projection to override, or `null` for ECharts' raw equirectangular plotting. Use a stable reference (module-level or memoised): a new object each render rebuilds the view and resets a roamed/zoomed map.
+- `showTooltip`: boolean
+  Show the tooltip. Default: `true`.
+- `valueFormat`: (value: number) => string
+  Format the value for the default tooltip. Default: `toLocaleString()`.
+- `tooltipFormatter`: (row: T) => string
+  Override the tooltip content for a row. Returns an HTML string rendered by ECharts' own tooltip. USE WITH CAUTION: the return value is injected as HTML. Escape any user-provided strings to avoid XSS.
+- `aspectRatio`: number | string
+  Container aspect ratio as `width / height` (e.g. `1.7` or `"16 / 9"`). The height derives from the rendered width so the map fills the frame with no letterboxing. Defaults to the projected aspect of the displayed window, so the land fits edge-to-edge. Pass `height` to fix a pixel height instead.
+- `height`: number
+  Fixed chart height in pixels. Overrides `aspectRatio` when set. Leave unset to size by aspect ratio (the default) so the map fills the container.
+- `className`: string
+- `isDarkMode`: boolean
+
+**Examples:**
+
+```tsx
+<BubbleMap<CfLocation>
+      echarts={echarts}
+      geoJson={geoJson}
+      data={cloudflareLocations}
+      lng="lon"
+      lat="lat"
+      name="city"
+      value={() => 1}
+      bubbleColor="#F6821F"
+      minRadius={8}
+      maxRadius={8}
+      tooltipFormatter={(row) =>
+        `<span style="font-size:12px"><strong>${row.city}</strong><span style="color:var(--text-color-kumo-subtle);margin-left:8px">${row.iata}</span></span>`
+      }
+      isDarkMode={isDarkMode}
+    />
+```
+
+```tsx
+<BubbleMap<Colo>
+      echarts={echarts}
+      geoJson={geoJson}
+      data={colos}
+      lng="lon"
+      lat="lat"
+      name="city"
+      value="requests"
+      valueFormat={fmt}
+      minRadius={8}
+      isDarkMode={isDarkMode}
+    />
+```
+
+```tsx
+<BubbleMap<Colo>
+      echarts={echarts}
+      geoJson={geoJson}
+      data={colos2}
+      lng="lon"
+      lat="lat"
+      name="city"
+      value="requests"
+      valueFormat={fmt}
+      isDarkMode={isDarkMode}
+    />
+```
+
+
+---
+
+### Button
+
+Primary action trigger. Supports multiple variants, sizes, shapes, icons, and loading state.
+
+**Type:** component
+
+**Import:** `import { Button } from "@cloudflare/kumo";`
+
+**Category:** Action
+
+**Props:**
+
+- `shape`: enum [default: base]
+  - `"base"`: Default rectangular button shape
+  - `"square"`: Square button for icon-only actions
+  - `"circle"`: Circular button for icon-only actions
+- `size`: enum [default: base]
+  - `"xs"`: Extra small button for compact UIs
+  - `"sm"`: Small button for secondary actions
+  - `"base"`: Default button size
+  - `"lg"`: Large button for primary CTAs
+- `variant`: enum [default: secondary]
+  - `"primary"`: High-emphasis button for primary actions
+  - `"secondary"`: Default button style for most actions
+  - `"ghost"`: Minimal button with no background
+  - `"destructive"`: Danger button for destructive actions like delete
+  - `"secondary-destructive"`: Secondary button with destructive text for less prominent dangerous actions
+  - `"outline"`: Bordered button with transparent background
+
+  **State Classes:**
+  - `"primary"`:
+    - `focus`: `focus:ring-(--kumo-button-emphasis-ring) focus-visible:ring-(--kumo-button-emphasis-ring)`
+    - `active`: `active:ring-(--kumo-button-emphasis-ring)`
+    - `disabled`: `disabled:opacity-50`
+  - `"secondary"`:
+    - `not-disabled`: `not-disabled:hover:bg-kumo-tint`
+    - `disabled`: `disabled:bg-kumo-base/50 disabled:!text-kumo-default/70`
+    - `data-state`: `data-[state=open]:bg-kumo-base`
+  - `"ghost"`:
+    - `hover`: `hover:bg-kumo-tint`
+  - `"destructive"`:
+    - `focus`: `focus:ring-(--kumo-button-emphasis-ring) focus-visible:ring-(--kumo-button-emphasis-ring)`
+    - `active`: `active:ring-(--kumo-button-emphasis-ring)`
+    - `disabled`: `disabled:opacity-50`
+  - `"secondary-destructive"`:
+    - `not-disabled`: `not-disabled:hover:!text-kumo-danger not-disabled:hover:ring-kumo-danger/30`
+    - `disabled`: `disabled:bg-kumo-base/50 disabled:!text-kumo-danger/70`
+    - `data-state`: `data-[state=open]:bg-kumo-base`
+  - `"outline"`:
+    - `not-disabled`: `not-disabled:hover:text-kumo-strong not-disabled:hover:ring-kumo-focus/25`
+- `children`: ReactNode
+- `className`: string
+- `icon`: ReactNode
+  Icon from `@phosphor-icons/react` or a React element. Rendered before children.
+- `loading`: boolean
+  Shows a loading spinner and disables interaction.
+- `title`: string
+- `id`: string
+- `lang`: string
+- `disabled`: boolean
+- `name`: string
+- `type`: enum
+- `value`: string | string[] | number
+
+**Colors (kumo tokens used):**
+
+`bg-kumo-base`, `bg-kumo-tint`, `ring-kumo-brand`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-line`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-strong`, `text-kumo-subtle`
+
+**Examples:**
 
 ```tsx
 <div className="flex flex-wrap items-center gap-2">
@@ -861,43 +871,9 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <Button variant="primary">Primary</Button>
 ```
-
-Example 3:
-
-```tsx
-<Button variant="secondary">Secondary</Button>
-```
-
-Example 4:
-
-```tsx
-<Button variant="ghost">Ghost</Button>
-```
-
-Example 5:
-
-```tsx
-<Button variant="destructive">Destructive</Button>
-```
-
-Example 6:
-
-```tsx
-<Button variant="outline">Outline</Button>
-```
-
-Example 7:
-
-```tsx
-<Button variant="secondary-destructive">Secondary Destructive</Button>
-```
-
-Example 8:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-3">
@@ -916,15 +892,11 @@ Example 8:
     </div>
 ```
 
-Example 9:
-
 ```tsx
 <Button variant="secondary" icon={PlusIcon}>
       Create Worker
     </Button>
 ```
-
-Example 10:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-3">
@@ -943,30 +915,6 @@ Example 10:
     </div>
 ```
 
-Example 11:
-
-```tsx
-<Button variant="primary" loading>
-      Loading...
-    </Button>
-```
-
-Example 12:
-
-```tsx
-<Button variant="secondary" disabled>
-      Disabled
-    </Button>
-```
-
-Example 13:
-
-```tsx
-<Button variant="secondary">Click me</Button>
-```
-
-Example 14:
-
 ```tsx
 <div className="flex flex-wrap items-center gap-3">
       <Button variant="secondary" title="Create a new Worker">
@@ -979,145 +927,532 @@ Example 14:
         aria-label="Add item"
         title="Add item"
       />
+      <Button
+        variant="secondary"
+        title="You need edit access to create a Worker"
+        disabled
+      >
+        Create Worker
+      </Button>
     </div>
 ```
 
-Example 15:
+
+---
+
+### Chart
+
+Chart — a low-level wrapper around [Apache ECharts](https://echarts.apache.org).
+
+**Type:** component
+
+**Import:** `import { Chart } from "@cloudflare/kumo";`
+
+**Category:** Data Visualization
+
+**Props:**
+
+- `echarts`: typeof echarts (required)
+  The ECharts core instance imported by the consumer. Passed in rather than imported directly so the consumer controls which ECharts modules are bundled (tree-shaking).
+- `options`: KumoChartOption (required)
+  ECharts option object — passed through to `chart.setOption()`
+- `optionUpdateBehavior`: SetOptionOpts
+  Additional options passed as the second argument to `chart.setOption()`. Defaults to `{ notMerge: false, lazyUpdate: true }`.
+- `className`: string
+  Additional CSS classes applied to the chart container `<div>`
+- `isDarkMode`: boolean
+  When `true`, initialises ECharts with its built-in dark theme. Changing this value after mount destroys and re-creates the chart instance.
+- `height`: number
+  Height of the chart container in pixels. Defaults to `350`.
+- `aspectRatio`: number | string
+  Container aspect ratio as `width / height` (e.g. `1.7` or `"16 / 9"`). When set, the height derives from the rendered width via CSS `aspect-ratio` and the `height` prop is ignored — useful for maps so the canvas matches the map's shape and fills the frame with no letterboxing.
+
+**Examples:**
 
 ```tsx
-<div className="flex flex-wrap items-center gap-3">
-      <LinkButton href="/components/link" variant="secondary">
-        Read Link docs
-      </LinkButton>
-      <LinkButton
-        href="https://developers.cloudflare.com"
-        variant="ghost"
-        icon={ArrowSquareOutIcon}
-        external
+<Chart
+      echarts={echarts}
+      options={options}
+      height={400}
+      isDarkMode={isDarkMode}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Count"
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      markers={markers}
+      xAxisName="Time (UTC)"
+      yAxisName="Count"
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      thresholds={[
+        {
+          value: 55,
+          label: "Memory limit",
+          color: ChartPalette.semantic("Attention", isDarkMode),
+        },
+      ]}
+      xAxisName="Time (UTC)"
+      yAxisName="Memory (MB)"
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Requests"
+      xAxisTickFormat={(ts) => {
+        const d = new Date(ts);
+        return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+      }}
+      yAxisTickFormat={(value) => {
+        if (value >= 1000) return `${value / 1000}k`;
+        return value.toString();
+      }}
+      tooltipValueFormat={(value) => `${(value / 1000).toFixed(1)}k requests`}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      yAxisTickCount={2}
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      height={160}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Mbps"
+      incomplete={{ after: incompleteTimestamp }}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="%"
+      onTimeRangeChange={(from, to) => {
+        alert(
+          `Selected range:\nFrom: ${new Date(from).toLocaleString()}\nTo: ${new Date(to).toLocaleString()}`,
+        );
+      }}
+    />
+```
+
+```tsx
+<div className="space-y-4">
+      <h3 className="text-sm font-medium">Active State</h3>
+
+      <div className="flex flex-wrap gap-4 divide-x divide-kumo-hairline">
+        <ChartLegend.LargeItem
+          name="Requests"
+          color={ChartPalette.semantic("Neutral", isDarkMode)}
+          value="1,234"
+          unit="req/s"
+        />
+        <ChartLegend.LargeItem
+          name="Storage"
+          color={ChartPalette.semantic("Attention", isDarkMode)}
+          value="56"
+          unit="GB"
+        />
+        <ChartLegend.LargeItem
+          name="Warnings"
+          color={ChartPalette.semantic("Warning", isDarkMode)}
+          value="128"
+        />
+      </div>
+
+      <h3 className="mt-12 text-sm font-medium">Inactive State</h3>
+
+      <div className="flex flex-wrap gap-4 divide-x divide-kumo-hairline">
+        <ChartLegend.LargeItem
+          name="Requests"
+          color={ChartPalette.semantic("Neutral", isDarkMode)}
+          value="1,234"
+          unit="req/s"
+          inactive
+        />
+        <ChartLegend.LargeItem
+          name="Storage"
+          color={ChartPalette.semantic("Attention", isDarkMode)}
+          value="56"
+          unit="GB"
+          inactive
+        />
+        <ChartLegend.LargeItem
+          name="Warnings"
+          color={ChartPalette.semantic("Warning", isDarkMode)}
+          value="128"
+          inactive
+        />
+      </div>
+
+      <h3 className="mt-12 text-sm font-medium">Loading state</h3>
+
+      <div className="flex flex-wrap gap-4 divide-x divide-kumo-hairline">
+        <ChartLegend.LargeItem loading />
+      </div>
+    </div>
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      type="bar"
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Count"
+      tooltipValueFormat={(r) => r.toFixed(2)}
+    />
+```
+
+```tsx
+<div className="flex w-full flex-1 flex-col">
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        data={[]}
+        loading
+      />
+    </div>
+```
+
+```tsx
+<div className="flex w-full flex-1 flex-col">
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        type="bar"
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        data={[]}
+        loading
+      />
+    </div>
+```
+
+```tsx
+<div className="flex w-full flex-1 flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-wrap gap-4">
+          {data.map((series) => (
+            <ChartLegend.SmallItem
+              loading={loading}
+              key={series.name}
+              name={series.name}
+              color={series.color}
+              value={Math.round(series.data.at(-1)?.[1] ?? 0).toLocaleString()}
+            />
+          ))}
+        </div>
+        <Switch
+          label="Loading"
+          checked={loading}
+          onCheckedChange={setLoading}
+        />
+      </div>
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        data={loading ? [] : data}
+        loading={loading}
+      />
+    </div>
+```
+
+```tsx
+<LayerCard>
+      <LayerCard.Secondary>Read latency</LayerCard.Secondary>
+      <LayerCard.Primary>
+        <div className="mb-2 flex gap-4 divide-x divide-kumo-hairline px-2">
+          <ChartLegend.LargeItem
+            name="P99"
+            color={ChartPalette.semantic("Attention", isDarkMode)}
+            value="124"
+            unit="ms"
+          />
+          <ChartLegend.LargeItem
+            name="P95"
+            color={ChartPalette.semantic("Warning", isDarkMode)}
+            value="76"
+            unit="ms"
+          />
+          <ChartLegend.LargeItem
+            name="P75"
+            color={ChartPalette.semantic("Neutral", isDarkMode)}
+            value="32"
+            unit="ms"
+          />
+          <ChartLegend.LargeItem
+            name="P50"
+            color={ChartPalette.semantic("Neutral", isDarkMode)}
+            value="10"
+            unit="ms"
+          />
+        </div>
+        <TimeseriesChart
+          xAxisName="Time (UTC)"
+          echarts={echarts}
+          isDarkMode={isDarkMode}
+          data={data}
+          height={300}
+        />
+      </LayerCard.Primary>
+    </LayerCard>
+```
+
+```tsx
+<LayerCard>
+      <LayerCard.Secondary>Read latency</LayerCard.Secondary>
+      <LayerCard.Primary>
+        <div className="mb-2 flex divide-x divide-kumo-line px-2">
+          {series.map((s) => (
+            <ChartLegend.LargeItem
+              key={s.name}
+              name={s.name}
+              color={s.color}
+              value={s.value}
+              unit={s.unit}
+              inactive={hoveredSeries !== null && hoveredSeries !== s.name}
+              onPointerEnter={() => {
+                setHoveredSeries(s.name);
+                chartRef.current?.dispatchAction({
+                  type: "highlight",
+                  seriesName: s.name,
+                });
+              }}
+              onPointerLeave={() => {
+                setHoveredSeries(null);
+                chartRef.current?.dispatchAction({
+                  type: "downplay",
+                  seriesName: s.name,
+                });
+              }}
+              className="not-first:pl-4"
+            />
+          ))}
+        </div>
+        <TimeseriesChart
+          ref={chartRef}
+          xAxisName="Time (UTC)"
+          echarts={echarts}
+          isDarkMode={isDarkMode}
+          data={data}
+          height={300}
+        />
+      </LayerCard.Primary>
+    </LayerCard>
+```
+
+```tsx
+<LayerCard>
+      <LayerCard.Secondary>Read latency</LayerCard.Secondary>
+      <LayerCard.Primary>
+        <div className="mb-2 flex divide-x divide-kumo-line px-2">
+          {series.map((s) => (
+            <ChartLegend.LargeItem
+              key={s.name}
+              name={s.name}
+              color={s.color}
+              value={s.value}
+              unit={s.unit}
+              inactive={hiddenSeries[s.name] ?? false}
+              onClick={() => handleClick(s.name)}
+              className="not-first:pl-4"
+            />
+          ))}
+        </div>
+        <TimeseriesChart
+          ref={chartRef}
+          xAxisName="Time (UTC)"
+          echarts={echarts}
+          isDarkMode={isDarkMode}
+          data={data}
+          height={300}
+          enableLegendSelection
+        />
+      </LayerCard.Primary>
+    </LayerCard>
+```
+
+```tsx
+<div className="flex w-full flex-col gap-4">
+      <Select
+        label="Tooltip follow cursor"
+        value={selected}
+        onValueChange={(v) => {
+          if (v) setSelected(v);
+        }}
+        renderValue={(v) => v.label}
       >
-        Cloudflare Docs
-      </LinkButton>
+        {FOLLOW_CURSOR_OPTIONS.map((opt) => (
+          <Select.Option key={opt.value} value={opt}>
+            {opt.label}
+          </Select.Option>
+        ))}
+      </Select>
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        data={data}
+        xAxisName="Time (UTC)"
+        yAxisName="Latency (ms)"
+        tooltipFollowCursor={selected.value}
+      />
+    </div>
+```
+
+```tsx
+<div
+      ref={boundaryRef}
+      className="w-full overflow-auto rounded-lg border border-kumo-line"
+      style={{ height: 300 }}
+    >
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        data={data}
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        height={280}
+        tooltipBoundary={boundary ?? undefined}
+      />
     </div>
 ```
 
 
-## Checkbox
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Checkbox component
+### Checkbox
 
-**Props**
+Checkbox component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | default | `default`, `error` | Visual variant: "default" or "error" for validation failures (visual only, no error text) |
-| `label` | ReactNode | No | - | - | Label content for the checkbox (enables built-in Field wrapper) - can be a string or any React node |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content to display next to the label via an info icon |
-| `controlFirst` | boolean | No | - | - | When true (default), checkbox appears before label. When false, label appears before checkbox. |
-| `checked` | boolean | No | - | - | Whether the checkbox is checked (controlled) |
-| `indeterminate` | boolean | No | - | - | Whether the checkbox is in indeterminate state |
-| `disabled` | boolean | No | - | - | Whether the checkbox is disabled |
-| `name` | string | No | - | - | Name for form submission |
-| `required` | boolean | No | - | - | Whether the field is required |
-| `className` | string | No | - | - | Additional class name |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Checkbox } from "@cloudflare/kumo";`
 
-### Checkbox.Item
+**Category:** Input
 
-- Description: Item sub-component
+**Props:**
 
-Props:
+- `variant`: enum [default: default]
+  - `"default"`: Default checkbox appearance
+  - `"error"`: Error state for validation failures
 
-- None
+  **State Classes:**
+  - `"default"`:
+    - `focus`: `[&:focus-within>span]:ring-kumo-focus`
+    - `hover`: `[&:hover>span]:ring-kumo-hairline`
+- `label`: ReactNode
+  Label content for the checkbox (enables built-in Field wrapper) - can be a string or any React node
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label via an info icon
+- `controlFirst`: boolean
+  When true (default), checkbox appears before label. When false, label appears before checkbox.
+- `checked`: boolean
+  Whether the checkbox is checked (controlled)
+- `indeterminate`: boolean
+  Whether the checkbox is in indeterminate state
+- `disabled`: boolean
+  Whether the checkbox is disabled
+- `name`: string
+  Name for form submission
+- `required`: boolean
+  Whether the field is required
+- `className`: string
+  Additional class name
 
-### Checkbox.Group
-
-- Description: Group sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `legend` | string | No | - | - | - |
-| `children` | ReactNode | Yes | - | - | - |
-| `error` | string | No | - | - | - |
-| `description` | ReactNode | No | - | - | - |
-| `value` | string[] | No | - | - | - |
-| `allValues` | string[] | No | - | - | - |
-| `disabled` | boolean | No | - | - | - |
-| `controlFirst` | boolean | No | - | - | - |
-| `className` | string | No | - | - | - |
-
-### Checkbox.Legend
-
-- Description: Legend sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | Yes | - | - | - |
-| `className` | string | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-contrast`, `ring-kumo-brand`, `ring-kumo-contrast`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-hairline`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-inverse`, `text-kumo-subtle`
 
-**Styling**
+**Styling:**
 
-```json
-{
-  "dimensions": "h-4 w-4",
-  "borderRadius": "rounded-sm",
-  "baseTokens": [
-    "bg-kumo-base",
-    "ring-kumo-line"
-  ],
-  "states": {
-    "checked": [
-      "bg-kumo-contrast",
-      "text-kumo-inverse"
-    ],
-    "indeterminate": [
-      "bg-kumo-contrast",
-      "text-kumo-inverse"
-    ],
-    "error": [
-      "ring-kumo-danger"
-    ],
-    "hover": [
-      "ring-kumo-hairline"
-    ],
-    "focus": [
-      "ring-kumo-hairline"
-    ],
-    "disabled": [
-      "opacity-50",
-      "cursor-not-allowed"
-    ]
-  },
-  "icons": [
-    {
-      "name": "ph-check",
-      "state": "checked",
-      "size": 12
-    },
-    {
-      "name": "ph-minus",
-      "state": "indeterminate",
-      "size": 12
-    }
-  ]
-}
-```
+- **Dimensions:** `h-4 w-4`
+- **Border Radius:** `rounded-sm`
+- **Base Tokens:** `bg-kumo-base`, `ring-kumo-line`
+- **States:**
+  - `checked`: `bg-kumo-contrast`, `text-kumo-inverse`
+  - `indeterminate`: `bg-kumo-contrast`, `text-kumo-inverse`
+  - `error`: `ring-kumo-danger`
+  - `hover`: `ring-kumo-hairline`
+  - `focus`: `ring-kumo-hairline`
+  - `disabled`: `opacity-50`, `cursor-not-allowed`
+- **Icons:**
+  - `ph-check` (checked) size 12
+  - `ph-minus` (indeterminate) size 12
+
+**Sub-Components:**
+
+This is a compound component. Use these sub-components:
+
+#### Checkbox.Item
+
+Item sub-component
+
+#### Checkbox.Group
+
+Group sub-component
+
+Props:
+- `legend`: string - Legend text for the group. For more control over legend styling, omit this prop and use `<Checkbox.Legend>` as a child instead.
+- `children`: ReactNode (required) - Child Checkbox.Item components (and optionally a Checkbox.Legend)
+- `error`: string - Error message for the group (only appears in groups, not single checkboxes)
+- `description`: ReactNode - Helper text for the group
+- `value`: string[] - Values of checkboxes that should be checked (controlled)
+- `allValues`: string[] - All possible checkbox values (required for parent checkbox pattern)
+- `disabled`: boolean - Whether all checkboxes in the group are disabled
+- `controlFirst`: boolean - When true (default), checkbox appears before label. When false, label appears before checkbox.
+- `className`: string - Additional CSS classes
+
+#### Checkbox.Legend
+
+Legend sub-component
+
+Props:
+- `children`: ReactNode (required) - Legend content
+- `className`: string - Additional CSS classes (e.g. "sr-only" to visually hide the legend)
 
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Checkbox
@@ -1127,24 +1462,6 @@ Example 1:
     />
 ```
 
-Example 2:
-
-```tsx
-<Checkbox
-      label="Enable notifications"
-      checked={checked}
-      onCheckedChange={setChecked}
-    />
-```
-
-Example 3:
-
-```tsx
-<Checkbox label="I agree" checked={checked} onCheckedChange={setChecked} />
-```
-
-Example 4:
-
 ```tsx
 <Checkbox
       label="Select all"
@@ -1152,8 +1469,6 @@ Example 4:
       onCheckedChange={setIndeterminate}
     />
 ```
-
-Example 5:
 
 ```tsx
 <Checkbox
@@ -1164,19 +1479,13 @@ Example 5:
     />
 ```
 
-Example 6:
-
 ```tsx
 <Checkbox label="Disabled option" disabled />
 ```
 
-Example 7:
-
 ```tsx
 <Checkbox label="Invalid option" variant="error" />
 ```
-
-Example 8:
 
 ```tsx
 <Checkbox.Group
@@ -1191,8 +1500,6 @@ Example 8:
     </Checkbox.Group>
 ```
 
-Example 9:
-
 ```tsx
 <Checkbox.Group value={preferences} onValueChange={setPreferences}>
       <Checkbox.Legend className="sr-only">
@@ -1203,21 +1510,6 @@ Example 9:
       <Checkbox.Item value="push" label="Push notifications" />
     </Checkbox.Group>
 ```
-
-Example 10:
-
-```tsx
-<Checkbox.Group value={preferences} onValueChange={setPreferences}>
-      <Checkbox.Legend className="text-sm font-normal text-kumo-subtle">
-        Notification preferences
-      </Checkbox.Legend>
-      <Checkbox.Item value="email" label="Email notifications" />
-      <Checkbox.Item value="sms" label="SMS notifications" />
-      <Checkbox.Item value="push" label="Push notifications" />
-    </Checkbox.Group>
-```
-
-Example 11:
 
 ```tsx
 <Checkbox.Group
@@ -1232,133 +1524,160 @@ Example 11:
 ```
 
 
-## ClipboardText
+---
 
-- Type: component
-- Category: Action
-- Import path: `@cloudflare/kumo`
-- Description: Read-only text field with a one-click copy-to-clipboard button.
+### ChoroplethMap
 
-**Props**
+ChoroplethMap component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `size` | enum | No | lg | `sm`, `base`, `lg` | Size of the clipboard text field. - `"sm"` - Small clipboard text for compact UIs - `"base"` - Default clipboard text size - `"lg"` - Large clipboard text for prominent display |
-| `text` | string | Yes | - | - | The text to display and copy to clipboard. |
-| `textToCopy` | string | No | - | - | If provided, this text will be copied to clipboard instead of the `text` prop. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `tooltip` | object | No | - | - | Tooltip config. Shows tooltip on hover, anchored toast on click. |
-| `labels` | object | No | - | - | Accessible labels for i18n. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { ChoroplethMap } from "@cloudflare/kumo";`
 
-`bg-kumo-base`, `border-kumo-line`, `outline-kumo-fill`, `ring-kumo-brand`, `ring-kumo-focus`, `text-kumo-default`
+**Category:** Data Visualization
 
-**Styling**
+**Props:**
 
-```json
-{
-  "baseTokens": [
-    "bg-kumo-base",
-    "text-kumo-default",
-    "ring-kumo-line",
-    "border-kumo-fill"
-  ],
-  "states": {
-    "input": [
-      "bg-kumo-control",
-      "text-kumo-default",
-      "ring-kumo-line"
-    ],
-    "text": [
-      "bg-kumo-base",
-      "font-mono"
-    ],
-    "button": [
-      "border-kumo-fill"
-    ]
-  },
-  "inputStyles": {
-    "base": "bg-kumo-control text-kumo-default ring ring-kumo-line",
-    "sizes": {
-      "xs": "h-5 gap-1 rounded-sm px-1.5 text-xs",
-      "sm": "h-6.5 gap-1 rounded-md px-2 text-xs",
-      "base": "h-9 gap-1.5 rounded-lg px-3 text-base",
-      "lg": "h-10 gap-2 rounded-lg px-4 text-base"
-    }
-  },
-  "sizeVariants": {
-    "sm": {
-      "height": 26,
-      "classes": "text-xs",
-      "buttonSize": "sm",
-      "dimensions": {
-        "paddingX": 8,
-        "gap": 1,
-        "borderRadius": 6,
-        "fontSize": 12
-      }
-    },
-    "base": {
-      "height": 36,
-      "classes": "text-sm",
-      "buttonSize": "base",
-      "dimensions": {
-        "paddingX": 12,
-        "gap": 6,
-        "borderRadius": 8,
-        "fontSize": 14
-      }
-    },
-    "lg": {
-      "height": 40,
-      "classes": "text-sm",
-      "buttonSize": "lg",
-      "dimensions": {
-        "paddingX": 16,
-        "gap": 8,
-        "borderRadius": 8,
-        "fontSize": 14
-      }
-    }
-  },
-  "icons": [
-    {
-      "name": "ph-clipboard",
-      "state": "default",
-      "size": 16
-    },
-    {
-      "name": "ph-check",
-      "state": "copied",
-      "size": 16
-    }
-  ]
-}
+- `echarts`: typeof echarts (required)
+  The ECharts core instance imported by the consumer (passed in for tree-shaking). Requires `MapChart`, `VisualMapComponent`, `TooltipComponent`, and a renderer registered via `echarts.use([...])`.
+- `geoJson`: MapGeoJson (required)
+  GeoJSON `FeatureCollection` whose regions are shaded by value.
+- `mapName`: string
+  Optional stable ECharts map registry name. Set this when the same GeoJSON is parsed into new object instances across mounts and should reuse one global ECharts registration.
+- `data`: T[] (required)
+  Raw data rows. The region key and value are read via the accessors below.
+- `name`: MapAccessor<T, string> (required)
+  Region-key accessor (key of `T` or `(row) => string`). Each row is joined to a GeoJSON feature whose `nameProperty` equals this value.
+- `value`: MapAccessor<T, number> (required)
+  Value accessor — drives the region's fill colour.
+- `nameProperty`: string
+  GeoJSON feature property to join on. Default: `"name"`. Real-world data is often more reliably matched on an ISO-code property (e.g. `"iso_a2"`).
+- `colorRange`: string[]
+  Sequential colour ramp (low → high). Defaults to the Kumo choropleth blues, tuned to stay distinct from the no-data fill. Distributed across the continuous gradient.
+- `noDataColor`: string
+  Fill for regions with no matching data row. Defaults to the neutral land grey.
+- `showLegend`: boolean
+  Show the visualMap colour legend. Default: `false`.
+- `showTooltip`: boolean
+  Show the tooltip. Default: `true`.
+- `valueFormat`: (value: number) => string
+  Format the value for the default tooltip. Default: `toLocaleString()`.
+- `tooltipFormatter`: (row: T) => string
+  Override the tooltip content for a row. Returns an HTML string rendered by ECharts' own tooltip. USE WITH CAUTION: the return value is injected as HTML. Escape any user-provided strings to avoid XSS.
+- `center`: [number, number]
+  Map center as `[longitude, latitude]`. Defaults to auto-fit.
+- `zoom`: number
+  Zoom level — multiplies the auto-fit scale. Default: `1.25`.
+- `roam`: boolean
+  Enable drag-to-pan and scroll-to-zoom. Default: `false`.
+- `projection`: MapProjection | null
+  Geographic projection. Defaults to a latitude-clamped Mercator (flat 2D web-map look). Pass another d3-geo projection to override, or `null` for ECharts' raw equirectangular plotting. Use a stable reference (module-level or memoised): a new object each render rebuilds the view and resets a roamed/zoomed map.
+- `aspectRatio`: number | string
+  Container aspect ratio as `width / height` (e.g. `1.7` or `"16 / 9"`). The height derives from the rendered width so the map fills the frame with no letterboxing. Defaults to the projected aspect of the displayed window, so the regions fit edge-to-edge. Pass `height` to fix a pixel height instead.
+- `height`: number
+  Fixed chart height in pixels. Overrides `aspectRatio` when set. Leave unset to size by aspect ratio (the default) so the map fills the container.
+- `className`: string
+- `isDarkMode`: boolean
+
+**Examples:**
+
+```tsx
+<ChoroplethMap<CountryTraffic>
+      echarts={echarts}
+      geoJson={geoJson}
+      data={countries}
+      name="country"
+      value="requests"
+      valueFormat={fmt}
+      isDarkMode={isDarkMode}
+    />
 ```
 
 
-**Examples**
+---
 
-Example 1:
+### ClipboardText
+
+Read-only text field with a one-click copy-to-clipboard button.
+
+**Type:** component
+
+**Import:** `import { ClipboardText } from "@cloudflare/kumo";`
+
+**Category:** Action
+
+**Props:**
+
+- `size`: enum [default: lg]
+  - `"sm"`: Small clipboard text for compact UIs
+  - `"base"`: Default clipboard text size
+  - `"lg"`: Large clipboard text for prominent display
+- `text`: string (required)
+  The text to display and copy to clipboard.
+- `textToCopy`: string
+  If provided, this text will be copied to clipboard instead of the `text` prop.
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `tooltip`: object
+  Tooltip config. Shows tooltip on hover, anchored toast on click.
+- `labels`: object
+  Accessible labels for i18n.
+
+**Colors (kumo tokens used):**
+
+`bg-kumo-base`, `border-kumo-line`, `outline-kumo-fill`, `ring-kumo-brand`, `ring-kumo-focus`, `text-kumo-default`
+
+**Styling:**
+
+- **Base Tokens:** `bg-kumo-base`, `text-kumo-default`, `ring-kumo-line`, `border-kumo-fill`
+- **States:**
+  - `input`: `bg-kumo-control`, `text-kumo-default`, `ring-kumo-line`
+  - `text`: `bg-kumo-base`, `font-mono`
+  - `button`: `border-kumo-fill`
+- **Icons:**
+  - `ph-clipboard` (default) size 16
+  - `ph-check` (copied) size 16
+- **Input Styles:**
+  - Base: `bg-kumo-control text-kumo-default ring ring-kumo-line`
+  - Sizes:
+    - `xs`: `h-5 gap-1 rounded-sm px-1.5 text-xs`
+    - `sm`: `h-6.5 gap-1 rounded-md px-2 text-xs`
+    - `base`: `h-9 gap-1.5 rounded-lg px-3 text-base`
+    - `lg`: `h-10 gap-2 rounded-lg px-4 text-base`
+- **Size Variants:**
+  - `sm`:
+    - Height: 26px
+    - Classes: `text-xs`
+    - Button Size: `sm`
+    - Dimensions:
+      - paddingX: 8
+      - gap: 1
+      - borderRadius: 6
+      - fontSize: 12
+  - `base`:
+    - Height: 36px
+    - Classes: `text-sm`
+    - Button Size: `base`
+    - Dimensions:
+      - paddingX: 12
+      - gap: 6
+      - borderRadius: 8
+      - fontSize: 14
+  - `lg`:
+    - Height: 40px
+    - Classes: `text-sm`
+    - Button Size: `lg`
+    - Dimensions:
+      - paddingX: 16
+      - gap: 8
+      - borderRadius: 8
+      - fontSize: 14
+
+**Examples:**
 
 ```tsx
 <ClipboardText text="0c239dd2" />
 ```
-
-Example 2:
-
-```tsx
-<ClipboardText text="abc123" />
-```
-
-Example 3:
-
-```tsx
-<ClipboardText text="sk_live_51H8..." />
-```
-
-Example 4:
 
 ```tsx
 <ClipboardText
@@ -1366,14 +1685,6 @@ Example 4:
       textToCopy="sk_live_51H8_abc123"
     />
 ```
-
-Example 5:
-
-```tsx
-<ClipboardText text="https://example.com/very/long/url/path" />
-```
-
-Example 6:
 
 ```tsx
 <ClipboardText
@@ -1383,291 +1694,290 @@ Example 6:
 ```
 
 
-## CloudflareLogo
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Cloudflare logo component.
+### CloudflareLogo
 
-**Props**
+Cloudflare logo component.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `height` | number \| string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `media` | string | No | - | - | - |
-| `method` | string | No | - | - | - |
-| `name` | string | No | - | - | - |
-| `target` | string | No | - | - | - |
-| `type` | string | No | - | - | - |
-| `width` | number \| string | No | - | - | - |
-| `accentHeight` | number \| string | No | - | - | - |
-| `accumulate` | enum | No | - | `none`, `sum` | - |
-| `additive` | enum | No | - | `replace`, `sum` | - |
-| `alignmentBaseline` | enum | No | - | `auto`, `baseline`, `before-edge`, `text-before-edge`, `middle`, `central`, `after-edge`, `text-after-edge`, `ideographic`, `alphabetic`, `hanging`, `mathematical`, `inherit` | - |
-| `allowReorder` | enum | No | - | `no`, `yes` | - |
-| `alphabetic` | number \| string | No | - | - | - |
-| `amplitude` | number \| string | No | - | - | - |
-| `arabicForm` | enum | No | - | `initial`, `medial`, `terminal`, `isolated` | - |
-| `ascent` | number \| string | No | - | - | - |
-| `attributeName` | string | No | - | - | - |
-| `attributeType` | string | No | - | - | - |
-| `autoReverse` | Booleanish | No | - | - | - |
-| `azimuth` | number \| string | No | - | - | - |
-| `baseFrequency` | number \| string | No | - | - | - |
-| `baselineShift` | number \| string | No | - | - | - |
-| `baseProfile` | number \| string | No | - | - | - |
-| `bbox` | number \| string | No | - | - | - |
-| `begin` | number \| string | No | - | - | - |
-| `bias` | number \| string | No | - | - | - |
-| `by` | number \| string | No | - | - | - |
-| `calcMode` | number \| string | No | - | - | - |
-| `capHeight` | number \| string | No | - | - | - |
-| `clip` | number \| string | No | - | - | - |
-| `clipPath` | string | No | - | - | - |
-| `clipPathUnits` | number \| string | No | - | - | - |
-| `clipRule` | number \| string | No | - | - | - |
-| `colorInterpolation` | number \| string | No | - | - | - |
-| `colorInterpolationFilters` | enum | No | - | `auto`, `sRGB`, `linearRGB`, `inherit` | - |
-| `colorProfile` | number \| string | No | - | - | - |
-| `colorRendering` | number \| string | No | - | - | - |
-| `contentScriptType` | number \| string | No | - | - | - |
-| `contentStyleType` | number \| string | No | - | - | - |
-| `cursor` | number \| string | No | - | - | - |
-| `cx` | number \| string | No | - | - | - |
-| `cy` | number \| string | No | - | - | - |
-| `d` | string | No | - | - | - |
-| `decelerate` | number \| string | No | - | - | - |
-| `descent` | number \| string | No | - | - | - |
-| `diffuseConstant` | number \| string | No | - | - | - |
-| `direction` | number \| string | No | - | - | - |
-| `display` | number \| string | No | - | - | - |
-| `divisor` | number \| string | No | - | - | - |
-| `dominantBaseline` | enum | No | - | `auto`, `use-script`, `no-change`, `reset-size`, `ideographic`, `alphabetic`, `hanging`, `mathematical`, `central`, `middle`, `text-after-edge`, `text-before-edge`, `inherit` | - |
-| `dur` | number \| string | No | - | - | - |
-| `dx` | number \| string | No | - | - | - |
-| `dy` | number \| string | No | - | - | - |
-| `edgeMode` | number \| string | No | - | - | - |
-| `elevation` | number \| string | No | - | - | - |
-| `enableBackground` | number \| string | No | - | - | - |
-| `end` | number \| string | No | - | - | - |
-| `exponent` | number \| string | No | - | - | - |
-| `externalResourcesRequired` | Booleanish | No | - | - | - |
-| `fill` | string | No | - | - | - |
-| `fillOpacity` | number \| string | No | - | - | - |
-| `fillRule` | enum | No | - | `nonzero`, `evenodd`, `inherit` | - |
-| `filter` | string | No | - | - | - |
-| `filterRes` | number \| string | No | - | - | - |
-| `filterUnits` | number \| string | No | - | - | - |
-| `floodColor` | number \| string | No | - | - | - |
-| `floodOpacity` | number \| string | No | - | - | - |
-| `focusable` | Booleanish \| string | No | - | - | - |
-| `fontFamily` | string | No | - | - | - |
-| `fontSize` | number \| string | No | - | - | - |
-| `fontSizeAdjust` | number \| string | No | - | - | - |
-| `fontStretch` | number \| string | No | - | - | - |
-| `fontStyle` | number \| string | No | - | - | - |
-| `fontVariant` | number \| string | No | - | - | - |
-| `fontWeight` | number \| string | No | - | - | - |
-| `format` | number \| string | No | - | - | - |
-| `fr` | number \| string | No | - | - | - |
-| `from` | number \| string | No | - | - | - |
-| `fx` | number \| string | No | - | - | - |
-| `fy` | number \| string | No | - | - | - |
-| `g1` | number \| string | No | - | - | - |
-| `g2` | number \| string | No | - | - | - |
-| `glyphName` | number \| string | No | - | - | - |
-| `glyphOrientationHorizontal` | number \| string | No | - | - | - |
-| `glyphOrientationVertical` | number \| string | No | - | - | - |
-| `glyphRef` | number \| string | No | - | - | - |
-| `gradientTransform` | string | No | - | - | - |
-| `gradientUnits` | string | No | - | - | - |
-| `hanging` | number \| string | No | - | - | - |
-| `horizAdvX` | number \| string | No | - | - | - |
-| `horizOriginX` | number \| string | No | - | - | - |
-| `href` | string | No | - | - | - |
-| `ideographic` | number \| string | No | - | - | - |
-| `imageRendering` | number \| string | No | - | - | - |
-| `in2` | number \| string | No | - | - | - |
-| `in` | string | No | - | - | - |
-| `intercept` | number \| string | No | - | - | - |
-| `k1` | number \| string | No | - | - | - |
-| `k2` | number \| string | No | - | - | - |
-| `k3` | number \| string | No | - | - | - |
-| `k4` | number \| string | No | - | - | - |
-| `k` | number \| string | No | - | - | - |
-| `kernelMatrix` | number \| string | No | - | - | - |
-| `kernelUnitLength` | number \| string | No | - | - | - |
-| `kerning` | number \| string | No | - | - | - |
-| `keyPoints` | number \| string | No | - | - | - |
-| `keySplines` | number \| string | No | - | - | - |
-| `keyTimes` | number \| string | No | - | - | - |
-| `lengthAdjust` | number \| string | No | - | - | - |
-| `letterSpacing` | number \| string | No | - | - | - |
-| `lightingColor` | number \| string | No | - | - | - |
-| `limitingConeAngle` | number \| string | No | - | - | - |
-| `local` | number \| string | No | - | - | - |
-| `markerEnd` | string | No | - | - | - |
-| `markerHeight` | number \| string | No | - | - | - |
-| `markerMid` | string | No | - | - | - |
-| `markerStart` | string | No | - | - | - |
-| `markerUnits` | number \| string | No | - | - | - |
-| `markerWidth` | number \| string | No | - | - | - |
-| `mask` | string | No | - | - | - |
-| `maskContentUnits` | number \| string | No | - | - | - |
-| `maskUnits` | number \| string | No | - | - | - |
-| `mathematical` | number \| string | No | - | - | - |
-| `mode` | number \| string | No | - | - | - |
-| `numOctaves` | number \| string | No | - | - | - |
-| `offset` | number \| string | No | - | - | - |
-| `opacity` | number \| string | No | - | - | - |
-| `operator` | number \| string | No | - | - | - |
-| `order` | number \| string | No | - | - | - |
-| `orient` | number \| string | No | - | - | - |
-| `orientation` | number \| string | No | - | - | - |
-| `origin` | number \| string | No | - | - | - |
-| `overflow` | number \| string | No | - | - | - |
-| `overlinePosition` | number \| string | No | - | - | - |
-| `overlineThickness` | number \| string | No | - | - | - |
-| `paintOrder` | number \| string | No | - | - | - |
-| `panose1` | number \| string | No | - | - | - |
-| `path` | string | No | - | - | - |
-| `pathLength` | number \| string | No | - | - | - |
-| `patternContentUnits` | string | No | - | - | - |
-| `patternTransform` | number \| string | No | - | - | - |
-| `patternUnits` | string | No | - | - | - |
-| `pointerEvents` | number \| string | No | - | - | - |
-| `points` | string | No | - | - | - |
-| `pointsAtX` | number \| string | No | - | - | - |
-| `pointsAtY` | number \| string | No | - | - | - |
-| `pointsAtZ` | number \| string | No | - | - | - |
-| `preserveAlpha` | Booleanish | No | - | - | - |
-| `preserveAspectRatio` | string | No | - | - | - |
-| `primitiveUnits` | number \| string | No | - | - | - |
-| `r` | number \| string | No | - | - | - |
-| `radius` | number \| string | No | - | - | - |
-| `refX` | number \| string | No | - | - | - |
-| `refY` | number \| string | No | - | - | - |
-| `renderingIntent` | number \| string | No | - | - | - |
-| `repeatCount` | number \| string | No | - | - | - |
-| `repeatDur` | number \| string | No | - | - | - |
-| `requiredExtensions` | number \| string | No | - | - | - |
-| `requiredFeatures` | number \| string | No | - | - | - |
-| `restart` | number \| string | No | - | - | - |
-| `result` | string | No | - | - | - |
-| `rotate` | number \| string | No | - | - | - |
-| `rx` | number \| string | No | - | - | - |
-| `ry` | number \| string | No | - | - | - |
-| `scale` | number \| string | No | - | - | - |
-| `seed` | number \| string | No | - | - | - |
-| `shapeRendering` | number \| string | No | - | - | - |
-| `slope` | number \| string | No | - | - | - |
-| `spacing` | number \| string | No | - | - | - |
-| `specularConstant` | number \| string | No | - | - | - |
-| `specularExponent` | number \| string | No | - | - | - |
-| `speed` | number \| string | No | - | - | - |
-| `spreadMethod` | string | No | - | - | - |
-| `startOffset` | number \| string | No | - | - | - |
-| `stdDeviation` | number \| string | No | - | - | - |
-| `stemh` | number \| string | No | - | - | - |
-| `stemv` | number \| string | No | - | - | - |
-| `stitchTiles` | number \| string | No | - | - | - |
-| `stopColor` | string | No | - | - | - |
-| `stopOpacity` | number \| string | No | - | - | - |
-| `strikethroughPosition` | number \| string | No | - | - | - |
-| `strikethroughThickness` | number \| string | No | - | - | - |
-| `string` | number \| string | No | - | - | - |
-| `stroke` | string | No | - | - | - |
-| `strokeDasharray` | string \| number | No | - | - | - |
-| `strokeDashoffset` | string \| number | No | - | - | - |
-| `strokeLinecap` | enum | No | - | `butt`, `round`, `square`, `inherit` | - |
-| `strokeLinejoin` | enum | No | - | `miter`, `round`, `bevel`, `inherit` | - |
-| `strokeMiterlimit` | number \| string | No | - | - | - |
-| `strokeOpacity` | number \| string | No | - | - | - |
-| `strokeWidth` | number \| string | No | - | - | - |
-| `surfaceScale` | number \| string | No | - | - | - |
-| `systemLanguage` | number \| string | No | - | - | - |
-| `tableValues` | number \| string | No | - | - | - |
-| `targetX` | number \| string | No | - | - | - |
-| `targetY` | number \| string | No | - | - | - |
-| `textAnchor` | enum | No | - | `start`, `middle`, `end`, `inherit` | - |
-| `textDecoration` | number \| string | No | - | - | - |
-| `textLength` | number \| string | No | - | - | - |
-| `textRendering` | number \| string | No | - | - | - |
-| `to` | number \| string | No | - | - | - |
-| `transform` | string | No | - | - | - |
-| `u1` | number \| string | No | - | - | - |
-| `u2` | number \| string | No | - | - | - |
-| `underlinePosition` | number \| string | No | - | - | - |
-| `underlineThickness` | number \| string | No | - | - | - |
-| `unicode` | number \| string | No | - | - | - |
-| `unicodeBidi` | number \| string | No | - | - | - |
-| `unicodeRange` | number \| string | No | - | - | - |
-| `unitsPerEm` | number \| string | No | - | - | - |
-| `vAlphabetic` | number \| string | No | - | - | - |
-| `values` | string | No | - | - | - |
-| `vectorEffect` | number \| string | No | - | - | - |
-| `version` | string | No | - | - | - |
-| `vertAdvY` | number \| string | No | - | - | - |
-| `vertOriginX` | number \| string | No | - | - | - |
-| `vertOriginY` | number \| string | No | - | - | - |
-| `vHanging` | number \| string | No | - | - | - |
-| `vIdeographic` | number \| string | No | - | - | - |
-| `viewBox` | string | No | - | - | - |
-| `viewTarget` | number \| string | No | - | - | - |
-| `visibility` | number \| string | No | - | - | - |
-| `vMathematical` | number \| string | No | - | - | - |
-| `widths` | number \| string | No | - | - | - |
-| `wordSpacing` | number \| string | No | - | - | - |
-| `writingMode` | number \| string | No | - | - | - |
-| `x1` | number \| string | No | - | - | - |
-| `x2` | number \| string | No | - | - | - |
-| `x` | number \| string | No | - | - | - |
-| `xChannelSelector` | string | No | - | - | - |
-| `xHeight` | number \| string | No | - | - | - |
-| `xlinkActuate` | string | No | - | - | - |
-| `xlinkArcrole` | string | No | - | - | - |
-| `xlinkHref` | string | No | - | - | - |
-| `xlinkRole` | string | No | - | - | - |
-| `xlinkShow` | string | No | - | - | - |
-| `xlinkTitle` | string | No | - | - | - |
-| `xlinkType` | string | No | - | - | - |
-| `xmlBase` | string | No | - | - | - |
-| `xmlLang` | string | No | - | - | - |
-| `xmlns` | string | No | - | - | - |
-| `xmlnsXlink` | string | No | - | - | - |
-| `xmlSpace` | string | No | - | - | - |
-| `y1` | number \| string | No | - | - | - |
-| `y2` | number \| string | No | - | - | - |
-| `y` | number \| string | No | - | - | - |
-| `yChannelSelector` | string | No | - | - | - |
-| `z` | number \| string | No | - | - | - |
-| `zoomAndPan` | string | No | - | - | - |
-| `variant` | enum | No | full | `glyph`, `full` | Logo variant - `glyph`: Cloud icon only - `full`: Cloud icon with "CLOUDFLARE" wordmark below |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { CloudflareLogo } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `children`: ReactNode
+- `className`: string
+- `height`: number | string
+- `id`: string
+- `lang`: string
+- `media`: string
+- `method`: string
+- `name`: string
+- `target`: string
+- `type`: string
+- `width`: number | string
+- `accentHeight`: number | string
+- `accumulate`: enum
+- `additive`: enum
+- `alignmentBaseline`: enum
+- `allowReorder`: enum
+- `alphabetic`: number | string
+- `amplitude`: number | string
+- `arabicForm`: enum
+- `ascent`: number | string
+- `attributeName`: string
+- `attributeType`: string
+- `autoReverse`: Booleanish
+- `azimuth`: number | string
+- `baseFrequency`: number | string
+- `baselineShift`: number | string
+- `baseProfile`: number | string
+- `bbox`: number | string
+- `begin`: number | string
+- `bias`: number | string
+- `by`: number | string
+- `calcMode`: number | string
+- `capHeight`: number | string
+- `clip`: number | string
+- `clipPath`: string
+- `clipPathUnits`: number | string
+- `clipRule`: number | string
+- `colorInterpolation`: number | string
+- `colorInterpolationFilters`: enum
+- `colorProfile`: number | string
+- `colorRendering`: number | string
+- `contentScriptType`: number | string
+- `contentStyleType`: number | string
+- `cursor`: number | string
+- `cx`: number | string
+- `cy`: number | string
+- `d`: string
+- `decelerate`: number | string
+- `descent`: number | string
+- `diffuseConstant`: number | string
+- `direction`: number | string
+- `display`: number | string
+- `divisor`: number | string
+- `dominantBaseline`: enum
+- `dur`: number | string
+- `dx`: number | string
+- `dy`: number | string
+- `edgeMode`: number | string
+- `elevation`: number | string
+- `enableBackground`: number | string
+- `end`: number | string
+- `exponent`: number | string
+- `externalResourcesRequired`: Booleanish
+- `fill`: string
+- `fillOpacity`: number | string
+- `fillRule`: enum
+- `filter`: string
+- `filterRes`: number | string
+- `filterUnits`: number | string
+- `floodColor`: number | string
+- `floodOpacity`: number | string
+- `focusable`: Booleanish | string
+- `fontFamily`: string
+- `fontSize`: number | string
+- `fontSizeAdjust`: number | string
+- `fontStretch`: number | string
+- `fontStyle`: number | string
+- `fontVariant`: number | string
+- `fontWeight`: number | string
+- `format`: number | string
+- `fr`: number | string
+- `from`: number | string
+- `fx`: number | string
+- `fy`: number | string
+- `g1`: number | string
+- `g2`: number | string
+- `glyphName`: number | string
+- `glyphOrientationHorizontal`: number | string
+- `glyphOrientationVertical`: number | string
+- `glyphRef`: number | string
+- `gradientTransform`: string
+- `gradientUnits`: string
+- `hanging`: number | string
+- `horizAdvX`: number | string
+- `horizOriginX`: number | string
+- `href`: string
+- `ideographic`: number | string
+- `imageRendering`: number | string
+- `in2`: number | string
+- `in`: string
+- `intercept`: number | string
+- `k1`: number | string
+- `k2`: number | string
+- `k3`: number | string
+- `k4`: number | string
+- `k`: number | string
+- `kernelMatrix`: number | string
+- `kernelUnitLength`: number | string
+- `kerning`: number | string
+- `keyPoints`: number | string
+- `keySplines`: number | string
+- `keyTimes`: number | string
+- `lengthAdjust`: number | string
+- `letterSpacing`: number | string
+- `lightingColor`: number | string
+- `limitingConeAngle`: number | string
+- `local`: number | string
+- `markerEnd`: string
+- `markerHeight`: number | string
+- `markerMid`: string
+- `markerStart`: string
+- `markerUnits`: number | string
+- `markerWidth`: number | string
+- `mask`: string
+- `maskContentUnits`: number | string
+- `maskUnits`: number | string
+- `mathematical`: number | string
+- `mode`: number | string
+- `numOctaves`: number | string
+- `offset`: number | string
+- `opacity`: number | string
+- `operator`: number | string
+- `order`: number | string
+- `orient`: number | string
+- `orientation`: number | string
+- `origin`: number | string
+- `overflow`: number | string
+- `overlinePosition`: number | string
+- `overlineThickness`: number | string
+- `paintOrder`: number | string
+- `panose1`: number | string
+- `path`: string
+- `pathLength`: number | string
+- `patternContentUnits`: string
+- `patternTransform`: number | string
+- `patternUnits`: string
+- `pointerEvents`: number | string
+- `points`: string
+- `pointsAtX`: number | string
+- `pointsAtY`: number | string
+- `pointsAtZ`: number | string
+- `preserveAlpha`: Booleanish
+- `preserveAspectRatio`: string
+- `primitiveUnits`: number | string
+- `r`: number | string
+- `radius`: number | string
+- `refX`: number | string
+- `refY`: number | string
+- `renderingIntent`: number | string
+- `repeatCount`: number | string
+- `repeatDur`: number | string
+- `requiredExtensions`: number | string
+- `requiredFeatures`: number | string
+- `restart`: number | string
+- `result`: string
+- `rotate`: number | string
+- `rx`: number | string
+- `ry`: number | string
+- `scale`: number | string
+- `seed`: number | string
+- `shapeRendering`: number | string
+- `slope`: number | string
+- `spacing`: number | string
+- `specularConstant`: number | string
+- `specularExponent`: number | string
+- `speed`: number | string
+- `spreadMethod`: string
+- `startOffset`: number | string
+- `stdDeviation`: number | string
+- `stemh`: number | string
+- `stemv`: number | string
+- `stitchTiles`: number | string
+- `stopColor`: string
+- `stopOpacity`: number | string
+- `strikethroughPosition`: number | string
+- `strikethroughThickness`: number | string
+- `string`: number | string
+- `stroke`: string
+- `strokeDasharray`: string | number
+- `strokeDashoffset`: string | number
+- `strokeLinecap`: enum
+- `strokeLinejoin`: enum
+- `strokeMiterlimit`: number | string
+- `strokeOpacity`: number | string
+- `strokeWidth`: number | string
+- `surfaceScale`: number | string
+- `systemLanguage`: number | string
+- `tableValues`: number | string
+- `targetX`: number | string
+- `targetY`: number | string
+- `textAnchor`: enum
+- `textDecoration`: number | string
+- `textLength`: number | string
+- `textRendering`: number | string
+- `to`: number | string
+- `transform`: string
+- `u1`: number | string
+- `u2`: number | string
+- `underlinePosition`: number | string
+- `underlineThickness`: number | string
+- `unicode`: number | string
+- `unicodeBidi`: number | string
+- `unicodeRange`: number | string
+- `unitsPerEm`: number | string
+- `vAlphabetic`: number | string
+- `values`: string
+- `vectorEffect`: number | string
+- `version`: string
+- `vertAdvY`: number | string
+- `vertOriginX`: number | string
+- `vertOriginY`: number | string
+- `vHanging`: number | string
+- `vIdeographic`: number | string
+- `viewBox`: string
+- `viewTarget`: number | string
+- `visibility`: number | string
+- `vMathematical`: number | string
+- `widths`: number | string
+- `wordSpacing`: number | string
+- `writingMode`: number | string
+- `x1`: number | string
+- `x2`: number | string
+- `x`: number | string
+- `xChannelSelector`: string
+- `xHeight`: number | string
+- `xlinkActuate`: string
+- `xlinkArcrole`: string
+- `xlinkHref`: string
+- `xlinkRole`: string
+- `xlinkShow`: string
+- `xlinkTitle`: string
+- `xlinkType`: string
+- `xmlBase`: string
+- `xmlLang`: string
+- `xmlns`: string
+- `xmlnsXlink`: string
+- `xmlSpace`: string
+- `y1`: number | string
+- `y2`: number | string
+- `y`: number | string
+- `yChannelSelector`: string
+- `z`: number | string
+- `zoomAndPan`: string
+- `variant`: enum [default: full]
+  - `"glyph"`: Cloud glyph only (logomark)
+  - `"full"`: Full logo with cloud glyph and wordmark stacked
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `ring-kumo-hairline`, `text-kumo-default`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <CloudflareLogo className="w-72" />
 ```
 
-Example 2:
-
 ```tsx
 <CloudflareLogo variant="glyph" className="w-24" />
 ```
-
-Example 3:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-8">
@@ -1681,8 +1991,6 @@ Example 3:
     </div>
 ```
 
-Example 4:
-
 ```tsx
 <div className="flex flex-wrap items-center gap-8">
       <CloudflareLogo variant="glyph" className="w-12" color="color" />
@@ -1695,8 +2003,6 @@ Example 4:
     </div>
 ```
 
-Example 5:
-
 ```tsx
 <div className="flex flex-wrap items-end gap-6">
       <CloudflareLogo className="w-20" />
@@ -1704,8 +2010,6 @@ Example 5:
       <CloudflareLogo className="w-44" />
     </div>
 ```
-
-Example 6:
 
 ```tsx
 <div className="flex items-center gap-4">
@@ -1776,13 +2080,9 @@ Example 6:
     </div>
 ```
 
-Example 7:
-
 ```tsx
 <PoweredByCloudflare />
 ```
-
-Example 8:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-4">
@@ -1794,8 +2094,6 @@ Example 8:
     </div>
 ```
 
-Example 9:
-
 ```tsx
 <footer className="flex w-full items-center justify-between rounded-lg border border-kumo-hairline bg-kumo-elevated px-6 py-4">
       <span className="text-sm text-kumo-subtle">
@@ -1806,141 +2104,121 @@ Example 9:
 ```
 
 
-## Code
+---
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Code component
+### Code
 
-**Props**
+Code component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `lang` | enum | No | ts | `ts`, `tsx`, `jsonc`, `bash`, `css` | Language hint for the code content. - `"ts"` - TypeScript code - `"tsx"` - TypeScript JSX code - `"jsonc"` - JSON with comments - `"bash"` - Shell/Bash commands - `"css"` - CSS styles |
-| `code` | string | Yes | - | - | The code string to display. |
-| `values` | Record<string, { value: string; highlight?: boolean }> | No | - | - | Template values for `{{key}}` interpolation. Values with `highlight: true` are visually emphasized. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Code } from "@cloudflare/kumo";`
 
-### Code.Block
+**Category:** Display
 
-- Description: Block sub-component
+**Props:**
 
-Props:
+- `lang`: enum [default: ts]
+  - `"ts"`: TypeScript code
+  - `"tsx"`: TypeScript JSX code
+  - `"jsonc"`: JSON with comments
+  - `"bash"`: Shell/Bash commands
+  - `"css"`: CSS styles
+- `code`: string (required)
+  The code string to display.
+- `values`: Record<string, { value: string; highlight?: boolean }>
+  Template values for `{{key}}` interpolation. Values with `highlight: true` are visually emphasized.
+- `className`: string
+  Additional CSS classes merged via `cn()`.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `code` | string | Yes | - | - | - |
-| `lang` | CodeLang | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `border-kumo-fill`, `text-kumo-subtle`
 
-**Styling**
+**Styling:**
 
-```json
-{
-  "baseTokens": [
-    "text-kumo-subtle"
-  ],
-  "typography": {
-    "fontFamily": "font-mono",
-    "fontSize": "text-sm",
-    "lineHeight": "leading-[20px]"
-  },
-  "dimensions": {
-    "margin": "m-0",
-    "padding": "p-0",
-    "width": "w-auto"
-  },
-  "appearance": {
-    "borderRadius": "rounded-none",
-    "border": "border-none",
-    "background": "bg-transparent"
-  }
-}
-```
+- **Dimensions:** `[object Object]`
+- **Base Tokens:** `text-kumo-subtle`
 
+**Sub-Components:**
 
+This is a compound component. Use these sub-components:
 
-## Collapsible
+#### Code.Block
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Collapsible - a composable disclosure component for showing/hiding content.  Built on Base UI's Collapsible with full composition support.  ## Basic Usage  ```tsx const [open, setOpen] = useState(false);  <Collapsible.Root open={open} onOpenChange={setOpen}> <Collapsible.Trigger render={<Button variant="ghost" />}> Show details </Collapsible.Trigger> <Collapsible.Panel className="mt-2"> <Text>Hidden content revealed when expanded.</Text> </Collapsible.Panel> </Collapsible.Root> ```  ## With Default Styling  Use `DefaultTrigger` and `DefaultPanel` for the classic Kumo style:  ```tsx <Collapsible.Root> <Collapsible.DefaultTrigger>Show details</Collapsible.DefaultTrigger> <Collapsible.DefaultPanel> <Text>Content with border-left accent</Text> </Collapsible.DefaultPanel> </Collapsible.Root> ```  ## Controlled Accordion Pattern  ```tsx const [activeIndex, setActiveIndex] = useState<number | null>(null);  {items.map((item, i) => ( <Collapsible.Root key={i} open={activeIndex === i} onOpenChange={(open) => setActiveIndex(open ? i : null)} > <Collapsible.DefaultTrigger>{item.title}</Collapsible.DefaultTrigger> <Collapsible.DefaultPanel>{item.content}</Collapsible.DefaultPanel> </Collapsible.Root> ))} ```
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes |
-| `onOpenChange` | (open: boolean) => void | No | - | - | Callback when collapsed state changes |
-
-**Subcomponents**
-
-### Collapsible.Root
-
-- Description: Root sub-component
+Block sub-component
 
 Props:
+- `code`: string (required) - The code string to display.
+- `lang`: CodeLang - Language hint for the code content.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
 
-### Collapsible.Trigger
+---
 
-- Description: Trigger sub-component
+### Collapsible
 
-Props:
+Collapsible — a composable disclosure component for showing/hiding content.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
+**Type:** component
 
-### Collapsible.Panel
+**Import:** `import { Collapsible } from "@cloudflare/kumo";`
 
-- Description: Panel sub-component
+**Category:** Display
 
-Props:
+**Props:**
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
+- `className`: string
+  Additional CSS classes
+- `onOpenChange`: (open: boolean) => void
+  Callback when collapsed state changes
 
-### Collapsible.DefaultTrigger
-
-- Description: DefaultTrigger sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | Yes | - | - | - |
-| `className` | string | No | - | - | - |
-
-### Collapsible.DefaultPanel
-
-- Description: DefaultPanel sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | Yes | - | - | - |
-| `className` | string | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `border-kumo-fill`, `text-kumo-link`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Collapsible.Root
+
+Root sub-component
+
+Props:
+- `className`: string - Additional CSS classes
+
+#### Collapsible.Trigger
+
+Trigger sub-component
+
+Props:
+- `className`: string - Additional CSS classes
+
+#### Collapsible.Panel
+
+Panel sub-component
+
+Props:
+- `className`: string - Additional CSS classes
+
+#### Collapsible.DefaultTrigger
+
+DefaultTrigger sub-component
+
+Props:
+- `children`: ReactNode (required) - Label text displayed in the trigger
+- `className`: string - Additional CSS classes
+
+#### Collapsible.DefaultPanel
+
+DefaultPanel sub-component
+
+Props:
+- `children`: ReactNode (required) - Panel content
+- `className`: string - Additional CSS classes
+
+
+**Examples:**
 
 ```tsx
 <div className="w-full">
@@ -1952,21 +2230,6 @@ Example 1:
       </Collapsible.Root>
     </div>
 ```
-
-Example 2:
-
-```tsx
-<div className="w-full">
-      <Collapsible.Root open={isOpen} onOpenChange={setIsOpen}>
-        <Collapsible.DefaultTrigger>What is Kumo?</Collapsible.DefaultTrigger>
-        <Collapsible.DefaultPanel>
-          <Text>Kumo is Cloudflare's new design system.</Text>
-        </Collapsible.DefaultPanel>
-      </Collapsible.Root>
-    </div>
-```
-
-Example 3:
 
 ```tsx
 <div className="w-full space-y-2">
@@ -1977,13 +2240,17 @@ Example 3:
         </Collapsible.DefaultPanel>
       </Collapsible.Root>
       <Collapsible.Root open={open2} onOpenChange={setOpen2}>
-        <Collapsible.DefaultTrigger>How do I use it?</Collapsible.DefaultTrigger>
+        <Collapsible.DefaultTrigger>
+          How do I use it?
+        </Collapsible.DefaultTrigger>
         <Collapsible.DefaultPanel>
           <Text>Install the components and import them into your project.</Text>
         </Collapsible.DefaultPanel>
       </Collapsible.Root>
       <Collapsible.Root open={open3} onOpenChange={setOpen3}>
-        <Collapsible.DefaultTrigger>Is it open source?</Collapsible.DefaultTrigger>
+        <Collapsible.DefaultTrigger>
+          Is it open source?
+        </Collapsible.DefaultTrigger>
         <Collapsible.DefaultPanel>
           <Text>Check the repository for license information.</Text>
         </Collapsible.DefaultPanel>
@@ -1991,26 +2258,21 @@ Example 3:
     </div>
 ```
 
-Example 4:
-
 ```tsx
 <div className="w-full">
       <Collapsible.Root open={isOpen} onOpenChange={setIsOpen}>
-        <Collapsible.Trigger
-          render={<Button variant="secondary" size="sm" />}
-        >
+        <Collapsible.Trigger render={<Button variant="secondary" size="sm" />}>
           {isOpen ? "Hide details" : "Show details"}
         </Collapsible.Trigger>
         <Collapsible.Panel className="mt-3 rounded-lg bg-kumo-tint p-4">
           <Text>
-            This panel uses custom styling instead of the default border-left accent.
+            This panel uses custom styling instead of the default border-left
+            accent.
           </Text>
         </Collapsible.Panel>
       </Collapsible.Root>
     </div>
 ```
-
-Example 5:
 
 ```tsx
 <div className="w-full space-y-4">
@@ -2018,16 +2280,34 @@ Example 5:
         <Collapsible.DefaultTrigger>Edit details</Collapsible.DefaultTrigger>
         <Collapsible.DefaultPanel keepMounted>
           <Text>
-            Type something below, then collapse and re-open - your input is
+            Type something below, then collapse and re-open — your input is
             preserved because the panel stays mounted.
           </Text>
-          <Input label="Name" placeholder="Type here..." />
+          <Input label="Name" placeholder="Type here…" />
         </Collapsible.DefaultPanel>
       </Collapsible.Root>
     </div>
 ```
 
-Example 6:
+```tsx
+<div className="w-full">
+      <Collapsible.Root open={isOpen} onOpenChange={setIsOpen}>
+        <Collapsible.DefaultTrigger>
+          Contact settings
+        </Collapsible.DefaultTrigger>
+        <Collapsible.DefaultPanel>
+          <form
+            className="flex max-w-sm flex-col gap-4"
+            onSubmit={(event) => event.preventDefault()}
+          >
+            <Input label="Email" placeholder="user@example.com" type="email" />
+            <Input label="Team name" placeholder="Design engineering" />
+            <Button type="submit">Save settings</Button>
+          </form>
+        </Collapsible.DefaultPanel>
+      </Collapsible.Root>
+    </div>
+```
 
 ```tsx
 <div className="w-full space-y-2">
@@ -2047,144 +2327,129 @@ Example 6:
 ```
 
 
-## Combobox
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Combobox - autocomplete input with filterable dropdown list.  Compound component: `Combobox` (Root), `.TriggerInput`, `.TriggerValue`, `.TriggerMultipleWithInput`, `.Content`, `.Item`, `.Chip`, `.Input`, `.Empty`, `.GroupLabel`, `.Group`, `.List`, `.Collection`.
+### Combobox
 
-**Props**
+Combobox — autocomplete input with filterable dropdown list.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | Size of the combobox trigger. Matches Input component sizes. - `"xs"` - Extra small for compact UIs (h-5 / 20px) - `"sm"` - Small for secondary fields (h-6.5 / 26px) - `"base"` - Default size (h-9 / 36px) - `"lg"` - Large for prominent fields (h-10 / 40px) |
-| `inputSide` | enum | No | right | `right`, `top` | Position of the text input relative to chips in multi-select mode. - `"right"` - Input inline to the right of chips - `"top"` - Input above chips |
-| `items` | T[] | Yes | - | - | Array of items to display in the dropdown |
-| `value` | T \| T[] | No | - | - | Currently selected value(s) |
-| `children` | ReactNode | No | - | - | Combobox content (trigger, content, items) |
-| `className` | string | No | - | - | Additional CSS classes |
-| `label` | ReactNode | No | - | - | Label content for the combobox (enables Field wrapper) - can be a string or any React node |
-| `required` | boolean | No | - | - | Whether the combobox is required |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content to display next to the label via an info icon |
-| `description` | ReactNode | No | - | - | Helper text displayed below the combobox |
-| `error` | string \| object | No | - | - | Error message or validation error object |
-| `onValueChange` | (value: T \| T[]) => void | No | - | - | Callback when selection changes |
-| `multiple` | boolean | No | - | - | Allow multiple selections |
-| `isItemEqualToValue` | (item: T, value: T) => boolean | No | - | - | Custom equality function for comparing items |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Combobox } from "@cloudflare/kumo";`
 
-### Combobox.Content
+**Category:** Input
 
-- Description: Content sub-component
+**Props:**
 
-Props:
+- `size`: enum [default: base]
+  Size of the combobox trigger. Matches Input component sizes.
+- `"xs"` — Extra small for compact UIs (h-5 / 20px)
+- `"sm"` — Small for secondary fields (h-6.5 / 26px)
+- `"base"` — Default size (h-9 / 36px)
+- `"lg"` — Large for prominent fields (h-10 / 40px)
+- `inputSide`: enum [default: right]
+  - `"right"`: Input positioned inline to the right of chips
+  - `"top"`: Input positioned above chips
+- `items`: T[] (required)
+  Array of items to display in the dropdown
+- `value`: T | T[]
+  Currently selected value(s)
+- `children`: ReactNode
+  Combobox content (trigger, content, items)
+- `className`: string
+  Additional CSS classes
+- `label`: ReactNode
+  Label content for the combobox (enables Field wrapper) - can be a string or any React node
+- `required`: boolean
+  Whether the combobox is required
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label via an info icon
+- `description`: ReactNode
+  Helper text displayed below the combobox
+- `error`: string | object
+  Error message or validation error object
+- `onValueChange`: (value: T | T[]) => void
+  Callback when selection changes
+- `multiple`: boolean
+  Allow multiple selections
+- `isItemEqualToValue`: (item: T, value: T) => boolean
+  Custom equality function for comparing items
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
-| `align` | ComboboxBase.Positioner.Props["align"] | No | - | - | - |
-| `alignOffset` | ComboboxBase.Positioner.Props["alignOffset"] | No | - | - | - |
-| `side` | ComboboxBase.Positioner.Props["side"] | No | - | - | - |
-| `sideOffset` | ComboboxBase.Positioner.Props["sideOffset"] | No | - | - | - |
-| `container` | PortalContainer | No | - | - | - |
+**Colors (kumo tokens used):**
 
-### Combobox.TriggerValue
+`bg-kumo-base`, `bg-kumo-fill-hover`, `bg-kumo-overlay`, `bg-kumo-tint`, `border-kumo-hairline`, `ring-kumo-hairline`, `ring-kumo-line`, `text-kumo-default`, `text-kumo-placeholder`, `text-kumo-subtle`
 
-- Description: TriggerValue sub-component
+**Sub-Components:**
 
-Props:
+This is a compound component. Use these sub-components:
 
-- None
+#### Combobox.Content
 
-### Combobox.TriggerInput
-
-- Description: TriggerInput sub-component
-
-Props:
-
-- None
-
-### Combobox.TriggerMultipleWithInput
-
-- Description: TriggerMultipleWithInput sub-component
+Content sub-component
 
 Props:
+- `className`: string
+- `align`: ComboboxBase.Positioner.Props["align"]
+- `alignOffset`: ComboboxBase.Positioner.Props["alignOffset"]
+- `side`: ComboboxBase.Positioner.Props["side"]
+- `sideOffset`: ComboboxBase.Positioner.Props["sideOffset"]
+- `anchor`: ComboboxBase.Positioner.Props["anchor"]
+- `positionMethod`: ComboboxBase.Positioner.Props["positionMethod"]
+- `collisionAvoidance`: ComboboxBase.Positioner.Props["collisionAvoidance"]
+- `collisionBoundary`: ComboboxBase.Positioner.Props["collisionBoundary"]
+- `collisionPadding`: ComboboxBase.Positioner.Props["collisionPadding"]
+- `sticky`: ComboboxBase.Positioner.Props["sticky"]
+- `disableAnchorTracking`: ComboboxBase.Positioner.Props["disableAnchorTracking"]
+- `container`: PortalContainer
 
-- None
+#### Combobox.TriggerValue
 
-### Combobox.Chip
+TriggerValue sub-component
 
-- Description: Chip sub-component
+#### Combobox.TriggerInput
 
-Props:
+TriggerInput sub-component
 
-- None
+#### Combobox.TriggerMultipleWithInput
 
-### Combobox.Item
+TriggerMultipleWithInput sub-component
 
-- Description: Item sub-component
+#### Combobox.Chip
 
-Props:
+Chip sub-component
 
-- None
+#### Combobox.Item
 
-### Combobox.Input
+Item sub-component
 
-- Description: Input sub-component
+#### Combobox.Input
 
-Props:
+Input sub-component
 
-- None
+#### Combobox.Empty
 
-### Combobox.Empty
+Empty sub-component
 
-- Description: Empty sub-component
+#### Combobox.GroupLabel
 
-Props:
+GroupLabel sub-component
 
-- None
+#### Combobox.Group
 
-### Combobox.GroupLabel
+Group sub-component
 
-- Description: GroupLabel sub-component
+#### Combobox.List
 
-Props:
+List sub-component
 
-- None
+#### Combobox.Collection
 
-### Combobox.Group
-
-- Description: Group sub-component
-
-Props:
-
-- None
-
-### Combobox.List
-
-- Description: List sub-component
-
-Props:
-
-- None
-
-### Combobox.Collection
-
-- Description: Renders filtered list items. Use when you need more control over item rendering.
-- Pass through: Yes, base: `ComboboxBase.Collection`
+Renders filtered list items. Use when you need more control over item rendering.
 
 Props:
+- `children`: (item: T, index: number) => ReactNode (required) - Function that receives each filtered item and returns a node
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | (item: T, index: number) => ReactNode | Yes | - | - | Function that receives each filtered item and returns a node |
-
-Usage examples:
-
-Example 1:
-
+Usage:
 ```tsx
 <Combobox.Collection>
   {(item, index) => (
@@ -2195,40 +2460,20 @@ Example 1:
 </Combobox.Collection>
 ```
 
-### Combobox.Trigger
+#### Combobox.Trigger
 
-- Description: Trigger sub-component (wraps ComboboxBase)
-- Pass through: Yes, base: `ComboboxBase.Trigger`
+Trigger sub-component (wraps ComboboxBase)
 
-Props:
+#### Combobox.Value
 
-- None
+Value sub-component (wraps ComboboxBase)
 
-### Combobox.Value
+#### Combobox.Icon
 
-- Description: Value sub-component (wraps ComboboxBase)
-- Pass through: Yes, base: `ComboboxBase.Value`
+Icon sub-component (wraps ComboboxBase)
 
-Props:
 
-- None
-
-### Combobox.Icon
-
-- Description: Icon sub-component (wraps ComboboxBase)
-- Pass through: Yes, base: `ComboboxBase.Icon`
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
-
-`bg-kumo-base`, `bg-kumo-fill-hover`, `bg-kumo-overlay`, `bg-kumo-tint`, `border-kumo-hairline`, `ring-kumo-hairline`, `ring-kumo-line`, `text-kumo-default`, `text-kumo-placeholder`, `text-kumo-subtle`
-
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Combobox
@@ -2250,8 +2495,6 @@ Example 1:
     </Combobox>
 ```
 
-Example 2:
-
 ```tsx
 <Combobox
       value={value}
@@ -2272,8 +2515,6 @@ Example 2:
       </Combobox.Content>
     </Combobox>
 ```
-
-Example 3:
 
 ```tsx
 <Combobox
@@ -2298,8 +2539,6 @@ Example 3:
       </Combobox.Content>
     </Combobox>
 ```
-
-Example 4:
 
 ```tsx
 <Combobox
@@ -2330,8 +2569,6 @@ Example 4:
       </Combobox.Content>
     </Combobox>
 ```
-
-Example 5:
 
 ```tsx
 <div className="flex gap-2">
@@ -2370,8 +2607,6 @@ Example 5:
     </div>
 ```
 
-Example 6:
-
 ```tsx
 <div className="w-80">
       <Combobox
@@ -2396,10 +2631,8 @@ Example 6:
     </div>
 ```
 
-Example 7:
-
 ```tsx
-<div className="flex flex-wrap gap-4 items-start">
+<div className="flex flex-wrap items-start gap-4">
       <Combobox value="Apple" items={fruits} disabled>
         <Combobox.TriggerInput
           className="w-[200px]"
@@ -2434,8 +2667,6 @@ Example 7:
     </div>
 ```
 
-Example 8:
-
 ```tsx
 <div className="w-80">
       <Combobox value={value} onValueChange={setValue} items={items}>
@@ -2453,7 +2684,7 @@ Example 8:
                   {item.label}
                   {item.reason && (
                     <Text variant="secondary" size="xs" as="span">
-                      {" - "}
+                      {" — "}
                       {item.reason}
                     </Text>
                   )}
@@ -2465,8 +2696,6 @@ Example 8:
       </Combobox>
     </div>
 ```
-
-Example 9:
 
 ```tsx
 <div className="w-80">
@@ -2491,8 +2720,6 @@ Example 9:
       </Combobox>
     </div>
 ```
-
-Example 10:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-4">
@@ -2534,8 +2761,6 @@ Example 10:
       </Combobox>
     </div>
 ```
-
-Example 11:
 
 ```tsx
 <div className="flex flex-wrap items-center gap-4">
@@ -2580,25 +2805,19 @@ Example 11:
     </div>
 ```
 
-Example 12:
-
 ```tsx
 <Combobox
       value={value}
       onValueChange={(v) => setValue(v as Language)}
       items={languages}
     >
-      <Combobox.Trigger
-        render={
-          <Button variant="ghost" size="sm" />
-        }
-      >
+      <Combobox.Trigger render={<Button variant="ghost" size="sm" />}>
         <Combobox.Value>
           <span className="truncate">
             {value.emoji} {value.label}
           </span>
         </Combobox.Value>
-        <CaretUpDownIcon size={14} className="text-kumo-subtle shrink-0" />
+        <CaretUpDownIcon size={14} className="shrink-0 text-kumo-subtle" />
       </Combobox.Trigger>
       <Combobox.Content>
         <Combobox.Input placeholder="Search languages" />
@@ -2615,28 +2834,32 @@ Example 12:
 ```
 
 
-## CommandPalette
+---
 
-- Type: component
-- Category: Navigation
-- Import path: `@cloudflare/kumo`
-- Description: CommandPalette - accessible command palette / spotlight search overlay.  Compound component: `CommandPalette.Root` (or `.Dialog` + `.Panel`), `.Input`, `.List`, `.Results`, `.Items`, `.Group`, `.GroupLabel`, `.Item`, `.ResultItem`, `.HighlightedText`, `.Empty`, `.Loading`, `.Footer`.  Built on `@base-ui/react/autocomplete` + `@base-ui/react/dialog`.
+### CommandPalette
 
-**Props**
+CommandPalette — accessible command palette / spotlight search overlay.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `open` | boolean | Yes | - | - | Whether the dialog is open |
-| `children` | ReactNode | No | - | - | Child content - typically one or more Panel components |
-| `container` | PortalContainer | No | - | - | Container element for the portal. Use this to render the command palette inside a Shadow DOM or custom container. Overrides `KumoPortalProvider` context. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { CommandPalette } from "@cloudflare/kumo";`
+
+**Category:** Navigation
+
+**Props:**
+
+- `open`: boolean (required)
+  Whether the dialog is open
+- `children`: ReactNode
+  Child content - typically one or more Panel components
+- `container`: PortalContainer
+  Container element for the portal. Use this to render the command palette inside a Shadow DOM or custom container. Overrides `KumoPortalProvider` context.
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-elevated`, `bg-kumo-overlay`, `bg-kumo-warning`, `ring-kumo-brand`, `ring-kumo-hairline`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <div className="flex flex-col items-start gap-4">
@@ -2693,13 +2916,13 @@ Example 1:
         <CommandPalette.Footer>
           <span className="flex items-center gap-2">
             <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 text-[10px]">
-              ??
+              ↑↓
             </kbd>
             <span>Navigate</span>
           </span>
           <span className="flex items-center gap-2">
             <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 text-[10px]">
-              ?
+              ↵
             </kbd>
             <span>Select</span>
           </span>
@@ -2707,8 +2930,6 @@ Example 1:
       </CommandPalette.Root>
     </div>
 ```
-
-Example 2:
 
 ```tsx
 <div>
@@ -2748,8 +2969,6 @@ Example 2:
       </CommandPalette.Root>
     </div>
 ```
-
-Example 3:
 
 ```tsx
 <div>
@@ -2804,8 +3023,6 @@ Example 3:
       </CommandPalette.Root>
     </div>
 ```
-
-Example 4:
 
 ```tsx
 <div className="flex flex-col items-start gap-4">
@@ -2871,8 +3088,6 @@ Example 4:
     </div>
 ```
 
-Example 5:
-
 ```tsx
 <div>
       <Button onClick={() => setOpen(true)}>Open with ResultItem</Button>
@@ -2908,13 +3123,13 @@ Example 5:
         <CommandPalette.Footer>
           <span className="flex items-center gap-2">
             <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 text-[10px]">
-              ??
+              ↑↓
             </kbd>
             <span>Navigate</span>
           </span>
           <span className="flex items-center gap-2">
             <kbd className="rounded border border-kumo-hairline bg-kumo-base px-1.5 py-0.5 text-[10px]">
-              ??
+              ⌘↵
             </kbd>
             <span>Open in new tab</span>
           </span>
@@ -2924,27 +3139,30 @@ Example 5:
 ```
 
 
-## DatePicker
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: DatePicker - a date selection calendar.  Built on [react-day-picker](https://daypicker.dev) with Kumo styling. Supports three selection modes: single, multiple, and range.
+### DatePicker
 
-**Props**
+DatePicker — a date selection calendar.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes |
-| `children` | ReactNode | No | - | - | Child elements |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { DatePicker } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `className`: string
+  Additional CSS classes
+- `children`: ReactNode
+  Child elements
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -2963,8 +3181,6 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <div className="flex flex-col gap-4">
       <DatePicker
@@ -2978,8 +3194,6 @@ Example 2:
       </p>
     </div>
 ```
-
-Example 3:
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -2998,8 +3212,6 @@ Example 3:
     </div>
 ```
 
-Example 4:
-
 ```tsx
 <div className="flex flex-col gap-4">
       <DatePicker
@@ -3015,8 +3227,6 @@ Example 4:
     </div>
 ```
 
-Example 5:
-
 ```tsx
 <Popover>
       <Popover.Trigger
@@ -3029,8 +3239,6 @@ Example 5:
       </Popover.Content>
     </Popover>
 ```
-
-Example 6:
 
 ```tsx
 <Popover>
@@ -3049,8 +3257,6 @@ Example 6:
       </Popover.Content>
     </Popover>
 ```
-
-Example 7:
 
 ```tsx
 <Popover>
@@ -3095,8 +3301,6 @@ Example 7:
     </Popover>
 ```
 
-Example 8:
-
 ```tsx
 <DatePicker
       mode="multiple"
@@ -3106,7 +3310,7 @@ Example 8:
       disabled={unavailableDates}
       fixedWeeks
       footer={
-        <p className="text-xs text-kumo-subtle pt-2 w-full">
+        <p className="w-full pt-2 text-xs text-kumo-subtle">
           {selectedCount}/{maxDays} days selected. Grayed dates are unavailable.
         </p>
       }
@@ -3114,220 +3318,134 @@ Example 8:
 ```
 
 
-## DateRangePicker
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: DateRangePicker - dual-calendar date range selector.  Renders two side-by-side month calendars with click-to-select start/end dates, hover preview of the range, a timezone footer, and a reset button.
+### DateRangePicker
 
-**Props**
+DateRangePicker — dual-calendar date range selector.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `size` | enum | No | base | `sm`, `base`, `lg` | Calendar size. - `"sm"` - Compact calendar for tight spaces - `"base"` - Default calendar size - `"lg"` - Large calendar for prominent date selection |
-| `variant` | enum | No | default | `default`, `subtle` | Visual variant. - `"default"` - Standard appearance with overlay background - `"subtle"` - Minimal background |
-| `timezone` | string | No | - | - | Display timezone string shown in the footer. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `onStartDateChange` | (date: Date \| null) => void | No | - | - | Callback when start date changes |
-| `onEndDateChange` | (date: Date \| null) => void | No | - | - | Callback when end date changes |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { DateRangePicker } from "@cloudflare/kumo";`
+
+**Category:** Input
+
+**Props:**
+
+- `size`: enum [default: base]
+  - `"sm"`: Compact calendar for tight spaces
+  - `"base"`: Default calendar size
+  - `"lg"`: Large calendar for prominent date selection
+- `variant`: enum [default: default]
+  - `"default"`: Default calendar appearance
+  - `"subtle"`: Subtle calendar with minimal background
+- `timezone`: string
+  Display timezone string shown in the footer.
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `onStartDateChange`: (date: Date | null) => void
+  Callback when start date changes
+- `onEndDateChange`: (date: Date | null) => void
+  Callback when end date changes
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-contrast`, `bg-kumo-fill`, `bg-kumo-interact`, `bg-kumo-overlay`, `ring-kumo-focus`, `text-kumo-default`, `text-kumo-inverse`, `text-kumo-subtle`
 
-**Styling**
+**Styling:**
 
-```json
-{
-  "sizeVariants": {
-    "sm": {
-      "height": 0,
-      "classes": "p-3 gap-2",
-      "dimensions": {
-        "calendarWidth": 168,
-        "cellHeight": 22,
-        "cellWidth": 24,
-        "textSize": 12,
-        "iconSize": 14,
-        "padding": 12,
-        "gap": 8
-      }
-    },
-    "base": {
-      "height": 0,
-      "classes": "p-4 gap-2.5",
-      "dimensions": {
-        "calendarWidth": 196,
-        "cellHeight": 26,
-        "cellWidth": 28,
-        "textSize": 14,
-        "iconSize": 16,
-        "padding": 16,
-        "gap": 10
-      }
-    },
-    "lg": {
-      "height": 0,
-      "classes": "p-5 gap-3",
-      "dimensions": {
-        "calendarWidth": 252,
-        "cellHeight": 32,
-        "cellWidth": 36,
-        "textSize": 16,
-        "iconSize": 18,
-        "padding": 20,
-        "gap": 12
-      }
-    }
-  }
-}
-```
+- **Size Variants:**
+  - `sm`:
+    - Classes: `p-3 gap-2`
+    - Dimensions:
+      - calendarWidth: 168
+      - cellHeight: 22
+      - cellWidth: 24
+      - textSize: 12
+      - iconSize: 14
+      - padding: 12
+      - gap: 8
+  - `base`:
+    - Classes: `p-4 gap-2.5`
+    - Dimensions:
+      - calendarWidth: 196
+      - cellHeight: 26
+      - cellWidth: 28
+      - textSize: 14
+      - iconSize: 16
+      - padding: 16
+      - gap: 10
+  - `lg`:
+    - Classes: `p-5 gap-3`
+    - Dimensions:
+      - calendarWidth: 252
+      - cellHeight: 32
+      - cellWidth: 36
+      - textSize: 16
+      - iconSize: 18
+      - padding: 20
+      - gap: 12
 
+---
 
+### Dialog
 
-## Dialog
+Dialog component
 
-- Type: component
-- Category: Overlay
-- Import path: `@cloudflare/kumo`
-- Description: Dialog component
+**Type:** component
 
-**Props**
+**Import:** `import { Dialog } from "@cloudflare/kumo";`
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `children` | ReactNode | No | - | - | Dialog content (typically Title, Description, Close, and action buttons). |
-| `container` | PortalContainer | No | - | - | Container element for the portal. Use this to render the dialog inside a Shadow DOM or custom container. Overrides `KumoPortalProvider` context. |
-| `size` | enum | No | base | `base`, `sm`, `lg`, `xl` | Dialog width. - `"sm"` - Small (min 288px) for simple confirmations - `"base"` - Default (min 384px) - `"lg"` - Large (min 512px) for complex content - `"xl"` - Extra large (min 768px) for detailed views |
+**Category:** Overlay
 
-**Subcomponents**
+**Props:**
 
-### Dialog.Root
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `children`: ReactNode
+  Dialog content (typically Title, Description, Close, and action buttons).
+- `container`: PortalContainer
+  Container element for the portal. Use this to render the dialog inside a Shadow DOM or custom container. Overrides `KumoPortalProvider` context.
+- `size`: enum [default: base]
+  - `"base"`: Default dialog width (384px)
+  - `"sm"`: Small dialog for simple confirmations (288px)
+  - `"lg"`: Large dialog for complex content (512px)
+  - `"xl"`: Extra large dialog for detailed views (768px)
 
-- Description: Root sub-component
-
-Props:
-
-- None
-
-### Dialog.Trigger
-
-- Description: Trigger sub-component
-
-Props:
-
-- None
-
-### Dialog.Title
-
-- Description: Title sub-component
-
-Props:
-
-- None
-
-### Dialog.Description
-
-- Description: Description sub-component
-
-Props:
-
-- None
-
-### Dialog.Close
-
-- Description: Close sub-component
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-recessed`, `ring-kumo-line`, `text-kumo-default`
 
-**Styling**
+**Styling:**
 
-```json
-{
-  "dimensions": {
-    "sm": {
-      "width": 350,
-      "titleSize": 20,
-      "descSize": 16,
-      "padding": 16,
-      "gap": 8,
-      "buttonSize": "sm"
-    },
-    "base": {
-      "width": 384,
-      "titleSize": 20,
-      "descSize": 16,
-      "padding": 24,
-      "gap": 16,
-      "buttonSize": "base"
-    },
-    "lg": {
-      "width": 512,
-      "titleSize": 20,
-      "descSize": 16,
-      "padding": 24,
-      "gap": 16,
-      "buttonSize": "base"
-    },
-    "xl": {
-      "width": 768,
-      "titleSize": 20,
-      "descSize": 16,
-      "padding": 24,
-      "gap": 16,
-      "buttonSize": "base"
-    }
-  },
-  "baseTokens": {
-    "background": "color-surface",
-    "text": "text-color-surface",
-    "borderRadius": 12,
-    "shadow": "shadow-m"
-  },
-  "backdrop": {
-    "background": "color-surface-secondary",
-    "opacity": 0.8
-  },
-  "header": {
-    "title": {
-      "fontWeight": 600,
-      "color": "text-color-surface"
-    },
-    "closeIcon": {
-      "name": "ph-x",
-      "size": 20,
-      "color": "text-color-muted"
-    }
-  },
-  "description": {
-    "fontWeight": 400,
-    "color": "text-color-muted"
-  },
-  "buttons": {
-    "primary": {
-      "background": "color-primary",
-      "text": "white"
-    },
-    "secondary": {
-      "ring": "color-border",
-      "text": "text-color-surface"
-    }
-  }
-}
-```
+- **Dimensions:** `[object Object]`
+
+**Sub-Components:**
+
+This is a compound component. Use these sub-components:
+
+#### Dialog.Root
+
+Root sub-component
+
+#### Dialog.Trigger
+
+Trigger sub-component
+
+#### Dialog.Title
+
+Title sub-component
+
+#### Dialog.Description
+
+Description sub-component
+
+#### Dialog.Close
+
+Close sub-component
 
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Dialog.Root>
@@ -3357,8 +3475,6 @@ Example 1:
       </Dialog>
     </Dialog.Root>
 ```
-
-Example 2:
 
 ```tsx
 <Dialog.Root>
@@ -3405,7 +3521,39 @@ Example 2:
     </Dialog.Root>
 ```
 
-Example 3:
+```tsx
+<Dialog.Root>
+      <Dialog.Trigger
+        render={(p) => <Button {...p}>Open capped dialog</Button>}
+      />
+      <Dialog className="max-w-lg p-8">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <Dialog.Title className="text-2xl font-semibold">
+            Max width override
+          </Dialog.Title>
+          <Dialog.Close
+            aria-label="Close"
+            render={(props) => (
+              <Button
+                {...props}
+                variant="secondary"
+                shape="square"
+                icon={<X />}
+                aria-label="Close"
+              />
+            )}
+          />
+        </div>
+        <Dialog.Description className="text-kumo-subtle">
+          This dialog uses <code>className="max-w-lg"</code> and should stay
+          capped around 512px on desktop.
+        </Dialog.Description>
+        <div className="mt-4 truncate rounded-md border border-kumo-line bg-kumo-recessed p-3 font-mono text-sm">
+          abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+        </div>
+      </Dialog>
+    </Dialog.Root>
+```
 
 ```tsx
 <Dialog.Root disablePointerDismissal>
@@ -3449,8 +3597,6 @@ Example 3:
     </Dialog.Root>
 ```
 
-Example 4:
-
 ```tsx
 <Dialog.Root role="alertdialog">
       <Dialog.Trigger
@@ -3493,8 +3639,6 @@ Example 4:
     </Dialog.Root>
 ```
 
-Example 5:
-
 ```tsx
 <Dialog.Root>
       <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />
@@ -3521,9 +3665,8 @@ Example 5:
         </Dialog.Description>
         <Select
           className="w-full"
-          renderValue={(v) =>
-            regions.find((r) => r.value === v)?.label ?? "Select region..."
-          }
+          placeholder="Select region..."
+          renderValue={(v) => regions.find((r) => r.value === v)?.label}
         >
           {regions.map((region) => (
             <Select.Option key={region.value} value={region.value}>
@@ -3544,8 +3687,6 @@ Example 5:
       </Dialog>
     </Dialog.Root>
 ```
-
-Example 6:
 
 ```tsx
 <Dialog.Root>
@@ -3601,249 +3742,227 @@ Example 6:
     </Dialog.Root>
 ```
 
-Example 7:
-
 ```tsx
-<Dialog.Root>
-      <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />
-      <Dialog className="p-8">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <Dialog.Title className="text-2xl font-semibold">
-            Resource Actions
-          </Dialog.Title>
-          <Dialog.Close
-            aria-label="Close"
-            render={(props) => (
-              <Button
-                {...props}
-                variant="secondary"
-                shape="square"
-                icon={<X />}
-                aria-label="Close"
-              />
-            )}
-          />
-        </div>
-        <Dialog.Description className="mb-4 text-kumo-subtle">
-          Choose an action for the selected resource.
-        </Dialog.Description>
-        <DropdownMenu>
-          <DropdownMenu.Trigger render={<Button>Actions</Button>} />
-          <DropdownMenu.Content>
-            <DropdownMenu.Item>Edit</DropdownMenu.Item>
-            <DropdownMenu.Item>Duplicate</DropdownMenu.Item>
-            <DropdownMenu.Separator />
-            <DropdownMenu.Item variant="danger">Delete</DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu>
-        <div className="mt-8 flex justify-end">
-          <Dialog.Close
-            render={(props) => (
-              <Button variant="secondary" {...props}>
-                Close
+<div className="flex flex-wrap gap-2">
+      {sizes.map(({ size, label, width }) => (
+        <Dialog.Root key={size}>
+          <Dialog.Trigger
+            render={(p) => (
+              <Button variant="secondary" {...p}>
+                {label} ({width})
               </Button>
             )}
           />
-        </div>
-      </Dialog>
-    </Dialog.Root>
+          <Dialog size={size} className="p-8">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <Dialog.Title className="text-2xl font-semibold">
+                {label} Dialog
+              </Dialog.Title>
+              <Dialog.Close
+                aria-label="Close"
+                render={(props) => (
+                  <Button
+                    {...props}
+                    variant="secondary"
+                    shape="square"
+                    icon={<X />}
+                    aria-label="Close"
+                  />
+                )}
+              />
+            </div>
+            <Dialog.Description className="text-kumo-subtle">
+              This <code>size="{size}"</code> dialog should stay at {width} wide
+              regardless of the content below.
+            </Dialog.Description>
+            <div className="mt-4 overflow-auto rounded-md border border-kumo-line">
+              <table className="w-max text-sm">
+                <thead className="bg-kumo-elevated text-left">
+                  <tr>
+                    <th className="px-3 py-2">Resource</th>
+                    <th className="px-3 py-2">Region</th>
+                    <th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">Latency</th>
+                    <th className="px-3 py-2">Requests</th>
+                    <th className="px-3 py-2">Last Deployed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-kumo-hairline">
+                  <tr>
+                    <td className="px-3 py-2">api-gateway-prod</td>
+                    <td className="px-3 py-2">us-east-1</td>
+                    <td className="px-3 py-2 text-kumo-success">Healthy</td>
+                    <td className="px-3 py-2">12ms</td>
+                    <td className="px-3 py-2">1,234,567</td>
+                    <td className="px-3 py-2">2026-06-23</td>
+                  </tr>
+                  <tr>
+                    <td className="px-3 py-2">worker-analytics</td>
+                    <td className="px-3 py-2">eu-west-1</td>
+                    <td className="px-3 py-2 text-kumo-warning">Degraded</td>
+                    <td className="px-3 py-2">89ms</td>
+                    <td className="px-3 py-2">456,789</td>
+                    <td className="px-3 py-2">2026-06-22</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Dialog.Close
+                render={(props) => (
+                  <Button variant="secondary" {...props}>
+                    Close
+                  </Button>
+                )}
+              />
+            </div>
+          </Dialog>
+        </Dialog.Root>
+      ))}
+    </div>
 ```
 
 
-## DropdownMenu
+---
 
-- Type: component
-- Category: Overlay
-- Import path: `@cloudflare/kumo`
-- Description: DropdownMenu - accessible dropdown menu anchored to a trigger.  Compound component: `DropdownMenu` (Root), `.Trigger`, `.Content`, `.Item`, `.LinkItem`, `.CheckboxItem`, `.RadioGroup`, `.RadioItem`, `.RadioItemIndicator`, `.Sub`, `.SubTrigger`, `.SubContent`, `.Label`, `.Separator`, `.Shortcut`, `.Group`.  Built on `@base-ui/react/menu`.
+### DropdownMenu
 
-**Props**
+DropdownMenu — accessible dropdown menu anchored to a trigger.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | default | `default`, `danger` | Visual style of the dropdown item. - `"default"` - Standard item appearance - `"danger"` - Destructive action with red text |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { DropdownMenu } from "@cloudflare/kumo";`
 
-### DropdownMenu.Trigger
+**Category:** Overlay
 
-- Description: Trigger sub-component
+**Props:**
 
-Props:
+- `variant`: enum [default: default]
+  - `"default"`: Default dropdown item appearance
+  - `"danger"`: Destructive action item
 
-- None
-
-### DropdownMenu.Portal
-
-- Description: Portal sub-component (wraps DropdownMenuPrimitive)
-- Pass through: Yes, base: `DropdownMenuPrimitive.Portal`
-
-Props:
-
-- None
-
-### DropdownMenu.Sub
-
-- Description: Sub sub-component (wraps DropdownMenuPrimitive)
-- Pass through: Yes, base: `DropdownMenuPrimitive.SubmenuRoot`
-
-Props:
-
-- None
-
-### DropdownMenu.SubTrigger
-
-- Description: SubTrigger sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | Icon | No | - | - | Icon displayed before the label. |
-| `inset` | boolean | No | - | - | Adds left padding to align with items that have icons. |
-
-### DropdownMenu.SubContent
-
-- Description: SubContent sub-component
-
-Props:
-
-- None
-
-### DropdownMenu.Content
-
-- Description: Content sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `sideOffset` | number | No | 8 | - | Distance in pixels from the trigger. |
-| `container` | PortalContainer | No | - | - | Container element for the portal. Use this to render inside a Shadow DOM or custom container. |
-
-### DropdownMenu.Item
-
-- Description: Item sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | Icon \| ReactNode | No | - | - | Icon displayed before the label. |
-| `variant` | "default" \| "danger" | No | "default" | - | Visual style of the item. |
-| `selected` | boolean | No | - | - | Shows a check mark indicator when true. |
-| `inset` | boolean | No | - | - | Adds left padding to align with items that have icons. |
-| `onClick` | (event: React.MouseEvent) => void | No | - | - | Callback when the item is clicked. |
-| `closeOnClick` | boolean | No | true | - | Whether the menu closes after clicking this item. |
-| `disabled` | boolean | No | - | - | When true, the item cannot be interacted with. |
-
-### DropdownMenu.LinkItem
-
-- Description: LinkItem sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `href` | string | No | - | - | URL to navigate to when clicked. |
-| `icon` | Icon \| ReactNode | No | - | - | Icon displayed before the label. |
-| `variant` | "default" \| "danger" | No | "default" | - | Visual style of the item. |
-| `inset` | boolean | No | - | - | Adds left padding to align with items that have icons. |
-| `target` | string | No | - | - | Link target attribute (e.g. "_blank" for new tab). |
-| `render` | ReactElement \| ((props, state) => ReactElement) | No | - | - | Custom element to render as the link. Use to integrate with framework routers (e.g. Next.js Link). |
-
-### DropdownMenu.CheckboxItem
-
-- Description: CheckboxItem sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `checked` | boolean | No | - | - | Whether the item is checked. |
-| `defaultChecked` | boolean | No | false | - | Whether the item is initially checked (uncontrolled). |
-| `onCheckedChange` | (checked: boolean, event: ChangeEventDetails) => void | No | - | - | Callback when the checked state changes. |
-| `closeOnClick` | boolean | No | false | - | Whether the menu closes after clicking this item. |
-| `disabled` | boolean | No | - | - | When true, the item cannot be interacted with. |
-
-### DropdownMenu.RadioGroup
-
-- Description: RadioGroup sub-component (wraps DropdownMenuPrimitive)
-- Pass through: Yes, base: `DropdownMenuPrimitive.RadioGroup`
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `value` | any | No | - | - | The controlled value of the currently selected radio item. |
-| `defaultValue` | any | No | - | - | The initially selected value (uncontrolled). |
-| `onValueChange` | (value: any, event: ChangeEventDetails) => void | No | - | - | Callback when the selected value changes. |
-| `disabled` | boolean | No | - | - | When true, all radio items in the group are disabled. |
-
-### DropdownMenu.RadioItem
-
-- Description: RadioItem sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `value` | any | Yes | - | - | The value of this radio item. |
-| `icon` | Icon \| ReactNode | No | - | - | Icon displayed before the label. |
-| `inset` | boolean | No | - | - | Adds left padding to align with items that have icons. |
-| `closeOnClick` | boolean | No | false | - | Whether the menu closes after clicking this item. |
-| `disabled` | boolean | No | - | - | When true, the item cannot be interacted with. |
-
-### DropdownMenu.RadioItemIndicator
-
-- Description: RadioItemIndicator sub-component
-
-Props:
-
-- None
-
-### DropdownMenu.Label
-
-- Description: Label sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `inset` | boolean | No | - | - | Adds left padding to align with items that have icons. |
-
-### DropdownMenu.Separator
-
-- Description: Separator sub-component
-
-Props:
-
-- None
-
-### DropdownMenu.Shortcut
-
-- Description: Shortcut sub-component
-
-Props:
-
-- None
-
-### DropdownMenu.Group
-
-- Description: Group sub-component (wraps DropdownMenuPrimitive)
-- Pass through: Yes, base: `DropdownMenuPrimitive.Group`
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-control`, `bg-kumo-danger`, `bg-kumo-hairline`, `bg-kumo-overlay`, `bg-kumo-tint`, `ring-kumo-brand`, `ring-kumo-focus`, `ring-kumo-line`, `text-kumo-danger`, `text-kumo-default`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### DropdownMenu.Trigger
+
+Trigger sub-component
+
+#### DropdownMenu.Portal
+
+Portal sub-component (wraps DropdownMenuPrimitive)
+
+#### DropdownMenu.Sub
+
+Sub sub-component (wraps DropdownMenuPrimitive)
+
+#### DropdownMenu.SubTrigger
+
+SubTrigger sub-component
+
+Props:
+- `icon`: Icon - Icon displayed before the label.
+- `inset`: boolean - Adds left padding to align with items that have icons.
+
+#### DropdownMenu.SubContent
+
+SubContent sub-component
+
+#### DropdownMenu.Content
+
+Content sub-component
+
+Props:
+- `sideOffset`: number [default: 8] - Distance in pixels from the trigger.
+- `container`: PortalContainer - Container element for the portal. Use this to render inside a Shadow DOM or custom container.
+
+#### DropdownMenu.Item
+
+Item sub-component
+
+Props:
+- `icon`: Icon | ReactNode - Icon displayed before the label.
+- `variant`: "default" | "danger" [default: "default"] - Visual style of the item.
+- `selected`: boolean - Shows a check mark indicator when true.
+- `inset`: boolean - Adds left padding to align with items that have icons.
+- `onClick`: (event: React.MouseEvent) => void - Callback when the item is clicked.
+- `closeOnClick`: boolean [default: true] - Whether the menu closes after clicking this item.
+- `disabled`: boolean - When true, the item cannot be interacted with.
+
+#### DropdownMenu.LinkItem
+
+LinkItem sub-component
+
+Props:
+- `href`: string - URL to navigate to when clicked.
+- `icon`: Icon | ReactNode - Icon displayed before the label.
+- `variant`: "default" | "danger" [default: "default"] - Visual style of the item.
+- `inset`: boolean - Adds left padding to align with items that have icons.
+- `target`: string - Link target attribute (e.g. "_blank" for new tab).
+- `render`: ReactElement | ((props, state) => ReactElement) - Custom element to render as the link. Use to integrate with framework routers (e.g. Next.js Link).
+
+#### DropdownMenu.CheckboxItem
+
+CheckboxItem sub-component
+
+Props:
+- `checked`: boolean - Whether the item is checked.
+- `defaultChecked`: boolean [default: false] - Whether the item is initially checked (uncontrolled).
+- `onCheckedChange`: (checked: boolean, event: ChangeEventDetails) => void - Callback when the checked state changes.
+- `closeOnClick`: boolean [default: false] - Whether the menu closes after clicking this item.
+- `disabled`: boolean - When true, the item cannot be interacted with.
+
+#### DropdownMenu.RadioGroup
+
+RadioGroup sub-component (wraps DropdownMenuPrimitive)
+
+Props:
+- `value`: any - The controlled value of the currently selected radio item.
+- `defaultValue`: any - The initially selected value (uncontrolled).
+- `onValueChange`: (value: any, event: ChangeEventDetails) => void - Callback when the selected value changes.
+- `disabled`: boolean - When true, all radio items in the group are disabled.
+
+#### DropdownMenu.RadioItem
+
+RadioItem sub-component
+
+Props:
+- `value`: any (required) - The value of this radio item.
+- `icon`: Icon | ReactNode - Icon displayed before the label.
+- `inset`: boolean - Adds left padding to align with items that have icons.
+- `closeOnClick`: boolean [default: false] - Whether the menu closes after clicking this item.
+- `disabled`: boolean - When true, the item cannot be interacted with.
+
+#### DropdownMenu.RadioItemIndicator
+
+RadioItemIndicator sub-component
+
+#### DropdownMenu.Label
+
+Label sub-component
+
+Props:
+- `inset`: boolean - Adds left padding to align with items that have icons.
+
+#### DropdownMenu.Separator
+
+Separator sub-component
+
+#### DropdownMenu.Shortcut
+
+Shortcut sub-component
+
+#### DropdownMenu.Group
+
+Group sub-component (wraps DropdownMenuPrimitive)
+
+
+**Examples:**
 
 ```tsx
 <DropdownMenu>
@@ -3855,8 +3974,6 @@ Example 1:
       </DropdownMenu.Content>
     </DropdownMenu>
 ```
-
-Example 2:
 
 ```tsx
 <DropdownMenu>
@@ -3886,8 +4003,6 @@ Example 2:
       </DropdownMenu.Content>
     </DropdownMenu>
 ```
-
-Example 3:
 
 ```tsx
 <DropdownMenu>
@@ -3945,8 +4060,6 @@ Example 3:
     </DropdownMenu>
 ```
 
-Example 4:
-
 ```tsx
 <DropdownMenu>
       <DropdownMenu.Trigger render={<Button>Edit</Button>} />
@@ -3963,8 +4076,6 @@ Example 4:
       </DropdownMenu.Content>
     </DropdownMenu>
 ```
-
-Example 5:
 
 ```tsx
 <div className="flex flex-col items-start gap-2">
@@ -4001,8 +4112,6 @@ Example 5:
     </div>
 ```
 
-Example 6:
-
 ```tsx
 <DropdownMenu>
       <DropdownMenu.Trigger
@@ -4023,7 +4132,16 @@ Example 6:
     </DropdownMenu>
 ```
 
-Example 7:
+```tsx
+<DropdownMenu>
+      <DropdownMenu.Trigger render={<Button>Open long list</Button>} />
+      <DropdownMenu.Content>
+        {items.map((item) => (
+          <DropdownMenu.Item key={item}>{item}</DropdownMenu.Item>
+        ))}
+      </DropdownMenu.Content>
+    </DropdownMenu>
+```
 
 ```tsx
 <DropdownMenu>
@@ -4048,32 +4166,42 @@ Example 7:
 ```
 
 
-## Empty
+---
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Placeholder shown when a list, table, or page has no content to display.
+### Empty
 
-**Props**
+Placeholder shown when a list, table, or page has no content to display.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `size` | enum | No | base | `sm`, `base`, `lg` | Size of the empty state container. - `"sm"` - Compact empty state for smaller containers - `"base"` - Default empty state size - `"lg"` - Large empty state for prominent placement |
-| `icon` | ReactNode | No | - | - | Decorative icon displayed above the title (e.g. from `@phosphor-icons/react`). |
-| `title` | string | Yes | - | - | Primary heading text for the empty state. |
-| `description` | string | No | - | - | Secondary description text displayed below the title. |
-| `commandLine` | string | No | - | - | Shell command displayed in a copyable code block. |
-| `contents` | ReactNode | No | - | - | Additional content (buttons, links) rendered below the description. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Empty } from "@cloudflare/kumo";`
+
+**Category:** Display
+
+**Props:**
+
+- `size`: enum [default: base]
+  - `"sm"`: Compact empty state for smaller containers
+  - `"base"`: Default empty state size
+  - `"lg"`: Large empty state for prominent placement
+- `icon`: ReactNode
+  Decorative icon displayed above the title (e.g. from `@phosphor-icons/react`).
+- `title`: string (required)
+  Primary heading text for the empty state.
+- `description`: string
+  Secondary description text displayed below the title.
+- `commandLine`: string
+  Shell command displayed in a copyable code block.
+- `contents`: ReactNode
+  Additional content (buttons, links) rendered below the description.
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-control`, `bg-kumo-overlay`, `border-kumo-fill`, `border-kumo-interact`, `text-kumo-brand`, `text-kumo-default`, `text-kumo-inactive`, `text-kumo-subtle`, `text-kumo-success`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Empty
@@ -4091,8 +4219,6 @@ Example 1:
       }
     />
 ```
-
-Example 2:
 
 ```tsx
 <div className="flex flex-col gap-8">
@@ -4126,8 +4252,6 @@ Example 2:
     </div>
 ```
 
-Example 3:
-
 ```tsx
 <Empty
       icon={<FolderOpen size={48} className="text-kumo-inactive" />}
@@ -4136,8 +4260,6 @@ Example 3:
       commandLine="npm create kumo-project"
     />
 ```
-
-Example 4:
 
 ```tsx
 <Empty
@@ -4153,13 +4275,9 @@ Example 4:
     />
 ```
 
-Example 5:
-
 ```tsx
 <Empty title="Nothing here" />
 ```
-
-Example 6:
 
 ```tsx
 <Empty
@@ -4169,58 +4287,85 @@ Example 6:
 ```
 
 
-## Field
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Form field wrapper that provides a label, optional description, and error display around any form control. Built on Base UI Field primitives.
+### Field
 
-**Props**
+Form field wrapper that provides a label, optional description, and error display around any form control. Built on Base UI Field primitives.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `controlFirst` | boolean | No | - | - | When `true`, places the control before the label (for checkbox/switch layouts). |
-| `children` | ReactNode | No | - | - | The form control element(s) to wrap (Input, Select, Checkbox, etc.). |
-| `label` | ReactNode | No | - | - | The label content - can be a string or any React node. |
-| `required` | boolean | No | - | - | When explicitly `false`, shows gray "(optional)" text after the label. When `true` or `undefined`, no indicator is shown. |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content displayed next to the label via an info icon. |
-| `error` | object | No | - | - | Validation error with a message and a browser `ValidityState` match key. |
-| `description` | ReactNode | No | - | - | Helper text displayed below the control (hidden when `error` is present). |
-| `hideLabel` | boolean | No | - | - | When `true`, Field renders layout, description, and error but skips the `<label>` element. Use when the child component provides its own accessible label (e.g. Select uses Base UI's `Select.Label` to avoid hover/focus coupling from native `<label>`). |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Field } from "@cloudflare/kumo";`
+
+**Category:** Input
+
+**Props:**
+
+- `controlFirst`: boolean
+  When `true`, places the control before the label (for checkbox/switch layouts).
+- `children`: ReactNode
+  The form control element(s) to wrap (Input, Select, Checkbox, etc.).
+- `label`: ReactNode
+  The label content — can be a string or any React node.
+- `required`: boolean
+  When explicitly `false`, shows gray "(optional)" text after the label. When `true` or `undefined`, no indicator is shown.
+- `labelTooltip`: ReactNode
+  Tooltip content displayed next to the label via an info icon.
+- `error`: object
+  Validation error with a message and a browser `ValidityState` match key.
+- `description`: ReactNode
+  Helper text displayed below the control (hidden when `error` is present).
+- `hideLabel`: boolean
+  When `true`, Field renders layout, description, and error but skips the `<label>` element. Use when the child component provides its own accessible label (e.g. Select uses Base UI's `Select.Label` to avoid hover/focus coupling from native `<label>`).
+
+**Colors (kumo tokens used):**
 
 `text-kumo-danger`, `text-kumo-default`, `text-kumo-subtle`
 
+---
 
-## Grid
+### Grid
 
-- Type: component
-- Category: Layout
-- Import path: `@cloudflare/kumo`
-- Description: Responsive CSS grid layout container with preset column configurations.
+Responsive CSS grid layout container with preset column configurations.
 
-**Props**
+**Type:** component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | No | - | - | Grid items to render. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
-| `mobileDivider` | boolean | No | - | - | Show dividers between grid items on mobile (only works with `"4up"` variant). |
-| `gap` | enum | No | base | `none`, `sm`, `base`, `lg` | Gap size between grid items. - `"none"` - No gap - `"sm"` - 12px gap - `"base"` - Responsive gap (8px -> 24px -> 32px) - `"lg"` - 32px gap |
-| `variant` | enum | No | - | `2up`, `side-by-side`, `2-1`, `1-2`, `1-3up`, `3up`, `4up`, `6up`, `1-2-4up` | Responsive column layout variant. - `"2up"` - 1 col -> 2 cols at md - `"side-by-side"` - Always 2 cols - `"2-1"` - 66%/33% split at md - `"1-2"` - 33%/66% split at md - `"3up"` - 1 -> 2 -> 3 cols - `"4up"` - 1 -> 2 -> 3 -> 4 cols - `"6up"` - 2 -> 3 -> 4 -> 6 cols - `"1-2-4up"` - 1 -> 2 -> 4 cols |
+**Import:** `import { Grid } from "@cloudflare/kumo";`
 
-**Kumo Color Tokens**
+**Category:** Layout
+
+**Props:**
+
+- `children`: ReactNode
+  Grid items to render.
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `id`: string
+- `lang`: string
+- `title`: string
+- `mobileDivider`: boolean
+  Show dividers between grid items on mobile (only works with `"4up"` variant).
+- `gap`: enum [default: base]
+  - `"none"`: No gap between grid items
+  - `"sm"`: Small gap between grid items
+  - `"base"`: Default responsive gap between grid items
+  - `"lg"`: Large gap between grid items
+- `variant`: enum
+  - `"2up"`: Grid items stack on small screens, display side-by-side on medium screens and up
+  - `"side-by-side"`: Grid items always displayed side-by-side
+  - `"2-1"`: Two-thirds / one-third split (66%/33%) on medium screens and up
+  - `"1-2"`: One-third / two-thirds split (33%/66%) on medium screens and up
+  - `"1-3up"`: Grid items stack on small screens, expand to 3 across on large screens
+  - `"3up"`: Grid items stack on small screens, 2 across on medium, 3 across on large
+  - `"4up"`: Grid items stack on small screens, progressively increase columns at larger breakpoints
+  - `"6up"`: Grid items start at 2 across, expand to 6 across on XL
+  - `"1-2-4up"`: Grid items stack on small screens, 2 across on medium, 4 across on large
+
+**Colors (kumo tokens used):**
 
 `border-kumo-hairline`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Grid variant="2up" gap="base">
@@ -4242,8 +4387,6 @@ Example 1:
       </GridItem>
     </Grid>
 ```
-
-Example 2:
 
 ```tsx
 <div className="flex flex-col gap-8">
@@ -4312,8 +4455,6 @@ Example 2:
     </div>
 ```
 
-Example 3:
-
 ```tsx
 <div className="flex flex-col gap-8">
       <div>
@@ -4361,8 +4502,6 @@ Example 3:
       </div>
     </div>
 ```
-
-Example 4:
 
 ```tsx
 <div className="flex flex-col gap-8">
@@ -4434,8 +4573,6 @@ Example 4:
     </div>
 ```
 
-Example 5:
-
 ```tsx
 <Grid variant="4up" gap="base" mobileDivider>
       <GridItem>
@@ -4474,88 +4611,54 @@ Example 5:
 ```
 
 
-## Input
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Input component
+### Input
 
-**Props**
+Input component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `label` | ReactNode | No | - | - | Label content for the input (enables Field wrapper) - can be a string or any React node |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content to display next to the label via an info icon |
-| `description` | ReactNode | No | - | - | Helper text displayed below the input |
-| `error` | string \| object | No | - | - | Error message or validation error object |
-| `passwordManagerIgnore` | boolean | No | - | - | Suppress browser extension password manager overlays on non-credential inputs. |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | Input size. - `"xs"` - Extra small for compact UIs - `"sm"` - Small for secondary fields - `"base"` - Default size - `"lg"` - Large for prominent fields |
-| `variant` | enum | No | default | `default`, `error` | Visual variant. - `"default"` - Standard input - `"error"` - Error state for validation failures |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Input } from "@cloudflare/kumo";`
+
+**Category:** Input
+
+**Props:**
+
+- `label`: ReactNode
+  Label content for the input (enables Field wrapper) - can be a string or any React node
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label via an info icon
+- `description`: ReactNode
+  Helper text displayed below the input
+- `error`: string | object
+  Error message or validation error object
+- `passwordManagerIgnore`: boolean
+  Suppress browser extension password manager overlays on non-credential inputs.
+- `size`: enum [default: base]
+  - `"xs"`: Extra small input for compact UIs
+  - `"sm"`: Small input for secondary fields
+  - `"base"`: Default input size
+  - `"lg"`: Large input for prominent fields
+- `variant`: enum [default: default]
+  - `"default"`: Default input appearance
+  - `"error"`: Error state for validation failures
+
+  **State Classes:**
+  - `"default"`:
+    - `focus`: `focus:ring-kumo-focus/50 focus:ring-[1.5px]`
+  - `"error"`:
+    - `focus`: `focus:ring-kumo-danger/50 focus:ring-[1.5px]`
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-control`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-line`, `text-kumo-default`
 
-**Styling**
+**Styling:**
 
-```json
-{
-  "dimensions": {
-    "xs": {
-      "height": 20,
-      "paddingX": 6,
-      "fontSize": 12,
-      "borderRadius": 2,
-      "width": 160
-    },
-    "sm": {
-      "height": 26,
-      "paddingX": 8,
-      "fontSize": 12,
-      "borderRadius": 6,
-      "width": 200
-    },
-    "base": {
-      "height": 36,
-      "paddingX": 12,
-      "fontSize": 16,
-      "borderRadius": 8,
-      "width": 280
-    },
-    "lg": {
-      "height": 40,
-      "paddingX": 16,
-      "fontSize": 16,
-      "borderRadius": 8,
-      "width": 320
-    }
-  },
-  "baseTokens": {
-    "background": "color-secondary",
-    "text": "text-color-surface",
-    "placeholder": "text-color-muted",
-    "ring": "color-border"
-  },
-  "stateTokens": {
-    "focus": {
-      "ring": "color-active"
-    },
-    "error": {
-      "ring": "color-error"
-    },
-    "disabled": {
-      "opacity": 0.5,
-      "text": "text-color-muted"
-    }
-  }
-}
-```
+- **Dimensions:** `[object Object]`
 
-
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Input
@@ -4565,18 +4668,6 @@ Example 1:
     />
 ```
 
-Example 2:
-
-```tsx
-<Input
-      label="Username"
-      placeholder="Choose a username"
-      description="3-20 characters, alphanumeric only"
-    />
-```
-
-Example 3:
-
 ```tsx
 <Input
       label="Email"
@@ -4585,8 +4676,6 @@ Example 3:
       error="Please enter a valid email address"
     />
 ```
-
-Example 4:
 
 ```tsx
 <Input
@@ -4601,8 +4690,6 @@ Example 4:
     />
 ```
 
-Example 5:
-
 ```tsx
 <div className="flex flex-col gap-4">
       <Input size="xs" label="Extra Small" placeholder="Extra small input" />
@@ -4612,19 +4699,9 @@ Example 5:
     </div>
 ```
 
-Example 6:
-
 ```tsx
 <Input label="Disabled field" placeholder="Cannot edit" disabled />
 ```
-
-Example 7:
-
-```tsx
-<Input placeholder="Search..." aria-label="Search products" />
-```
-
-Example 8:
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -4643,36 +4720,30 @@ Example 8:
     </div>
 ```
 
-Example 9:
-
 ```tsx
 <div className="flex flex-col gap-4">
       <Input
         label="API Key (default)"
         type="password"
-        placeholder="<API_KEY>"
+        placeholder="sk_live_..."
       />
       <Input
         label="API Key (passwordManagerIgnore)"
         type="password"
-        placeholder="<API_KEY>"
+        placeholder="sk_live_..."
         passwordManagerIgnore
       />
     </div>
 ```
 
-Example 10:
-
 ```tsx
 <div className="flex flex-col gap-4">
       <Input type="email" label="Email" placeholder="you@example.com" />
-      <Input type="password" label="Password" placeholder="????????" />
+      <Input type="password" label="Password" placeholder="••••••••" />
       <Input type="number" label="Age" placeholder="18" />
       <Input type="tel" label="Phone" placeholder="+1 (555) 000-0000" />
     </div>
 ```
-
-Example 11:
 
 ```tsx
 <Input
@@ -4682,17 +4753,13 @@ Example 11:
     />
 ```
 
-Example 12:
-
 ```tsx
 <Input
       label="API Key"
       labelTooltip="Find this in your dashboard under Settings > API Keys"
-      placeholder="<API_KEY>"
+      placeholder="sk_live_..."
     />
 ```
-
-Example 13:
 
 ```tsx
 <Input
@@ -4707,8 +4774,6 @@ Example 13:
     />
 ```
 
-Example 14:
-
 ```tsx
 <Input
       label="With onChange"
@@ -4718,8 +4783,6 @@ Example 14:
       onChange={(e) => setValue(e.target.value)}
     />
 ```
-
-Example 15:
 
 ```tsx
 <Input
@@ -4732,135 +4795,89 @@ Example 15:
 ```
 
 
-## InputArea
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo (synthetic - uses Input component)`
-- Description: Multi-line textarea input with Input variants and InputArea-specific dimensions
+### InputGroup
 
-**Props**
+InputGroup component
 
-- None
+**Type:** component
 
-**Styling**
+**Import:** `import { InputGroup } from "@cloudflare/kumo";`
 
-```json
-{
-  "sizeVariants": {
-    "xs": {
-      "minHeight": 60,
-      "width": 200
-    },
-    "sm": {
-      "minHeight": 72,
-      "width": 240
-    },
-    "base": {
-      "minHeight": 88,
-      "width": 320
-    },
-    "lg": {
-      "minHeight": 100,
-      "width": 360
-    }
-  }
-}
-```
+**Category:** Input
 
+**Props:**
 
+- `label`: ReactNode
+  The label content — can be a string or any React node.
+- `description`: ReactNode
+  Helper text displayed below the control (hidden when `error` is present).
+- `error`: object
+  Validation error with a message and a browser `ValidityState` match key.
+- `required`: boolean
+  When explicitly `false`, shows gray "(optional)" text after the label. When `true` or `undefined`, no indicator is shown.
+- `labelTooltip`: ReactNode
+  Tooltip content displayed next to the label via an info icon.
+- `children`: ReactNode
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
+- `size`: enum [default: base]
+  - `"xs"`: Extra small size.
+  - `"sm"`: Small size.
+  - `"base"`: Default size.
+  - `"lg"`: Large size.
+- `disabled`: boolean
 
-## InputGroup
-
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: InputGroup component
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `label` | ReactNode | No | - | - | The label content - can be a string or any React node. |
-| `description` | ReactNode | No | - | - | Helper text displayed below the control (hidden when `error` is present). |
-| `error` | object | No | - | - | Validation error with a message and a browser `ValidityState` match key. |
-| `required` | boolean | No | - | - | When explicitly `false`, shows gray "(optional)" text after the label. When `true` or `undefined`, no indicator is shown. |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content displayed next to the label via an info icon. |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | `{"xs":"Extra small size.","sm":"Small size.","base":"Default size.","lg":"Large size."}` |
-| `disabled` | boolean | No | - | - | - |
-
-**Subcomponents**
-
-### InputGroup.Input
-
-- Description: Input sub-component
-
-Props:
-
-- None
-
-### InputGroup.Button
-
-- Description: Button sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `tooltip` | ReactNode | No | - | - | When provided, wraps the button in a Tooltip. Automatically sets aria-label from a string value. |
-| `tooltipSide` | "top" \| "right" \| "bottom" \| "left" | No | "bottom" | - | Preferred side for the tooltip popup. |
-| `variant` | "primary" \| "secondary" \| "ghost" \| "destructive" \| "secondary-destructive" \| "outline" | No | "ghost" | - | Button visual style. Defaults to ghost. |
-| `size` | "xs" \| "sm" \| "base" \| "lg" | No | "sm" | - | Button size. |
-
-### InputGroup.Addon
-
-- Description: Addon sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `align` | "start" \| "end" | No | "start" | - | Position relative to the input. |
-| `className` | string | No | - | - | Additional CSS classes. |
-
-### InputGroup.Suffix
-
-- Description: Suffix sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes. |
-
-### InputGroup.Label
-
-- Description: Label sub-component
-
-Props:
-
-- None
-
-### InputGroup.Description
-
-- Description: Description sub-component
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `border-kumo-focus`, `border-kumo-line`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-line`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### InputGroup.Input
+
+Input sub-component
+
+#### InputGroup.Button
+
+Button sub-component
+
+Props:
+- `tooltip`: ReactNode - When provided, wraps the button in a Tooltip. Automatically sets aria-label from a string value.
+- `tooltipSide`: "top" | "right" | "bottom" | "left" [default: "bottom"] - Preferred side for the tooltip popup.
+- `variant`: "primary" | "secondary" | "ghost" | "destructive" | "secondary-destructive" | "outline" [default: "ghost"] - Button visual style. Defaults to ghost.
+- `size`: "xs" | "sm" | "base" | "lg" [default: "sm"] - Button size.
+
+#### InputGroup.Addon
+
+Addon sub-component
+
+Props:
+- `align`: "start" | "end" [default: "start"] - Position relative to the input.
+- `className`: string - Additional CSS classes.
+
+#### InputGroup.Suffix
+
+Suffix sub-component
+
+Props:
+- `className`: string - Additional CSS classes.
+
+#### InputGroup.Label
+
+Label sub-component
+
+#### InputGroup.Description
+
+Description sub-component
+
+
+**Examples:**
 
 ```tsx
 <div className="w-full max-w-2xs">
@@ -4884,8 +4901,6 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <InputGroup className="w-full max-w-3xs">
       <InputGroup.Addon>
@@ -4894,8 +4909,6 @@ Example 2:
       <InputGroup.Input placeholder="Paste a link..." aria-label="Link" />
     </InputGroup>
 ```
-
-Example 3:
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -4917,14 +4930,12 @@ Example 3:
     </div>
 ```
 
-Example 4:
-
 ```tsx
 <div className="flex flex-col gap-4">
       <InputGroup className="w-full max-w-3xs">
         <InputGroup.Input
           type={show ? "text" : "password"}
-          defaultValue="<PASSWORD>"
+          defaultValue="password"
           aria-label="Password"
         />
         <InputGroup.Addon align="end">
@@ -4965,8 +4976,6 @@ Example 4:
     </div>
 ```
 
-Example 5:
-
 ```tsx
 <InputGroup className="w-full max-w-2xs">
       <InputGroup.Addon>
@@ -4989,8 +4998,6 @@ Example 5:
     </InputGroup>
 ```
 
-Example 6:
-
 ```tsx
 <InputGroup className="w-full max-w-3xs">
       <InputGroup.Addon>
@@ -4998,12 +5005,10 @@ Example 6:
       </InputGroup.Addon>
       <InputGroup.Input placeholder="Search..." aria-label="Search" />
       <InputGroup.Addon align="end">
-        <kbd className="bg-none! border-none!">?K</kbd>
+        <kbd className="border-none! bg-none!">⌘K</kbd>
       </InputGroup.Addon>
     </InputGroup>
 ```
-
-Example 7:
 
 ```tsx
 <InputGroup className="w-full max-w-3xs">
@@ -5013,8 +5018,6 @@ Example 7:
       </InputGroup.Addon>
     </InputGroup>
 ```
-
-Example 8:
 
 ```tsx
 <div className="flex w-full max-w-2xs flex-col gap-4">
@@ -5046,8 +5049,6 @@ Example 8:
       </InputGroup>
     </div>
 ```
-
-Example 9:
 
 ```tsx
 <div className="flex w-full max-w-3xs flex-col gap-4">
@@ -5113,8 +5114,6 @@ Example 9:
     </div>
 ```
 
-Example 10:
-
 ```tsx
 <div className="flex w-full max-w-3xs flex-col gap-4">
       <InputGroup
@@ -5160,31 +5159,38 @@ Example 10:
 ```
 
 
-## Label
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Label component for form fields.  Provides a standardized way to display labels with optional indicators: - Optional indicator: gray "(optional)" text when `showOptional={true}` - Tooltip: info icon with hover tooltip for additional context
+### Label
 
-**Props**
+Label component for form fields.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | No | - | - | The label content - can be a string or any React node. |
-| `showOptional` | boolean | No | - | - | When `true`, shows gray "(optional)" text after the label. |
-| `tooltip` | ReactNode | No | - | - | Tooltip content displayed next to the label via an info icon. |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `htmlFor` | string | No | - | - | The id of the form element this label is associated with |
-| `asContent` | boolean | No | - | - | When true, only renders the inline content (indicators, tooltip) without the outer label element with font styling. Useful when composed inside another label element that already provides the text styling. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Label } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `children`: ReactNode
+  The label content — can be a string or any React node.
+- `showOptional`: boolean
+  When `true`, shows gray "(optional)" text after the label.
+- `tooltip`: ReactNode
+  Tooltip content displayed next to the label via an info icon.
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `htmlFor`: string
+  The id of the form element this label is associated with
+- `asContent`: boolean
+  When true, only renders the inline content (indicators, tooltip) without the outer label element with font styling. Useful when composed inside another label element that already provides the text styling.
+
+**Colors (kumo tokens used):**
 
 `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -5196,23 +5202,17 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <Input label="Phone Number" required={false} placeholder="+1 555-0000" />
 ```
-
-Example 3:
 
 ```tsx
 <Input
       label="API Key"
       labelTooltip="Find this in your dashboard settings under API > Keys"
-      placeholder="<API_KEY>"
+      placeholder="sk_live_..."
     />
 ```
-
-Example 4:
 
 ```tsx
 <Checkbox
@@ -5223,8 +5223,6 @@ Example 4:
       }
     />
 ```
-
-Example 5:
 
 ```tsx
 <div className="flex max-w-md flex-col gap-4">
@@ -5244,88 +5242,52 @@ Example 5:
     </div>
 ```
 
-Example 6:
 
-```tsx
-<div className="flex flex-col gap-3">
-      <Label>Default</Label>
-      <Label showOptional>Optional</Label>
-      <Label tooltip="Important field">With Tooltip</Label>
-    </div>
-```
+---
 
+### LayerCard
 
-## LayerCard
+LayerCard component
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: LayerCard component
+**Type:** component
 
-**Props**
+**Import:** `import { LayerCard } from "@cloudflare/kumo";`
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `render` | ReactNode | No | - | - | Allows you to replace the component's HTML element with a different tag, or compose it with another component.  Accepts a `ReactElement` or a function that returns the element to render. |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
+**Category:** Display
 
-**Subcomponents**
+**Props:**
 
-### LayerCard.Primary
+- `render`: ReactNode
+  Allows you to replace the component's HTML element with a different tag, or compose it with another component.
 
-- Description: Primary sub-component
+Accepts a `ReactElement` or a function that returns the element to render.
+- `children`: ReactNode
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
 
-Props:
-
-- None
-
-### LayerCard.Secondary
-
-- Description: Secondary sub-component
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-elevated`, `ring-kumo-fill`, `ring-kumo-hairline`, `ring-kumo-line`, `text-kumo-subtle`
 
-**Styling**
-
-```json
-{
-  "container": {
-    "width": 280,
-    "borderRadius": 8
-  },
-  "secondary": {
-    "paddingX": 8,
-    "paddingY": 8,
-    "gap": 8,
-    "fontSize": 16,
-    "fontWeight": 500
-  },
-  "primary": {
-    "paddingX": 16,
-    "paddingY": 16,
-    "paddingRight": 12,
-    "gap": 8,
-    "fontSize": 16,
-    "fontWeight": 400,
-    "borderRadius": 8
-  }
-}
-```
+**Styling:**
 
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### LayerCard.Primary
+
+Primary sub-component
+
+#### LayerCard.Secondary
+
+Secondary sub-component
+
+
+**Examples:**
 
 ```tsx
 <LayerCard>
@@ -5345,8 +5307,6 @@ Example 1:
     </LayerCard>
 ```
 
-Example 2:
-
 ```tsx
 <LayerCard className="w-[250px]">
       <LayerCard.Secondary>Getting Started</LayerCard.Secondary>
@@ -5357,16 +5317,6 @@ Example 2:
       </LayerCard.Primary>
     </LayerCard>
 ```
-
-Example 3:
-
-```tsx
-<LayerCard className="w-[250px] p-4">
-      <p className="text-sm text-kumo-subtle">Quick start guide for new users</p>
-    </LayerCard>
-```
-
-Example 4:
 
 ```tsx
 <LayerCard className="w-[250px]">
@@ -5380,8 +5330,6 @@ Example 4:
       </LayerCard.Primary>
     </LayerCard>
 ```
-
-Example 5:
 
 ```tsx
 <div className="flex gap-4">
@@ -5401,51 +5349,57 @@ Example 5:
 ```
 
 
-## Link
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Link component
+### Link
 
-**Props**
+Link component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | inline | `inline`, `current`, `plain` | Visual style of the link. - `"inline"` - Inline text link that flows with content - `"current"` - Link that inherits color from parent text - `"plain"` - Link without underline decoration |
-| `to` | string | No | - | - | - |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
-| `download` | unknown | No | - | - | - |
-| `href` | string | No | - | - | - |
-| `hrefLang` | string | No | - | - | - |
-| `media` | string | No | - | - | - |
-| `ping` | string | No | - | - | - |
-| `target` | React.HTMLAttributeAnchorTarget | No | - | - | - |
-| `type` | string | No | - | - | - |
-| `referrerPolicy` | enum | No | - | ``, `no-referrer`, `no-referrer-when-downgrade`, `origin`, `origin-when-cross-origin`, `same-origin`, `strict-origin`, `strict-origin-when-cross-origin`, `unsafe-url` | - |
-| `render` | ReactNode | No | - | - | Allows you to replace the component's HTML element with a different tag, or compose it with another component.  Accepts a `ReactElement` or a function that returns the element to render. |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Link } from "@cloudflare/kumo";`
 
-### Link.ExternalIcon
+**Category:** Other
 
-- Description: ExternalIcon sub-component
+**Props:**
 
-Props:
+- `variant`: enum [default: inline]
+  - `"inline"`: Inline text link that flows with content
+  - `"current"`: Link that inherits color from parent text
+  - `"plain"`: Link without underline decoration
+- `to`: string
+- `children`: ReactNode
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
+- `download`: unknown
+- `href`: string
+- `hrefLang`: string
+- `media`: string
+- `ping`: string
+- `target`: React.HTMLAttributeAnchorTarget
+- `type`: string
+- `referrerPolicy`: enum
+- `render`: ReactNode
+  Allows you to replace the component's HTML element with a different tag, or compose it with another component.
 
-- None
+Accepts a `ReactElement` or a function that returns the element to render.
 
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `text-kumo-link`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Link.ExternalIcon
+
+ExternalIcon sub-component
+
+
+**Examples:**
 
 ```tsx
 <div className="grid gap-x-6 gap-y-4 text-base md:grid-cols-3">
@@ -5459,8 +5413,6 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <p className="mx-auto max-w-md text-base leading-relaxed text-kumo-default">
       This is a paragraph with an <Link href="#">inline link</Link> that flows
@@ -5468,8 +5420,6 @@ Example 2:
       offset for readability.
     </p>
 ```
-
-Example 3:
 
 ```tsx
 <Link
@@ -5482,8 +5432,6 @@ Example 3:
     </Link>
 ```
 
-Example 4:
-
 ```tsx
 <p className="text-base text-kumo-danger">
       This error message contains a{" "}
@@ -5493,8 +5441,6 @@ Example 4:
       that inherits the red color from its parent.
     </p>
 ```
-
-Example 5:
 
 ```tsx
 <div className="flex flex-col gap-x-6 gap-y-4 text-base md:flex-row">
@@ -5517,29 +5463,28 @@ Example 5:
 ```
 
 
-## Loader
+---
 
-- Type: component
-- Category: Feedback
-- Import path: `@cloudflare/kumo`
-- Description: Animated circular spinner for indicating loading states.
+### Loader
 
-**Props**
+Animated circular spinner for indicating loading states.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `size` | enum | No | base | `sm`, `base`, `lg` | Size of the spinner. Use a preset name or a custom pixel number. - `"sm"` - 16px, for inline use - `"base"` - 24px, default size - `"lg"` - 32px, for prominent loading states |
+**Type:** component
 
-**Examples**
+**Import:** `import { Loader } from "@cloudflare/kumo";`
 
-Example 1:
+**Category:** Feedback
 
-```tsx
-<Loader />
-```
+**Props:**
 
-Example 2:
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `size`: enum [default: base]
+  - `"sm"`: Small loader for inline use
+  - `"base"`: Default loader size
+  - `"lg"`: Large loader for prominent loading states
+
+**Examples:**
 
 ```tsx
 <div className="flex items-center gap-4">
@@ -5549,107 +5494,46 @@ Example 2:
     </div>
 ```
 
-Example 3:
-
 ```tsx
 <Loader size={24} />
 ```
-
-Example 4:
 
 ```tsx
 <Loader className="text-kumo-subtle" />
 ```
 
 
-## MenuBar
+---
 
-- Type: component
-- Category: Navigation
-- Import path: `@cloudflare/kumo`
-- Description: MenuBar - horizontal icon-button toolbar with keyboard arrow-key navigation.  Each option renders as a `<button>` with a Tooltip. The active option is visually highlighted with an elevated background.
+### MenuBar
 
-**Props**
+MenuBar — horizontal icon-button toolbar with keyboard arrow-key navigation.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `isActive` | number \| boolean \| string | No | - | - | The currently active option value - matched against option index or `id`. |
-| `options` | MenuOptionProps[] | Yes | - | - | Array of menu option configurations. |
-| `optionIds` | boolean | No | - | - | When true, each option's `id` field is used for matching instead of its array index. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { MenuBar } from "@cloudflare/kumo";`
+
+**Category:** Navigation
+
+**Props:**
+
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `isActive`: number | boolean | string
+  The currently active option value — matched against option index or `id`.
+- `options`: MenuOptionProps[] (required)
+  Array of menu option configurations.
+- `optionIds`: boolean
+  When true, each option's `id` field is used for matching instead of its array index.
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-recessed`, `border-kumo-recessed`, `ring-kumo-brand`, `ring-kumo-focus`, `ring-kumo-line`
 
-**Styling**
-
-```json
-{
-  "container": {
-    "height": 32,
-    "borderRadius": 8,
-    "padding": 2,
-    "gap": 2
-  },
-  "button": {
-    "width": 36,
-    "borderRadius": 6,
-    "iconSize": 18
-  }
-}
-```
+**Styling:**
 
 
-**Examples**
-
-Example 1:
-
-```tsx
-<MenuBar
-      isActive={active}
-      optionIds
-      options={[
-        {
-          icon: <TextBolderIcon />,
-          id: "bold",
-          tooltip: "Bold",
-          onClick: () => setActive(active === "bold" ? undefined : "bold"),
-        },
-        {
-          icon: <TextItalicIcon />,
-          id: "italic",
-          tooltip: "Italic",
-          onClick: () => setActive(active === "italic" ? undefined : "italic"),
-        },
-      ]}
-    />
-```
-
-Example 2:
-
-```tsx
-<MenuBar
-      isActive={active}
-      optionIds
-      options={[
-        {
-          icon: <TextBolderIcon />,
-          id: "bold",
-          tooltip: "Bold",
-          onClick: () => setActive(active === "bold" ? undefined : "bold"),
-        },
-        {
-          icon: <TextItalicIcon />,
-          id: "italic",
-          tooltip: "Italic",
-          onClick: () => setActive(active === "italic" ? undefined : "italic"),
-        },
-      ]}
-    />
-```
-
-Example 3:
+**Examples:**
 
 ```tsx
 <MenuBar
@@ -5673,63 +5557,54 @@ Example 3:
 ```
 
 
-## Meter
+---
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Progress bar showing a measured value within a known range (e.g. quota usage).
+### Meter
 
-**Props**
+Progress bar showing a measured value within a known range (e.g. quota usage).
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `customValue` | string | No | - | - | Custom formatted value text (e.g. "750 / 1,000") displayed instead of percentage. |
-| `label` | string | Yes | - | - | Label text displayed above the meter track. |
-| `showValue` | boolean | No | - | - | Whether to display the percentage value next to the label. |
-| `trackClassName` | string | No | - | - | Additional CSS classes for the track (background bar). |
-| `indicatorClassName` | string | No | - | - | Additional CSS classes for the indicator (filled bar). |
-| `value` | number | No | - | - | Current value of the meter |
-| `max` | number | No | - | - | Maximum value of the meter (default: 100) |
-| `min` | number | No | - | - | Minimum value of the meter (default: 0) |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Meter } from "@cloudflare/kumo";`
+
+**Category:** Display
+
+**Props:**
+
+- `customValue`: string
+  Custom formatted value text (e.g. "750 / 1,000") displayed instead of percentage.
+- `label`: string (required)
+  Label text displayed above the meter track.
+- `showValue`: boolean
+  Whether to display the percentage value next to the label.
+- `trackClassName`: string
+  Additional CSS classes for the track (background bar).
+- `indicatorClassName`: string
+  Additional CSS classes for the indicator (filled bar).
+- `value`: number
+  Current value of the meter
+- `max`: number
+  Maximum value of the meter (default: 100)
+- `min`: number
+  Minimum value of the meter (default: 0)
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-fill`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <Meter label="Storage used" value={65} />
 ```
 
-Example 2:
-
 ```tsx
 <Meter label="API requests" value={75} customValue="750 / 1,000" />
 ```
 
-Example 3:
-
 ```tsx
 <Meter label="Progress" value={40} showValue={false} />
 ```
-
-Example 4:
-
-```tsx
-<Meter label="Quota reached" value={100} />
-```
-
-Example 5:
-
-```tsx
-<Meter label="Memory usage" value={15} />
-```
-
-Example 6:
 
 ```tsx
 <Meter
@@ -5740,108 +5615,98 @@ Example 6:
 ```
 
 
-## Pagination
+---
 
-- Type: component
-- Category: Navigation
-- Import path: `@cloudflare/kumo`
-- Description: Pagination component
+### Pagination
 
-**Props**
+Pagination component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `setPage` | (page: number) => void | Yes | - | - | Callback when page changes |
-| `page` | number | No | - | - | Current page number (1-indexed). |
-| `perPage` | number | No | - | - | Number of items displayed per page. |
-| `totalCount` | number | No | - | - | Total number of items across all pages. |
-| `className` | string | No | - | - | Additional CSS classes for the container |
-| `labels` | PaginationLabels | No | - | - | Labels for internationalization of aria-labels. All labels have English defaults.  For visible text like "Showing X of Y", use render props on sub-components: - `Pagination.Info` children for the info text - `Pagination.PageSize` label prop for the "Per page:" text |
-| `children` | ReactNode | No | - | - | Compound component children for custom layouts. Use Pagination.Info, Pagination.PageSize, Pagination.Controls, and Pagination.Separator. |
-| `controls` | enum | No | full | `full`, `simple` | `{"full":"Full pagination controls with first, previous, page input, next, and last buttons","simple":"Simple pagination controls with only previous and next buttons"}` |
-| `text` | object | No | - | - | - |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Pagination } from "@cloudflare/kumo";`
 
-### Pagination.Info
+**Category:** Navigation
 
-- Description: Info sub-component
+**Props:**
 
-Props:
+- `setPage`: (page: number) => void (required)
+  Callback when page changes
+- `page`: number
+  Current page number (1-indexed).
+- `perPage`: number
+  Number of items displayed per page.
+- `totalCount`: number
+  Total number of items across all pages.
+- `className`: string
+  Additional CSS classes for the container
+- `labels`: PaginationLabels
+  Labels for internationalization of aria-labels. All labels have English defaults.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | (props: { | No | - | - | - |
-| `page` | number | Yes | - | - | - |
-| `perPage` | number | No | - | - | - |
-| `totalCount` | number | No | - | - | - |
-| `pageShowingRange` | string | Yes | - | - | - |
+For visible text like "Showing X of Y", use render props on sub-components:
+- `Pagination.Info` children for the info text
+- `Pagination.PageSize` label prop for the "Per page:" text
+- `children`: ReactNode
+  Compound component children for custom layouts. Use Pagination.Info, Pagination.PageSize, Pagination.Controls, and Pagination.Separator.
+- `controls`: enum [default: full]
+  - `"full"`: Full pagination controls with first, previous, page input, next, and last buttons
+  - `"simple"`: Simple pagination controls with only previous and next buttons
+- `text`: object
 
-### Pagination.PageSize
-
-- Description: PageSize sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `value` | number | Yes | - | - | - |
-| `options` | number[] | No | - | - | - |
-| `page` | " | Yes | - | - | - |
-| `label` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-
-### Pagination.Controls
-
-- Description: Controls sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `Note` | ** `"dropdown"` renders an option for every page | Yes | - | - | - |
-| `pageSelector` | "input" \| "dropdown" | No | - | - | - |
-| `className` | string | No | - | - | - |
-
-### Pagination.Separator
-
-- Description: Separator sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `border-kumo-hairline`, `ring-kumo-hairline`, `text-kumo-subtle`
 
-**Styling**
-
-```json
-{
-  "layout": {
-    "height": 36,
-    "buttonSize": 36,
-    "inputWidth": 50,
-    "iconSize": 16,
-    "gap": 8,
-    "borderRadius": 6
-  }
-}
-```
+**Styling:**
 
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Pagination.Info
+
+Info sub-component
+
+Props:
+- `children`: (props: {
+    page: number;
+    perPage?: number;
+    totalCount?: number;
+    pageShowingRange: string;
+  }) => ReactNode - Custom render function for the info text
+- `className`: string - Additional CSS classes
+
+#### Pagination.PageSize
+
+PageSize sub-component
+
+Props:
+- `value`: number (required) - Current page size value
+- `options`: number[] - Available page size options
+- `label`: ReactNode - Label text shown before the selector.
+- `className`: string - Additional CSS classes
+
+#### Pagination.Controls
+
+Controls sub-component
+
+Props:
+- `pageSelector`: "input" | "dropdown" - How the page number selector is rendered in "full" controls mode. - `"input"` (default): A text input where users type a page number. - `"dropdown"`: A dropdown select with all page numbers as options. **Note:** `"dropdown"` renders an option for every page, so it is best suited for small page counts. For large datasets (hundreds of pages or more) prefer `"input"` to avoid rendering performance overhead.
+- `className`: string - Additional CSS classes
+
+#### Pagination.Separator
+
+Separator sub-component
+
+Props:
+- `className`: string - Additional CSS classes
+
+
+**Examples:**
 
 ```tsx
 <Pagination page={page} setPage={setPage} perPage={10} totalCount={100} />
 ```
-
-Example 2:
 
 ```tsx
 <Pagination
@@ -5852,32 +5717,6 @@ Example 2:
       controls="simple"
     />
 ```
-
-Example 3:
-
-```tsx
-<Pagination
-      page={page}
-      setPage={setPage}
-      perPage={10}
-      totalCount={100}
-      controls="full"
-    />
-```
-
-Example 4:
-
-```tsx
-<Pagination page={page} setPage={setPage} perPage={10} totalCount={100} />
-```
-
-Example 5:
-
-```tsx
-<Pagination page={page} setPage={setPage} perPage={25} totalCount={1250} />
-```
-
-Example 6:
 
 ```tsx
 <Pagination
@@ -5890,8 +5729,6 @@ Example 6:
       totalCount={100}
     />
 ```
-
-Example 7:
 
 ```tsx
 <Pagination
@@ -5912,8 +5749,6 @@ Example 7:
       <Pagination.Controls />
     </Pagination>
 ```
-
-Example 8:
 
 ```tsx
 <Pagination
@@ -5936,21 +5771,6 @@ Example 8:
     </Pagination>
 ```
 
-Example 9:
-
-```tsx
-<Pagination page={page} setPage={setPage} perPage={25} totalCount={100}>
-      <Pagination.Info>
-        {({ page, totalCount }) =>
-          `Page ${page} of ${Math.ceil((totalCount ?? 1) / 25)}`
-        }
-      </Pagination.Info>
-      <Pagination.Controls />
-    </Pagination>
-```
-
-Example 10:
-
 ```tsx
 <Pagination
       page={page}
@@ -5970,8 +5790,6 @@ Example 10:
       <Pagination.Controls pageSelector="dropdown" />
     </Pagination>
 ```
-
-Example 11:
 
 ```tsx
 <Pagination
@@ -5995,8 +5813,6 @@ Example 11:
     </Pagination>
 ```
 
-Example 12:
-
 ```tsx
 <Pagination
       page={page}
@@ -6004,11 +5820,11 @@ Example 12:
       perPage={10}
       totalCount={100}
       labels={{
-        firstPage: "Premie?re page",
-        previousPage: "Page pre?ce?dente",
+        firstPage: "Première page",
+        previousPage: "Page précédente",
         nextPage: "Page suivante",
-        lastPage: "Dernie?re page",
-        pageNumber: "Nume?ro de page",
+        lastPage: "Dernière page",
+        pageNumber: "Numéro de page",
         pageSize: "Taille de page",
       }}
     >
@@ -6026,68 +5842,56 @@ Example 12:
 ```
 
 
-## Popover
+---
 
-- Type: component
-- Category: Overlay
-- Import path: `@cloudflare/kumo`
-- Description: Popover component for displaying accessible popup content anchored to a trigger.
+### Popover
 
-**Props**
+Popover component for displaying accessible popup content anchored to a trigger.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `side` | enum | No | bottom | `top`, `bottom`, `left`, `right` | Which side of the trigger the popover appears on. - `"top"` - Above the trigger - `"bottom"` - Below the trigger - `"left"` - Left of the trigger - `"right"` - Right of the trigger |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Popover } from "@cloudflare/kumo";`
 
-### Popover.Trigger
+**Category:** Overlay
 
-- Description: Trigger sub-component
+**Props:**
 
-Props:
+- `side`: enum [default: bottom]
+  - `"top"`: Popover appears above the trigger
+  - `"bottom"`: Popover appears below the trigger
+  - `"left"`: Popover appears to the left of the trigger
+  - `"right"`: Popover appears to the right of the trigger
 
-- None
-
-### Popover.Content
-
-- Description: Content sub-component
-
-Props:
-
-- None
-
-### Popover.Title
-
-- Description: Title sub-component
-
-Props:
-
-- None
-
-### Popover.Description
-
-- Description: Description sub-component
-
-Props:
-
-- None
-
-### Popover.Close
-
-- Description: Close sub-component
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `fill-kumo-base`, `fill-kumo-tip-shadow`, `fill-kumo-tip-stroke`, `outline-kumo-fill`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Popover.Trigger
+
+Trigger sub-component
+
+#### Popover.Content
+
+Content sub-component
+
+#### Popover.Title
+
+Title sub-component
+
+#### Popover.Description
+
+Description sub-component
+
+#### Popover.Close
+
+Close sub-component
+
+
+**Examples:**
 
 ```tsx
 <Popover>
@@ -6105,8 +5909,6 @@ Example 1:
     </Popover>
 ```
 
-Example 2:
-
 ```tsx
 <Popover>
       <Popover.Trigger render={<Button />}>Open Popover</Popover.Trigger>
@@ -6118,8 +5920,6 @@ Example 2:
       </Popover.Content>
     </Popover>
 ```
-
-Example 3:
 
 ```tsx
 <Popover>
@@ -6137,8 +5937,6 @@ Example 3:
       </Popover.Content>
     </Popover>
 ```
-
-Example 4:
 
 ```tsx
 <div className="flex flex-wrap gap-4">
@@ -6186,8 +5984,6 @@ Example 4:
     </div>
 ```
 
-Example 5:
-
 ```tsx
 <Popover>
       <Popover.Trigger render={<Button />}>User Profile</Popover.Trigger>
@@ -6213,8 +6009,6 @@ Example 5:
     </Popover>
 ```
 
-Example 6:
-
 ```tsx
 <Popover>
       <Popover.Trigger
@@ -6238,8 +6032,6 @@ Example 6:
       </Popover.Content>
     </Popover>
 ```
-
-Example 7:
 
 ```tsx
 <div className="w-full">
@@ -6307,78 +6099,91 @@ Example 7:
 ```
 
 
-## Radio
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Radio - radio button group for single-select choices.  Compound component: `Radio.Group` (with built-in Fieldset), `Radio.Item`, and `Radio.Legend`. Built on `@base-ui/react/radio-group` + `@base-ui/react/radio`.
+### Radio
 
-**Props**
+Radio — radio button group for single-select choices.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `legend` | string | No | - | - | Legend text for the group (required for accessibility). For more control over legend styling, omit this prop and use `<Radio.Legend>` as a child instead. |
-| `children` | ReactNode | No | - | - | Child Radio.Item components (and optionally a Radio.Legend) |
-| `orientation` | enum | No | - | `vertical`, `horizontal` | Layout direction of the radio items |
-| `appearance` | enum | No | default | `default`, `card` | Visual appearance applied to all Radio.Item children. - `"default"` - Standard inline radio items - `"card"` - Choice card with border, padding, and highlighted selection state  Individual items can override this with their own `appearance` prop. |
-| `error` | string | No | - | - | Error message for the group |
-| `description` | ReactNode | No | - | - | Helper text for the group |
-| `value` | string | No | - | - | Value of the radio that should be selected (controlled) |
-| `disabled` | boolean | No | - | - | Whether all radios in the group are disabled |
-| `controlPosition` | enum | No | - | `start`, `end` | Position of radio control relative to label: "start" puts radio before label, "end" puts label before radio. Defaults to "start" for default appearance and "end" for card appearance. |
-| `name` | string | No | - | - | Form submission name for the radio group |
-| `className` | string | No | - | - | Additional CSS classes |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Radio } from "@cloudflare/kumo";`
 
-### Radio.Item
+**Category:** Input
 
-- Description: Item sub-component
+**Props:**
 
-Props:
+- `variant`: enum [default: default]
+  - `"default"`: Default radio appearance
+  - `"error"`: Error state for validation failures
+- `appearance`: KumoRadioAppearance
+  Visual appearance applied to all Radio.Item children. - `"default"` — Standard inline radio items - `"card"` — Choice card with border, padding, and highlighted selection state Individual items can override this with their own `appearance` prop.
+- `legend`: string
+  Legend text for the group (required for accessibility). For more control over legend styling, omit this prop and use `<Radio.Legend>` as a child instead.
+- `children`: ReactNode (required)
+  Child Radio.Item components (and optionally a Radio.Legend)
+- `orientation`: "vertical" | "horizontal"
+  Layout direction of the radio items
+- `error`: string
+  Error message for the group
+- `description`: ReactNode
+  Helper text for the group
+- `value`: T
+  The controlled value of the selected radio item.
+- `disabled`: boolean
+  Whether all radios in the group are disabled
+- `controlPosition`: RadioControlPosition
+  Position of radio control relative to label: "start" puts radio before label, "end" puts label before radio. Defaults to "start" for default appearance and "end" for card appearance.
+- `name`: string
+  Form submission name for the radio group
+- `className`: string
+  Additional CSS classes
+- `defaultValue`: T
+  The uncontrolled initial value of the selected radio item.
+- `onValueChange`: (value: T, eventDetails: RadioGroupChangeEventDetails) => void
+  Callback fired when the selected value changes. The second argument carries native event details about the interaction.
 
-- None
-
-### Radio.Group
-
-- Description: Group sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `legend` | string | No | - | - | - |
-| `children` | ReactNode | Yes | - | - | - |
-| `orientation` | "vertical" \| "horizontal" | No | - | - | - |
-| `appearance` | KumoRadioAppearance | No | - | - | - |
-| `error` | string | No | - | - | - |
-| `description` | ReactNode | No | - | - | - |
-| `value` | string | No | - | - | - |
-| `disabled` | boolean | No | - | - | - |
-| `label` | "start" puts radio before label | Yes | - | - | - |
-| `controlPosition` | RadioControlPosition | No | - | - | - |
-| `name` | string | No | - | - | - |
-| `className` | string | No | - | - | - |
-
-### Radio.Legend
-
-- Description: Legend sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | Yes | - | - | - |
-| `className` | string | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-contrast`, `bg-kumo-tint`, `border-kumo-danger`, `border-kumo-hairline`, `border-kumo-interact`, `ring-kumo-brand`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-hairline`, `ring-kumo-line`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Radio.Item
+
+Item sub-component
+
+#### Radio.Group
+
+Group sub-component
+
+Props:
+- `legend`: string - Legend text for the group (required for accessibility). For more control over legend styling, omit this prop and use `<Radio.Legend>` as a child instead.
+- `children`: ReactNode (required) - Child Radio.Item components (and optionally a Radio.Legend)
+- `orientation`: "vertical" | "horizontal" - Layout direction of the radio items
+- `appearance`: KumoRadioAppearance - Visual appearance applied to all Radio.Item children. - `"default"` — Standard inline radio items - `"card"` — Choice card with border, padding, and highlighted selection state Individual items can override this with their own `appearance` prop.
+- `error`: string - Error message for the group
+- `description`: ReactNode - Helper text for the group
+- `value`: T - The controlled value of the selected radio item.
+- `disabled`: boolean - Whether all radios in the group are disabled
+- `controlPosition`: RadioControlPosition - Position of radio control relative to label: "start" puts radio before label, "end" puts label before radio. Defaults to "start" for default appearance and "end" for card appearance.
+- `name`: string - Form submission name for the radio group
+- `className`: string - Additional CSS classes
+- `defaultValue`: T - The uncontrolled initial value of the selected radio item.
+- `onValueChange`: (value: T, eventDetails: RadioGroupChangeEventDetails) => void - Callback fired when the selected value changes. The second argument carries native event details about the interaction.
+
+#### Radio.Legend
+
+Legend sub-component
+
+Props:
+- `children`: ReactNode (required) - Legend content
+- `className`: string - Additional CSS classes (e.g. "sr-only" to visually hide the legend)
+
+
+**Examples:**
 
 ```tsx
 <Radio.Group
@@ -6391,18 +6196,6 @@ Example 1:
       <Radio.Item label="Push notification" value="push" />
     </Radio.Group>
 ```
-
-Example 2:
-
-```tsx
-<Radio.Group legend="Account type" value={value} onValueChange={setValue}>
-      <Radio.Item label="Personal" value="personal" />
-      <Radio.Item label="Business" value="business" />
-      <Radio.Item label="Enterprise" value="enterprise" />
-    </Radio.Group>
-```
-
-Example 3:
 
 ```tsx
 <Radio.Group
@@ -6417,8 +6210,6 @@ Example 3:
     </Radio.Group>
 ```
 
-Example 4:
-
 ```tsx
 <Radio.Group
       legend="Shipping method"
@@ -6431,8 +6222,6 @@ Example 4:
       <Radio.Item label="Overnight" value="overnight" />
     </Radio.Group>
 ```
-
-Example 5:
 
 ```tsx
 <div className="grid grid-cols-2 gap-6">
@@ -6463,8 +6252,6 @@ Example 5:
       </Radio.Group>
     </div>
 ```
-
-Example 6:
 
 ```tsx
 <div className="grid grid-cols-2 gap-6">
@@ -6513,16 +6300,12 @@ Example 6:
     </div>
 ```
 
-Example 7:
-
 ```tsx
 <Radio.Group legend="Preferences" controlPosition="end" defaultValue="a">
       <Radio.Item label="Label before radio" value="a" />
       <Radio.Item label="Another option" value="b" />
     </Radio.Group>
 ```
-
-Example 8:
 
 ```tsx
 <Radio.Group
@@ -6554,8 +6337,6 @@ Example 8:
     </Radio.Group>
 ```
 
-Example 9:
-
 ```tsx
 <Radio.Group defaultValue="all" value={value} onValueChange={setValue}>
       <Radio.Legend className="sr-only">Paths</Radio.Legend>
@@ -6563,8 +6344,6 @@ Example 9:
       <Radio.Item label="Restrict to specific paths" value="specific" />
     </Radio.Group>
 ```
-
-Example 10:
 
 ```tsx
 <Radio.Group value={value} onValueChange={setValue}>
@@ -6576,8 +6355,6 @@ Example 10:
       <Radio.Item label="Push notification" value="push" />
     </Radio.Group>
 ```
-
-Example 11:
 
 ```tsx
 <Radio.Group
@@ -6600,7 +6377,28 @@ Example 11:
     </Radio.Group>
 ```
 
-Example 12:
+```tsx
+<div className="grid grid-cols-2 gap-6">
+      <Radio.Group<number>
+        legend="Items per page"
+        value={pageSize}
+        onValueChange={setPageSize}
+      >
+        <Radio.Item<number> label="10" value={10} />
+        <Radio.Item<number> label="25" value={25} />
+        <Radio.Item<number> label="50" value={50} />
+      </Radio.Group>
+      <Radio.Group<ThemeType>
+        legend="Theme"
+        value={theme}
+        onValueChange={setTheme}
+      >
+        <Radio.Item<ThemeType> label="Light" value={ThemeType.light} />
+        <Radio.Item<ThemeType> label="Dark" value={ThemeType.dark} />
+        <Radio.Item<ThemeType> label="System" value={ThemeType.system} />
+      </Radio.Group>
+    </div>
+```
 
 ```tsx
 <Radio.Group
@@ -6631,8 +6429,6 @@ Example 12:
       />
     </Radio.Group>
 ```
-
-Example 13:
 
 ```tsx
 <Radio.Group
@@ -6666,126 +6462,252 @@ Example 13:
 ```
 
 
-## Select
+---
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Select component
+### SankeyChart
 
-**Props**
+SankeyChart component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | Additional CSS classes merged via `cn()`. |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | Size of the select trigger. Matches Input component sizes. |
-| `label` | ReactNode | No | - | - | Label content for the select. When provided, enables the Field wrapper with a visible label above the select. For accessibility without a visible label, use `aria-label` instead. |
-| `hideLabel` | boolean | No | - | - | - |
-| `placeholder` | string | No | - | - | Placeholder text shown when no value is selected. |
-| `loading` | boolean | No | - | - | When `true`, shows a skeleton loader in place of the selected value. |
-| `disabled` | boolean | No | - | - | Whether the select is disabled. |
-| `required` | boolean | No | - | - | Whether the select is required. When `false`, shows "(optional)" text. |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content displayed next to the label via an info icon. |
-| `value` | T | No | - | - | Currently selected value (controlled mode). |
-| `children` | ReactNode | No | - | - | `Select.Option` elements to render in the dropdown. |
-| `description` | ReactNode | No | - | - | Helper text displayed below the select. |
-| `error` | string \| object | No | - | - | Error message string or validation error object with `match` key. |
-| `onValueChange` | (value: T) => void | No | - | - | Callback when selection changes |
-| `defaultValue` | T | No | - | - | Initial value for uncontrolled mode |
-| `renderValue` | (value: T) => ReactNode | No | - | - | A function that returns a ReactNode to format the selected value in the trigger. Required when using object values. Use `placeholder` for the empty state. |
-| `items` | Record<string, string> \| Array<{ label: ReactNode; value: T }> | No | - | - | Data structure of items rendered in the popup. Accepts a plain object map (`{ key: "Label" }`) or an array of `{ label, value }` for object/complex values. |
-| `isItemEqualToValue` | (item: T, value: T) => boolean | No | - | - | Custom equality function for comparing items. Required when value is an object, since object identity (`===`) won't match across renders. |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { SankeyChart } from "@cloudflare/kumo";`
 
-### Select.Option
+**Category:** Data Visualization
 
-- Description: Option sub-component
+**Props:**
 
-Props:
+- `echarts`: typeof echarts (required)
+  The ECharts core instance imported by the consumer. Passed in rather than imported directly so the consumer controls which ECharts modules are bundled (tree-shaking).
+- `nodes`: SankeyNodeData[] (required)
+  Array of nodes in the Sankey diagram
+- `links`: SankeyLinkData[] (required)
+  Array of links connecting nodes by index
+- `height`: number
+  Height of the chart in pixels
+- `showNodeValues`: boolean
+  Show node values above labels (default: true if any node has a value)
+- `nodeLabelLayout`: "stacked" | "inline"
+  Layout for node labels when showNodeValues is true. - 'stacked': value on top, name below (default) - 'inline': "value name" on a single line (better for small nodes)
+- `formatValue`: (value: number) => string
+  Format function for node values (default: toLocaleString)
+- `tooltipFormatter`: (params: SankeyTooltipParams) => string
+  Custom tooltip formatter. Return HTML string or empty string to hide tooltip.
+- `nodeWidth`: number
+- `nodePadding`: number
+- `showTooltip`: boolean
+- `defaultNodeColor`: string
+- `left`: number | string
+  Left padding of the Sankey layout within the chart container. Accepts a number (px) or percentage string. ECharts default: '5%'.
+- `right`: number | string
+  Right padding of the Sankey layout within the chart container. Accepts a number (px) or percentage string. ECharts default: '5%'.
+- `linkColor`: "gradient" | "gray"
+  Link fill style: 'gradient' blends source to target colors, 'gray' uses flat gray
+- `linkOpacity`: number
+- `className`: string
+- `isDarkMode`: boolean
 
-- None
+**Examples:**
 
-### Select.Group
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={basicNodes}
+      links={basicLinks}
+      height={350}
+      isDarkMode={isDarkMode}
+    />
+```
 
-- Description: Group sub-component
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={previewNodes}
+      links={previewLinks}
+      height={200}
+      showTooltip={false}
+      isDarkMode={isDarkMode}
+    />
+```
 
-Props:
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={multiLevelNodes}
+      links={multiLevelLinks}
+      height={350}
+      nodeWidth={20}
+      nodePadding={15}
+      isDarkMode={isDarkMode}
+    />
+```
 
-- None
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={nodes}
+      links={links}
+      height={250}
+      linkOpacity={0.6}
+      isDarkMode={isDarkMode}
+    />
+```
 
-### Select.GroupLabel
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={nodes}
+      links={links}
+      height={300}
+      tooltipFormatter={customTooltip}
+      isDarkMode={isDarkMode}
+    />
+```
 
-- Description: GroupLabel sub-component
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={basicNodes}
+      links={basicLinks}
+      height={350}
+      left={0}
+      right={0}
+      isDarkMode={isDarkMode}
+    />
+```
 
-Props:
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={basicNodes}
+      links={basicLinks}
+      height={350}
+      onNodeClick={handleNodeClick}
+      onLinkClick={handleLinkClick}
+      isDarkMode={isDarkMode}
+    />
+```
 
-- None
+```tsx
+<div className="flex w-full flex-col gap-2">
+      <div className="flex items-center gap-2 text-sm text-kumo-subtle">
+        <span>
+          {hasSelection
+            ? `Showing: ${[selectedSource, selectedTarget].filter(Boolean).join(" → ")}`
+            : "Click a node to filter"}
+        </span>
+        {hasSelection && (
+          <button
+            onClick={resetFilters}
+            className="text-kumo-brand hover:underline"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+      <SankeyChart
+        echarts={echarts}
+        nodes={filteredNodes}
+        links={filteredLinks}
+        height={300}
+        onNodeClick={handleNodeClick}
+        isDarkMode={isDarkMode}
+      />
+    </div>
+```
 
-### Select.Separator
-
-- Description: Separator sub-component
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
-
-`bg-kumo-base`, `bg-kumo-elevated`, `bg-kumo-hairline`, `bg-kumo-tint`, `border-kumo-line`, `ring-kumo-brand`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-line`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-placeholder`, `text-kumo-subtle`
-
-**Styling**
-
-```json
-{
-  "trigger": {
-    "height": 36,
-    "paddingX": 12,
-    "borderRadius": 8,
-    "background": "bg-kumo-elevated",
-    "text": "text-color-surface",
-    "ring": "color-border",
-    "fontSize": 16,
-    "fontWeight": 400
-  },
-  "stateTokens": {
-    "focus": {
-      "ring": "color-active"
-    },
-    "disabled": {
-      "opacity": 0.5
-    }
-  },
-  "icons": {
-    "caret": {
-      "name": "ph-caret-up-down",
-      "size": 20
-    },
-    "check": {
-      "name": "ph-check",
-      "size": 20
-    }
-  },
-  "popup": {
-    "background": "bg-kumo-elevated",
-    "ring": "border-kumo-line",
-    "borderRadius": 8,
-    "padding": 6
-  },
-  "option": {
-    "paddingX": 8,
-    "paddingY": 6,
-    "borderRadius": 4,
-    "fontSize": 16,
-    "highlightBackground": "color-surface-secondary"
-  }
-}
+```tsx
+<SankeyChart
+      echarts={echarts}
+      nodes={nodes}
+      links={links}
+      height={300}
+      nodeLabelLayout="inline"
+      isDarkMode={isDarkMode}
+    />
 ```
 
 
-**Examples**
+---
 
-Example 1:
+### Select
+
+Select component
+
+**Type:** component
+
+**Import:** `import { Select } from "@cloudflare/kumo";`
+
+**Category:** Input
+
+**Props:**
+
+- `className`: string
+  Additional CSS classes merged via `cn()`.
+- `render`: ReactNode
+  Replaces the trigger element while preserving Select behavior.
+- `size`: enum [default: base]
+  Size of the select trigger. Matches Input component sizes.
+- `label`: ReactNode
+  Label content for the select. When provided, enables the Field wrapper with a visible label above the select. For accessibility without a visible label, use `aria-label` instead.
+- `hideLabel`: boolean
+- `placeholder`: string
+  Placeholder text shown when no value is selected.
+- `loading`: boolean
+  When `true`, shows a skeleton loader in place of the selected value.
+- `disabled`: boolean
+  Whether the select is disabled.
+- `required`: boolean
+  Whether the select is required. When `false`, shows "(optional)" text.
+- `labelTooltip`: ReactNode
+  Tooltip content displayed next to the label via an info icon.
+- `value`: T
+  Currently selected value (controlled mode).
+- `children`: ReactNode
+  `Select.Option` elements to render in the dropdown.
+- `description`: ReactNode
+  Helper text displayed below the select.
+- `error`: string | object
+  Error message string or validation error object with `match` key.
+- `onValueChange`: (value: T) => void
+  Callback when selection changes
+- `defaultValue`: T
+  Initial value for uncontrolled mode
+- `renderValue`: (value: T) => ReactNode
+  A function that returns a ReactNode to format the selected value in the trigger. Required when using object values. Use `placeholder` for the empty state.
+- `items`: Record<string, string> | Array<{ label: ReactNode; value: T }>
+  Data structure of items rendered in the popup. Accepts a plain object map (`{ key: "Label" }`) or an array of `{ label, value }` for object/complex values.
+- `isItemEqualToValue`: (item: T, value: T) => boolean
+  Custom equality function for comparing items. Required when value is an object, since object identity (`===`) won't match across renders.
+
+**Colors (kumo tokens used):**
+
+`bg-kumo-base`, `bg-kumo-elevated`, `bg-kumo-hairline`, `bg-kumo-tint`, `border-kumo-line`, `ring-kumo-brand`, `ring-kumo-danger`, `ring-kumo-focus`, `ring-kumo-line`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-placeholder`, `text-kumo-subtle`
+
+**Styling:**
+
+
+**Sub-Components:**
+
+This is a compound component. Use these sub-components:
+
+#### Select.Option
+
+Option sub-component
+
+#### Select.Group
+
+Group sub-component
+
+#### Select.GroupLabel
+
+GroupLabel sub-component
+
+#### Select.Separator
+
+Separator sub-component
+
+
+**Examples:**
 
 ```tsx
 <Select
@@ -6796,8 +6718,6 @@ Example 1:
       items={{ apple: "Apple", banana: "Banana", cherry: "Cherry" }}
     />
 ```
-
-Example 2:
 
 ```tsx
 <div className="grid gap-4">
@@ -6844,20 +6764,6 @@ Example 2:
     </div>
 ```
 
-Example 3:
-
-```tsx
-<Select
-      aria-label="Select a fruit"
-      className="w-[200px]"
-      value={value}
-      onValueChange={(v) => setValue(v ?? "apple")}
-      items={{ apple: "Apple", banana: "Banana", cherry: "Cherry" }}
-    />
-```
-
-Example 4:
-
 ```tsx
 <Select
       label="Issue Type"
@@ -6873,8 +6779,6 @@ Example 4:
     />
 ```
 
-Example 5:
-
 ```tsx
 <Select
       label="Issue Type"
@@ -6888,8 +6792,6 @@ Example 5:
       }}
     />
 ```
-
-Example 6:
 
 ```tsx
 <Select
@@ -6905,8 +6807,6 @@ Example 6:
       }}
     />
 ```
-
-Example 7:
 
 ```tsx
 <Select
@@ -6924,8 +6824,6 @@ Example 7:
       }}
     />
 ```
-
-Example 8:
 
 ```tsx
 <Select
@@ -6947,13 +6845,9 @@ Example 8:
     </Select>
 ```
 
-Example 9:
-
 ```tsx
 <Select aria-label="Loading select" className="w-[200px]" loading />
 ```
-
-Example 10:
 
 ```tsx
 <Select
@@ -6966,8 +6860,6 @@ Example 10:
       items={items}
     />
 ```
-
-Example 11:
 
 ```tsx
 <Select
@@ -6996,8 +6888,6 @@ Example 11:
     </Select>
 ```
 
-Example 12:
-
 ```tsx
 <Select
       label="Compliance Frameworks"
@@ -7020,8 +6910,6 @@ Example 12:
       </Select.Option>
     </Select>
 ```
-
-Example 13:
 
 ```tsx
 <Select
@@ -7047,8 +6935,6 @@ Example 13:
     </Select>
 ```
 
-Example 14:
-
 ```tsx
 <Select
       label="Author"
@@ -7071,8 +6957,6 @@ Example 14:
     </Select>
 ```
 
-Example 15:
-
 ```tsx
 <Select
       label="Deployment Region"
@@ -7093,25 +6977,6 @@ Example 15:
       ))}
     </Select>
 ```
-
-Example 16:
-
-```tsx
-<Select
-      label="Plan"
-      className="w-[200px]"
-      value={value}
-      onValueChange={(v) => setValue(v as string | null)}
-      items={{
-        free: "Free",
-        pro: "Pro",
-        business: { label: "Business", disabled: true },
-        enterprise: { label: "Enterprise", disabled: true },
-      }}
-    />
-```
-
-Example 17:
 
 ```tsx
 <Select
@@ -7142,39 +7007,6 @@ Example 17:
     </Select>
 ```
 
-Example 18:
-
-```tsx
-<Select
-      label="Server Region"
-      placeholder="Select a region..."
-      className="w-[260px]"
-      value={value}
-      onValueChange={(v) => setValue(v as ServerRegion | null)}
-      isItemEqualToValue={(item, val) => item.value === val.value}
-    >
-      <Select.Group>
-        <Select.GroupLabel>Available</Select.GroupLabel>
-        {serverRegions.available.map((region) => (
-          <Select.Option key={region.value} value={region}>
-            {region.label}
-          </Select.Option>
-        ))}
-      </Select.Group>
-      <Select.Separator />
-      <Select.Group>
-        <Select.GroupLabel>Unavailable</Select.GroupLabel>
-        {serverRegions.unavailable.map((region) => (
-          <Select.Option key={region.value} value={region} disabled>
-            {region.label}
-          </Select.Option>
-        ))}
-      </Select.Group>
-    </Select>
-```
-
-Example 19:
-
 ```tsx
 <Select
       label="Long List Select"
@@ -7194,56 +7026,68 @@ Example 19:
 ```
 
 
-## SensitiveInput
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Password/secret input that masks its value by default and reveals on click. Includes a built-in copy-to-clipboard button on hover.
+### SensitiveInput
 
-**Props**
+Password/secret input that masks its value by default and reveals on click. Includes a built-in copy-to-clipboard button on hover.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `alt` | string | No | - | - | - |
-| `autoComplete` | React.HTMLInputAutoCompleteAttribute | No | - | - | - |
-| `checked` | boolean | No | - | - | - |
-| `disabled` | boolean | No | - | - | - |
-| `height` | number \| string | No | - | - | - |
-| `list` | string | No | - | - | - |
-| `name` | string | No | - | - | - |
-| `placeholder` | string | No | - | - | - |
-| `readOnly` | boolean | No | - | - | - |
-| `required` | boolean | No | - | - | - |
-| `width` | number \| string | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
-| `children` | ReactNode | No | - | - | - |
-| `value` | string | No | - | - | Controlled value |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | Size of the input. - `"xs"` - Extra small for compact UIs - `"sm"` - Small for secondary fields - `"base"` - Default input size - `"lg"` - Large for prominent fields |
-| `variant` | enum | No | default | `default`, `error` | Style variant of the input. - `"default"` - Default input appearance - `"error"` - Error state for validation failures |
-| `label` | ReactNode | No | - | - | Label content for the input (enables Field wrapper and sets masked state label) - can be a string or any React node |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content to display next to the label via an info icon |
-| `description` | ReactNode | No | - | - | Helper text displayed below the input |
-| `error` | string \| object | No | - | - | Error message or validation error object |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { SensitiveInput } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `alt`: string
+- `autoComplete`: React.HTMLInputAutoCompleteAttribute
+- `checked`: boolean
+- `disabled`: boolean
+- `height`: number | string
+- `list`: string
+- `name`: string
+- `placeholder`: string
+- `readOnly`: boolean
+- `required`: boolean
+- `width`: number | string
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
+- `children`: ReactNode
+- `value`: string
+  Controlled value
+- `size`: enum [default: base]
+  Size of the input.
+- `"xs"` — Extra small for compact UIs
+- `"sm"` — Small for secondary fields
+- `"base"` — Default input size
+- `"lg"` — Large for prominent fields
+- `variant`: enum [default: default]
+  Style variant of the input.
+- `"default"` — Default input appearance
+- `"error"` — Error state for validation failures
+- `label`: ReactNode
+  Label content for the input (enables Field wrapper and sets masked state label) - can be a string or any React node
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label via an info icon
+- `description`: ReactNode
+  Helper text displayed below the input
+- `error`: string | object
+  Error message or validation error object
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-brand`, `bg-kumo-control`, `outline-kumo-focus`, `ring-kumo-brand`, `ring-kumo-focus`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <div className="w-80">
       <SensitiveInput label="API Key" defaultValue="sk_live_abc123xyz789" />
     </div>
 ```
-
-Example 2:
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -7253,14 +7097,12 @@ Example 2:
           <SensitiveInput
             label={`${size} size`}
             size={size}
-            defaultValue="<SECRET>"
+            defaultValue="secret-api-key-123"
           />
         </div>
       ))}
     </div>
 ```
-
-Example 3:
 
 ```tsx
 <div className="flex w-80 flex-col gap-4">
@@ -7274,7 +7116,7 @@ Example 3:
       </div>
       <div className="flex gap-2">
         <Button
-          onClick={() => setValue("<SECRET>-" + Date.now())}
+          onClick={() => setValue("new-secret-" + Date.now())}
           variant="primary"
           size="sm"
         >
@@ -7287,8 +7129,6 @@ Example 3:
     </div>
 ```
 
-Example 4:
-
 ```tsx
 <div className="flex w-80 flex-col gap-4">
       <SensitiveInput
@@ -7300,333 +7140,359 @@ Example 4:
       <SensitiveInput label="Disabled" defaultValue="cannot-edit" disabled />
       <SensitiveInput
         label="Read-only"
-        defaultValue="<SECRET>"
+        defaultValue="view-only-secret-key"
         readOnly
       />
       <SensitiveInput
         label="With Description"
-        defaultValue="<SECRET>"
+        defaultValue="my-secret-value"
         description="Keep this value secure and don't share it"
       />
     </div>
 ```
 
 
-## Sidebar
-
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Sidebar - responsive navigation panel with expand/collapse support.  Compound component: `Sidebar` (root `<aside>`), `.Provider`, `.Header`, `.Content`, `.Footer`, `.Group`, `.GroupLabel`, `.Menu`, `.MenuItem`, `.MenuButton`, `.MenuBadge`, `.MenuSub`, `.MenuSubItem`, `.MenuSubButton`, `.Separator`, `.Trigger`, `.Rail`, `.MenuChevron`, `.Collapsible`, `.CollapsibleTrigger`, `.CollapsibleContent`.
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | Initial open state when uncontrolled. |
-| `open` | boolean | No | - | - | Controlled open state. |
-| `variant` | enum | No | sidebar | `sidebar`, `floating`, `inset` | Sidebar layout variant. |
-| `side` | enum | No | left | `left`, `right` | Which side the sidebar is on. |
-| `collapsible` | enum | No | icon | `icon`, `offcanvas`, `none` | `{"icon":"Collapses to show icons only","offcanvas":"Slides off screen when collapsed","none":"Cannot be collapsed"}` |
-| `resizable` | boolean | No | - | - | Enable drag-to-resize on the sidebar edge. |
-| `defaultWidth` | number | No | - | - | Initial width in pixels when resizable. |
-| `minWidth` | number | No | - | - | Minimum width in pixels when resizing. |
-| `maxWidth` | number | No | - | - | Maximum width in pixels when resizing. |
-| `contained` | boolean | No | - | - | When true, the collapsed sidebar uses absolute positioning instead of fixed, keeping it scoped inside a bounded parent. Useful for demos and embedded sidebars. |
-| `peekable` | boolean | No | - | - | When true, hovering or focusing the collapsed sidebar temporarily expands it. The `state` will be `"peeking"` during the peek. Moving away collapses it back. |
-| `animationDuration` | number | No | - | - | Duration of sidebar expand/collapse animation in milliseconds. |
-| `mobileBreakpoint` | number | No | - | - | Viewport width (in px) below which the sidebar renders as a mobile dialog sheet instead of the desktop aside rail. |
-| `children` | ReactNode | No | - | - | Content - typically `<Sidebar>` + main content. |
-| `className` | string | No | - | - | Additional CSS classes for the wrapper div. |
-
-**Subcomponents**
-
-### Sidebar.Provider
-
-- Description: Provider sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | - |
-| `open` | boolean | No | - | - | - |
-| `variant` | SidebarVariant | No | - | - | - |
-| `side` | SidebarSide | No | - | - | - |
-| `collapsible` | "icon" \| "offcanvas" \| "none" | No | - | - | - |
-| `resizable` | boolean | No | - | - | - |
-| `defaultWidth` | number | No | - | - | - |
-| `minWidth` | number | No | - | - | - |
-| `maxWidth` | number | No | - | - | - |
-| `contained` | boolean | No | - | - | - |
-| `peekable` | boolean | No | - | - | - |
-| `animationDuration` | number | No | - | - | - |
-| `mobileBreakpoint` | number | No | - | - | - |
-| `children` | ReactNode | Yes | - | - | - |
-| `className` | string | No | - | - | - |
-
-### Sidebar.Header
-
-- Description: Header sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.Content
-
-- Description: Content sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.Footer
-
-- Description: Footer sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.Group
-
-- Description: Group sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.GroupLabel
-
-- Description: GroupLabel sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.Menu
-
-- Description: Menu sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.MenuItem
-
-- Description: MenuItem sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.MenuButton
-
-- Description: MenuButton sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `icon` | React.ComponentType<{ className?: string | No | - | - | - |
-
-### Sidebar.MenuBadge
-
-- Description: MenuBadge sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `active` | boolean | No | - | - | - |
-| `href` | string | No | - | - | - |
-
-### Sidebar.MenuSub
-
-- Description: MenuSub sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `active` | boolean | No | - | - | - |
-| `href` | string | No | - | - | - |
-
-### Sidebar.MenuSubItem
-
-- Description: MenuSubItem sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `active` | boolean | No | - | - | - |
-| `href` | string | No | - | - | - |
-
-### Sidebar.MenuSubButton
-
-- Description: MenuSubButton sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `active` | boolean | No | - | - | - |
-| `href` | string | No | - | - | - |
-
-### Sidebar.Separator
-
-- Description: Separator sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | - |
-| `open` | boolean | No | - | - | - |
-| `autoScrollOnOpen` | boolean | No | - | - | - |
-
-### Sidebar.Trigger
-
-- Description: Trigger sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | - |
-| `open` | boolean | No | - | - | - |
-| `autoScrollOnOpen` | boolean | No | - | - | - |
-
-### Sidebar.Rail
-
-- Description: Rail sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | - |
-| `open` | boolean | No | - | - | - |
-| `autoScrollOnOpen` | boolean | No | - | - | - |
-
-### Sidebar.ResizeHandle
-
-- Description: ResizeHandle sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | - |
-| `open` | boolean | No | - | - | - |
-| `autoScrollOnOpen` | boolean | No | - | - | - |
-
-### Sidebar.MenuChevron
-
-- Description: MenuChevron sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `className` | string | No | - | - | - |
-
-### Sidebar.Collapsible
-
-- Description: Collapsible sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `defaultOpen` | boolean | No | - | - | - |
-| `open` | boolean | No | - | - | - |
-| `autoScrollOnOpen` | boolean | No | - | - | - |
-
-### Sidebar.CollapsibleTrigger
-
-- Description: CollapsibleTrigger sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `render` | React.ReactElement | Yes | - | - | - |
-
-### Sidebar.CollapsibleContent
-
-- Description: CollapsibleContent sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `activeKey` | string | Yes | - | - | - |
-| `direction` | "left" \| "right" | No | - | - | - |
-
-### Sidebar.SlidingViews
-
-- Description: SlidingViews sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `activeKey` | string | Yes | - | - | - |
-| `direction` | "left" \| "right" | No | - | - | - |
-
-### Sidebar.SlidingView
-
-- Description: SlidingView sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `value` | string | Yes | - | - | - |
-
-**Kumo Color Tokens**
+---
+
+### Sidebar
+
+Sidebar — responsive navigation panel with expand/collapse support.
+
+**Type:** component
+
+**Import:** `import { Sidebar } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `defaultOpen`: boolean
+  Initial open state when uncontrolled.
+- `open`: boolean
+  Controlled open state.
+- `variant`: enum [default: sidebar]
+  - `"sidebar"`: Standard sidebar with border separator
+  - `"floating"`: Floating sidebar with shadow and rounded corners
+  - `"inset"`: Inset sidebar within the content area
+- `side`: enum [default: left]
+  - `"left"`: Left-aligned sidebar
+  - `"right"`: Right-aligned sidebar
+- `collapsible`: enum [default: icon]
+  - `"icon"`: Collapses to show icons only
+  - `"offcanvas"`: Slides off screen when collapsed
+  - `"none"`: Cannot be collapsed
+- `resizable`: boolean
+  Enable drag-to-resize on the sidebar edge.
+- `defaultWidth`: number
+  Initial width in pixels when resizable.
+- `minWidth`: number
+  Minimum width in pixels when resizing.
+- `maxWidth`: number
+  Maximum width in pixels when resizing.
+- `contained`: boolean
+  When true, the collapsed sidebar uses absolute positioning instead of fixed, keeping it scoped inside a bounded parent. Useful for demos and embedded sidebars.
+- `peekable`: boolean
+  When true, hovering or focusing the collapsed sidebar temporarily expands it. The `state` will be `"peeking"` during the peek. Moving away collapses it back.
+- `animationDuration`: number
+  Duration of sidebar expand/collapse animation in milliseconds.
+- `mobileBreakpoint`: number
+  Viewport width (in px) below which the sidebar renders as a mobile dialog sheet instead of the desktop aside rail.
+- `children`: ReactNode
+  Content — typically `<Sidebar>` + main content.
+- `className`: string
+  Additional CSS classes for the wrapper div.
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-brand`, `bg-kumo-hairline`, `bg-kumo-line`, `bg-kumo-recessed`, `border-kumo-line`, `ring-kumo-brand`, `text-kumo-default`, `text-kumo-strong`, `text-kumo-subtle`
 
-**Styling**
-
-```json
-{
-  "width": {
-    "expanded": "16.25rem",
-    "icon": "57px"
-  },
-  "mobile": {
-    "breakpoint": 768
-  }
-}
-```
+**Styling:**
 
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Sidebar.Provider
+
+Provider sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state when uncontrolled.
+- `open`: boolean - Controlled open state.
+- `variant`: SidebarVariant - Sidebar layout variant.
+- `side`: SidebarSide - Which side the sidebar is on.
+- `collapsible`: "icon" | "offcanvas" | "none"
+- `resizable`: boolean - Enable drag-to-resize on the sidebar edge.
+- `defaultWidth`: number - Initial width in pixels when resizable.
+- `minWidth`: number - Minimum width in pixels when resizing.
+- `maxWidth`: number - Maximum width in pixels when resizing.
+- `contained`: boolean - When true, the collapsed sidebar uses absolute positioning instead of fixed, keeping it scoped inside a bounded parent. Useful for demos and embedded sidebars.
+- `peekable`: boolean - When true, hovering or focusing the collapsed sidebar temporarily expands it. The `state` will be `"peeking"` during the peek. Moving away collapses it back.
+- `animationDuration`: number - Duration of sidebar expand/collapse animation in milliseconds.
+- `mobileBreakpoint`: number - Viewport width (in px) below which the sidebar renders as a mobile dialog sheet instead of the desktop aside rail.
+- `children`: ReactNode (required) - Content — typically `<Sidebar>` + main content.
+- `className`: string - Additional CSS classes for the wrapper div.
+
+#### Sidebar.Header
+
+Header sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.Content
+
+Content sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.Footer
+
+Footer sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.Loading
+
+Loading sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.Group
+
+Group sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.GroupLabel
+
+GroupLabel sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.Menu
+
+Menu sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.MenuItem
+
+MenuItem sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.MenuButton
+
+MenuButton sub-component
+
+Props:
+- `icon`: React.ComponentType<{ className?: string }> | React.ReactNode
+- `active`: boolean
+- `size`: SidebarMenuButtonSize - Button size. - `"base"` — Standard nav item - `"sm"` — Compact nav item
+- `href`: string
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+- `tooltip`: string
+- `className`: string
+- `children`: ReactNode
+
+#### Sidebar.MenuBadge
+
+MenuBadge sub-component
+
+Props:
+- `active`: boolean - Marks this sub-item as currently active/selected.
+- `href`: string - Navigation URL. When set, renders as a link via LinkProvider.
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+
+#### Sidebar.MenuSub
+
+MenuSub sub-component
+
+Props:
+- `active`: boolean - Marks this sub-item as currently active/selected.
+- `href`: string - Navigation URL. When set, renders as a link via LinkProvider.
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+
+#### Sidebar.MenuSubItem
+
+MenuSubItem sub-component
+
+Props:
+- `active`: boolean - Marks this sub-item as currently active/selected.
+- `href`: string - Navigation URL. When set, renders as a link via LinkProvider.
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+
+#### Sidebar.MenuSubButton
+
+MenuSubButton sub-component
+
+Props:
+- `active`: boolean - Marks this sub-item as currently active/selected.
+- `href`: string - Navigation URL. When set, renders as a link via LinkProvider.
+- `target`: React.HTMLAttributeAnchorTarget - Link target — only meaningful when `href` is provided.
+
+#### Sidebar.Separator
+
+Separator sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state (uncontrolled).
+- `open`: boolean - Controlled open state.
+- `autoScrollOnOpen`: boolean - Scroll the expanded content into view after opening.
+
+#### Sidebar.Trigger
+
+Trigger sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state (uncontrolled).
+- `open`: boolean - Controlled open state.
+- `autoScrollOnOpen`: boolean - Scroll the expanded content into view after opening.
+
+#### Sidebar.Close
+
+Close sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state (uncontrolled).
+- `open`: boolean - Controlled open state.
+- `autoScrollOnOpen`: boolean - Scroll the expanded content into view after opening.
+
+#### Sidebar.Rail
+
+Rail sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state (uncontrolled).
+- `open`: boolean - Controlled open state.
+- `autoScrollOnOpen`: boolean - Scroll the expanded content into view after opening.
+
+#### Sidebar.ResizeHandle
+
+ResizeHandle sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state (uncontrolled).
+- `open`: boolean - Controlled open state.
+- `autoScrollOnOpen`: boolean - Scroll the expanded content into view after opening.
+
+#### Sidebar.MenuChevron
+
+MenuChevron sub-component
+
+Props:
+- `className`: string
+
+#### Sidebar.Collapsible
+
+Collapsible sub-component
+
+Props:
+- `defaultOpen`: boolean - Initial open state (uncontrolled).
+- `open`: boolean - Controlled open state.
+- `autoScrollOnOpen`: boolean - Scroll the expanded content into view after opening.
+
+#### Sidebar.CollapsibleTrigger
+
+CollapsibleTrigger sub-component
+
+Props:
+- `render`: React.ReactElement (required) - Element to render as the trigger. Gets aria-expanded, aria-controls, and onClick merged.
+
+#### Sidebar.CollapsibleContent
+
+CollapsibleContent sub-component
+
+Props:
+- `activeKey`: string (required) - Key of the currently active view. Must match a child `SlidingView` value.
+- `direction`: "left" | "right" - Slide direction for the transition. - `"left"`: new view slides in from the right - `"right"`: new view slides in from the left
+
+#### Sidebar.SlidingViews
+
+SlidingViews sub-component
+
+Props:
+- `activeKey`: string (required) - Key of the currently active view. Must match a child `SlidingView` value.
+- `direction`: "left" | "right" - Slide direction for the transition. - `"left"`: new view slides in from the right - `"right"`: new view slides in from the left
+
+#### Sidebar.SlidingView
+
+SlidingView sub-component
+
+Props:
+- `value`: string (required) - Unique key matching this view. Must correspond to `activeKey` on `SlidingViews`.
+
+
+**Examples:**
 
 ```tsx
 <DemoContainer>
-      <Sidebar.Provider contained defaultOpen className="min-h-0! h-full">
+      <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
         <Sidebar>
           <Sidebar.Content>
             <Sidebar.Group>
@@ -7703,11 +7569,9 @@ Example 1:
     </DemoContainer>
 ```
 
-Example 2:
-
 ```tsx
 <DemoContainer>
-      <Sidebar.Provider contained defaultOpen className="min-h-0! h-full">
+      <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
         <Sidebar>
           <Sidebar.Header>
             <BrandLogo />
@@ -7736,25 +7600,69 @@ Example 2:
         </Sidebar>
         <DemoMain>
           <ToggleButton />
-          <p>
-            Click the button or the sidebar trigger to toggle
-          </p>
+          <p>Click the button or the sidebar trigger to toggle</p>
         </DemoMain>
       </Sidebar.Provider>
     </DemoContainer>
 ```
 
-Example 3:
+```tsx
+<DemoContainer>
+      <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
+        <Sidebar>
+          <Sidebar.Header>
+            <BrandLogo />
+          </Sidebar.Header>
+          {loading ? (
+            <Sidebar.Loading />
+          ) : (
+            <Sidebar.Content>
+              <Sidebar.Group>
+                <Sidebar.Menu>
+                  <Sidebar.MenuButton icon={HouseIcon} active>
+                    Home
+                  </Sidebar.MenuButton>
+                  <Sidebar.MenuButton icon={ChartBarIcon}>
+                    Analytics
+                  </Sidebar.MenuButton>
+                  <Sidebar.MenuButton icon={CodeIcon}>
+                    Compute
+                  </Sidebar.MenuButton>
+                  <Sidebar.MenuButton icon={DatabaseIcon}>
+                    Storage
+                  </Sidebar.MenuButton>
+                </Sidebar.Menu>
+              </Sidebar.Group>
+            </Sidebar.Content>
+          )}
+          <Sidebar.Footer>
+            <Sidebar.Trigger />
+          </Sidebar.Footer>
+        </Sidebar>
+        <DemoMain>
+          <button
+            type="button"
+            onClick={() => setLoading((l) => !l)}
+            className="cursor-pointer rounded-lg border border-kumo-line bg-kumo-base px-3 py-1.5 text-base text-kumo-default transition-colors hover:bg-kumo-tint"
+          >
+            {loading ? "Show loaded nav" : "Show loading"}
+          </button>
+          <p>Toggle to compare the loading state with the loaded nav</p>
+        </DemoMain>
+      </Sidebar.Provider>
+    </DemoContainer>
+```
 
 ```tsx
 <DemoContainer>
-      <Sidebar.Provider contained
+      <Sidebar.Provider
+        contained
         defaultOpen
         resizable
         defaultWidth={240}
         minWidth={180}
         maxWidth={400}
-        className="min-h-0! h-full"
+        className="h-full min-h-0!"
       >
         <Sidebar>
           <Sidebar.Header>
@@ -7787,11 +7695,14 @@ Example 3:
     </DemoContainer>
 ```
 
-Example 4:
-
 ```tsx
 <DemoContainer>
-      <Sidebar.Provider contained defaultOpen side="right" className="min-h-0! h-full">
+      <Sidebar.Provider
+        contained
+        defaultOpen
+        side="right"
+        className="h-full min-h-0!"
+      >
         <DemoMain />
         <Sidebar>
           <Sidebar.Content>
@@ -7813,49 +7724,9 @@ Example 4:
     </DemoContainer>
 ```
 
-Example 5:
-
-```tsx
-<DemoContainer>
-      <Sidebar.Provider contained defaultOpen peekable className="min-h-0! h-full">
-        <Sidebar>
-          <Sidebar.Header>
-            <BrandLogo />
-          </Sidebar.Header>
-          <Sidebar.Content>
-            <Sidebar.Group>
-              <Sidebar.Menu>
-                <Sidebar.MenuButton icon={HouseIcon} tooltip="Home" active>
-                  Home
-                </Sidebar.MenuButton>
-                <Sidebar.MenuButton icon={ChartBarIcon} tooltip="Analytics">
-                  Analytics
-                </Sidebar.MenuButton>
-                <Sidebar.MenuButton icon={CodeIcon} tooltip="Compute">
-                  Compute
-                </Sidebar.MenuButton>
-                <Sidebar.MenuButton icon={DatabaseIcon} tooltip="Storage">
-                  Storage
-                </Sidebar.MenuButton>
-              </Sidebar.Menu>
-            </Sidebar.Group>
-          </Sidebar.Content>
-          <Sidebar.Footer>
-            <Sidebar.Trigger />
-          </Sidebar.Footer>
-        </Sidebar>
-        <DemoMain>
-          <PeekStateIndicator />
-        </DemoMain>
-      </Sidebar.Provider>
-    </DemoContainer>
-```
-
-Example 6:
-
 ```tsx
 <div className="relative h-[420px] w-full overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-      <Sidebar.Provider contained defaultOpen className="min-h-0! h-full">
+      <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
         <Sidebar>
           <Sidebar.Header>
             <BrandLogo />
@@ -7910,8 +7781,12 @@ Example 6:
                     <Sidebar.CollapsibleContent>
                       <Sidebar.MenuSub>
                         <Sidebar.MenuSubButton>Overview</Sidebar.MenuSubButton>
-                        <Sidebar.MenuSubButton>Deployments</Sidebar.MenuSubButton>
-                        <Sidebar.MenuSubButton>Observability</Sidebar.MenuSubButton>
+                        <Sidebar.MenuSubButton>
+                          Deployments
+                        </Sidebar.MenuSubButton>
+                        <Sidebar.MenuSubButton>
+                          Observability
+                        </Sidebar.MenuSubButton>
                         <Sidebar.MenuSubButton>Settings</Sidebar.MenuSubButton>
                       </Sidebar.MenuSub>
                     </Sidebar.CollapsibleContent>
@@ -7935,11 +7810,9 @@ Example 6:
     </div>
 ```
 
-Example 7:
-
 ```tsx
 <DemoContainer>
-      <Sidebar.Provider contained defaultOpen className="min-h-0! h-full">
+      <Sidebar.Provider contained defaultOpen className="h-full min-h-0!">
         <Sidebar>
           <Sidebar.Header>
             <button
@@ -7947,7 +7820,7 @@ Example 7:
               onClick={() =>
                 setSurface((s) => (s === "account" ? "zone" : "account"))
               }
-              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-kumo-default hover:bg-kumo-tint transition-colors"
+              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-kumo-default transition-colors hover:bg-kumo-tint"
             >
               <ArrowsLeftRightIcon className="size-4 shrink-0 text-kumo-brand" />
               <span className="flex-1 text-left font-semibold text-kumo-strong">
@@ -8010,20 +7883,21 @@ Example 7:
             <p className="font-medium text-kumo-default">
               Active: {surface === "account" ? "Account" : "Zone"} surface
             </p>
-            <p>
-              Click the header button to slide between views
-            </p>
+            <p>Click the header button to slide between views</p>
           </div>
         </DemoMain>
       </Sidebar.Provider>
     </DemoContainer>
 ```
 
-Example 8:
-
 ```tsx
 <DemoContainer>
-      <Sidebar.Provider contained defaultOpen peekable className="min-h-0! h-full">
+      <Sidebar.Provider
+        contained
+        defaultOpen
+        peekable
+        className="h-full min-h-0!"
+      >
         <Sidebar>
           <Sidebar.Header>
             <AccountSwitcher />
@@ -8039,7 +7913,7 @@ Example 8:
                     <Sidebar.MenuButton
                       icon={MagnifyingGlassIcon}
                       tooltip="Search"
-                      className="ring ring-kumo-line group-data-[state=collapsed]/sidebar:ring-transparent mb-3 group-data-[state=collapsed]/sidebar:mb-0 transition-[margin] duration-(--sidebar-animation-duration)"
+                      className="mb-3 ring ring-kumo-line transition-[margin] duration-(--sidebar-animation-duration) group-data-[state=collapsed]/sidebar:mb-0 group-data-[state=collapsed]/sidebar:ring-transparent"
                     >
                       Quick search&hellip;
                     </Sidebar.MenuButton>
@@ -8179,8 +8053,6 @@ Example 8:
     </DemoContainer>
 ```
 
-Example 9:
-
 ```tsx
 <div className="relative h-[540px] w-full overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
       <Sidebar.Provider contained mobileBreakpoint={9999} className="h-full">
@@ -8207,9 +8079,7 @@ Example 9:
             <Sidebar.Group>
               <Sidebar.GroupLabel>Build</Sidebar.GroupLabel>
               <Sidebar.Menu>
-                <Sidebar.MenuButton icon={CodeIcon}>
-                  Compute
-                </Sidebar.MenuButton>
+                <Sidebar.MenuButton icon={CodeIcon}>Compute</Sidebar.MenuButton>
                 <Sidebar.MenuButton icon={DatabaseIcon}>
                   Storage
                 </Sidebar.MenuButton>
@@ -8231,124 +8101,192 @@ Example 9:
     </div>
 ```
 
+```tsx
+<div className="flex flex-col gap-3">
+      {/* Width control — stands in for resizing a real phone viewport. */}
+      <label className="flex items-center gap-3 text-sm text-kumo-subtle">
+        <span className="shrink-0">Viewport</span>
+        <input
+          type="range"
+          min={280}
+          max={720}
+          value={width}
+          onChange={(e) => setWidth(Number(e.target.value))}
+          className="flex-1 cursor-pointer"
+        />
+        <span className="w-14 shrink-0 text-right tabular-nums">{width}px</span>
+      </label>
 
-## Surface
+      <div
+        className="relative h-[540px] overflow-hidden rounded-lg border border-kumo-line bg-kumo-base"
+        style={{ width }}
+      >
+        <Sidebar.Provider contained mobileBreakpoint={9999} className="h-full">
+          <Sidebar fullScreenOnMobile>
+            {/* Single row: avatar, then the trail takes the rest of the width.
+                Mirrors the product header — account mark, then breadcrumbs. */}
+            <Sidebar.Header className="gap-2 px-3.5">
+              <CompactAccountSwitcher />
+              <div className="min-w-0 flex-1">
+                <Breadcrumbs size="sm">
+                  {trail.map((label) => (
+                    <Fragment key={label}>
+                      <Breadcrumbs.Link href="#">{label}</Breadcrumbs.Link>
+                      <Breadcrumbs.Separator />
+                    </Fragment>
+                  ))}
+                  <Breadcrumbs.Current>{current}</Breadcrumbs.Current>
+                </Breadcrumbs>
+              </div>
+              <Sidebar.Close />
+            </Sidebar.Header>
+            <Sidebar.Content>
+              <div className="pt-1 pb-2">
+                <QuickSearch />
+              </div>
+              <NavTree selected={selected} onSelect={setSelected} />
+            </Sidebar.Content>
+          </Sidebar>
 
-- Type: component
-- Category: Layout
-- Import path: `@cloudflare/kumo`
-- Description: Surface component
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex h-12 shrink-0 items-center gap-2 border-b border-kumo-line px-3">
+              <Sidebar.Trigger />
+              <div className="min-w-0 flex-1">
+                <Breadcrumbs size="sm">
+                  {trail.map((label) => (
+                    <Fragment key={label}>
+                      <Breadcrumbs.Link href="#">{label}</Breadcrumbs.Link>
+                      <Breadcrumbs.Separator />
+                    </Fragment>
+                  ))}
+                  <Breadcrumbs.Current>{current}</Breadcrumbs.Current>
+                </Breadcrumbs>
+              </div>
+            </header>
+            <DemoMain>
+              <p className="text-kumo-default">{current}</p>
+              <p className="text-sm text-kumo-subtle">
+                Drill into the nav — the trail is derived from the tree, so it
+                always matches where you are.
+              </p>
+            </DemoMain>
+          </div>
+        </Sidebar.Provider>
+      </div>
+    </div>
+```
 
-**Props**
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `as` | React.ElementType | No | - | - | - |
-| `render` | ReactNode | No | - | - | Allows you to replace the component's HTML element with a different tag, or compose it with another component.  Accepts a `ReactElement` or a function that returns the element to render. |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
+---
 
+### Surface
 
-## Switch
+Surface component
 
-- Type: component
-- Category: Input
-- Import path: `@cloudflare/kumo`
-- Description: Switch component
+**Type:** component
 
-**Props**
+**Import:** `import { Surface } from "@cloudflare/kumo";`
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | default | `default`, `neutral` | Visual variant: "default" (pill, brand color) or "neutral" (squircle, monochrome) |
-| `label` | ReactNode | No | - | - | Label content for the switch (Field wrapper is built-in) - can be a string or any React node. Optional when used standalone for visual-only purposes. |
-| `labelTooltip` | ReactNode | No | - | - | Tooltip content to display next to the label via an info icon |
-| `required` | boolean | No | - | - | Whether the switch is required. When explicitly false, shows "(optional)" text after the label. |
-| `controlFirst` | boolean | No | - | - | When true (default), switch appears before label. When false, label appears before switch. |
-| `size` | enum | No | base | `sm`, `base`, `lg` | `{"sm":"Small switch for compact UIs","base":"Default switch size","lg":"Large switch for prominent toggles"}` |
-| `checked` | boolean | No | - | - | - |
-| `disabled` | boolean | No | - | - | - |
-| `transitioning` | boolean | No | - | - | - |
-| `name` | string | No | - | - | - |
-| `type` | enum | No | - | `submit`, `reset`, `button` | - |
-| `value` | string \| string[] \| number | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
-| `onClick` | (event: React.MouseEvent) => void | Yes | - | - | Callback when switch is clicked |
+**Category:** Layout
 
-**Subcomponents**
+**Props:**
 
-### Switch.Item
+- `as`: React.ElementType
+- `render`: ReactNode
+  Allows you to replace the component's HTML element with a different tag, or compose it with another component.
 
-- Description: Item sub-component
+Accepts a `ReactElement` or a function that returns the element to render.
+- `children`: ReactNode
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
 
-Props:
+---
 
-- None
+### Switch
 
-### Switch.Group
+Switch component
 
-- Description: Group sub-component
+**Type:** component
 
-Props:
+**Import:** `import { Switch } from "@cloudflare/kumo";`
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `legend` | string | No | - | - | - |
-| `children` | ReactNode | Yes | - | - | - |
-| `error` | string | No | - | - | - |
-| `description` | ReactNode | No | - | - | - |
-| `disabled` | boolean | No | - | - | - |
-| `controlFirst` | boolean | No | - | - | - |
-| `className` | string | No | - | - | - |
+**Category:** Input
 
-### Switch.Legend
+**Props:**
 
-- Description: Legend sub-component
+- `variant`: enum [default: default]
+  - `"default"`: Default switch with squircle shape and brand blue color
+  - `"neutral"`: Monochrome switch with squircle shape for subtle toggles
+- `label`: ReactNode
+  Label content for the switch (Field wrapper is built-in) - can be a string or any React node. Optional when used standalone for visual-only purposes.
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label via an info icon
+- `required`: boolean
+  Whether the switch is required. When explicitly false, shows "(optional)" text after the label.
+- `controlFirst`: boolean
+  When true (default), switch appears before label. When false, label appears before switch.
+- `size`: enum [default: base]
+  - `"sm"`: Small switch for compact UIs
+  - `"base"`: Default switch size
+  - `"lg"`: Large switch for prominent toggles
+- `checked`: boolean
+- `disabled`: boolean
+- `transitioning`: boolean
+- `name`: string
+- `type`: enum
+- `value`: string | string[] | number
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
+- `onClick`: (event: React.MouseEvent) => void (required)
+  Callback when switch is clicked
 
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | Yes | - | - | - |
-| `className` | string | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `ring-kumo-brand`, `ring-kumo-focus`, `ring-kumo-hairline`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Switch.Item
+
+Item sub-component
+
+#### Switch.Group
+
+Group sub-component
+
+Props:
+- `legend`: string - Legend text for the group. For more control over legend styling, omit this prop and use `<Switch.Legend>` as a child instead.
+- `children`: ReactNode (required) - Child Switch.Item components (and optionally a Switch.Legend)
+- `error`: string - Error message for the group (only appears in groups, not single switches)
+- `description`: ReactNode - Helper text for the group
+- `disabled`: boolean - Whether all switches in the group are disabled
+- `controlFirst`: boolean - When true (default), switch appears before label. When false, label appears before switch.
+- `className`: string - Additional CSS classes
+
+#### Switch.Legend
+
+Legend sub-component
+
+Props:
+- `children`: ReactNode (required) - Legend content
+- `className`: string - Additional CSS classes (e.g. "sr-only" to visually hide the legend)
+
+
+**Examples:**
 
 ```tsx
 <Switch label="Switch" checked={checked} onCheckedChange={setChecked} />
 ```
 
-Example 2:
-
-```tsx
-<Switch label="Switch" checked={false} onCheckedChange={() => {}} />
-```
-
-Example 3:
-
-```tsx
-<Switch label="Switch" checked={true} onCheckedChange={() => {}} />
-```
-
-Example 4:
-
 ```tsx
 <Switch label="Disabled" checked={false} disabled />
 ```
-
-Example 5:
 
 ```tsx
 <Switch
@@ -8358,8 +8296,6 @@ Example 5:
       onCheckedChange={setChecked}
     />
 ```
-
-Example 6:
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -8384,8 +8320,6 @@ Example 6:
     </div>
 ```
 
-Example 7:
-
 ```tsx
 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
       <Switch label="Default off" checked={false} onCheckedChange={() => {}} />
@@ -8405,8 +8339,6 @@ Example 7:
     </div>
 ```
 
-Example 8:
-
 ```tsx
 <Switch
       id="my-custom-switch"
@@ -8416,8 +8348,6 @@ Example 8:
     />
 ```
 
-Example 9:
-
 ```tsx
 <Switch.Group legend="Notification settings">
       <Switch.Item label="Email notifications" />
@@ -8425,8 +8355,6 @@ Example 9:
       <Switch.Item label="Push notifications" />
     </Switch.Group>
 ```
-
-Example 10:
 
 ```tsx
 <Switch.Group>
@@ -8436,21 +8364,6 @@ Example 10:
       <Switch.Item label="Push notifications" />
     </Switch.Group>
 ```
-
-Example 11:
-
-```tsx
-<Switch.Group>
-      <Switch.Legend className="text-sm font-normal text-kumo-subtle">
-        Notification settings
-      </Switch.Legend>
-      <Switch.Item label="Email notifications" />
-      <Switch.Item label="SMS notifications" />
-      <Switch.Item label="Push notifications" />
-    </Switch.Group>
-```
-
-Example 12:
 
 ```tsx
 <div className="flex flex-col gap-4">
@@ -8476,104 +8389,80 @@ Example 12:
 ```
 
 
-## Table
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: Table - semantic HTML table with styled rows, cells, and selection support.  Compound component: `Table` (Root), `.Header`, `.Head`, `.Body`, `.Row`, `.Cell`, `.Footer`, `.CheckCell`, `.CheckHead`, `.ResizeHandle`.
+### Table
 
-**Props**
+Table — semantic HTML table with styled rows, cells, and selection support.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `layout` | enum | No | auto | `auto`, `fixed` | `{"auto":"Auto table layout - columns resize based on content","fixed":"Fixed table layout - columns have equal width, controlled via colgroup"}` |
-| `variant` | enum | No | default | `default`, `selected` | `{"default":"Default row variant","selected":"Selected row variant"}` |
-| `sticky` | enum | No | - | `left`, `right` | `{"left":"Pin column to the left edge of the scroll container","right":"Pin column to the right edge of the scroll container"}` |
-| `className` | string | No | - | - | Additional CSS classes |
-| `children` | ReactNode | No | - | - | Child elements |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { Table } from "@cloudflare/kumo";`
 
-### Table.Header
+**Category:** Other
 
-- Description: Header sub-component
+**Props:**
 
-Props:
+- `layout`: enum [default: auto]
+  - `"auto"`: Auto table layout - columns resize based on content
+  - `"fixed"`: Fixed table layout - columns have equal width, controlled via colgroup
+- `variant`: enum [default: default]
+  - `"default"`: Default row variant
+  - `"selected"`: Selected row variant
+- `sticky`: enum
+  - `"left"`: Pin column to the left edge of the scroll container
+  - `"right"`: Pin column to the right edge of the scroll container
+- `className`: string
+  Additional CSS classes
+- `children`: ReactNode
+  Child elements
 
-- None
-
-### Table.Head
-
-- Description: Head sub-component
-
-Props:
-
-- None
-
-### Table.Row
-
-- Description: Row sub-component
-
-Props:
-
-- None
-
-### Table.Body
-
-- Description: Body sub-component
-
-Props:
-
-- None
-
-### Table.Cell
-
-- Description: Cell sub-component
-
-Props:
-
-- None
-
-### Table.CheckCell
-
-- Description: CheckCell sub-component
-
-Props:
-
-- None
-
-### Table.CheckHead
-
-- Description: CheckHead sub-component
-
-Props:
-
-- None
-
-### Table.Footer
-
-- Description: Footer sub-component
-
-Props:
-
-- None
-
-### Table.ResizeHandle
-
-- Description: ResizeHandle sub-component
-
-Props:
-
-- None
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-elevated`, `bg-kumo-hairline`, `bg-kumo-tint`, `border-kumo-fill`, `ring-kumo-brand`, `text-kumo-default`, `text-kumo-strong`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### Table.Header
+
+Header sub-component
+
+#### Table.Head
+
+Head sub-component
+
+#### Table.Row
+
+Row sub-component
+
+#### Table.Body
+
+Body sub-component
+
+#### Table.Cell
+
+Cell sub-component
+
+#### Table.CheckCell
+
+CheckCell sub-component
+
+#### Table.CheckHead
+
+CheckHead sub-component
+
+#### Table.Footer
+
+Footer sub-component
+
+#### Table.ResizeHandle
+
+ResizeHandle sub-component
+
+
+**Examples:**
 
 ```tsx
 <LayerCard className="p-0">
@@ -8597,8 +8486,6 @@ Example 1:
       </Table>
     </LayerCard>
 ```
-
-Example 2:
 
 ```tsx
 <LayerCard className="p-0">
@@ -8636,8 +8523,6 @@ Example 2:
     </LayerCard>
 ```
 
-Example 3:
-
 ```tsx
 <LayerCard className="p-0">
       <Table>
@@ -8660,8 +8545,6 @@ Example 3:
       </Table>
     </LayerCard>
 ```
-
-Example 4:
 
 ```tsx
 <LayerCard className="p-0">
@@ -8702,8 +8585,6 @@ Example 4:
     </LayerCard>
 ```
 
-Example 5:
-
 ```tsx
 <LayerCard className="p-0">
       <Table layout="fixed">
@@ -8732,8 +8613,6 @@ Example 5:
     </LayerCard>
 ```
 
-Example 6:
-
 ```tsx
 <LayerCard className="w-full max-w-md overflow-x-auto p-0">
       <Table>
@@ -8754,12 +8633,8 @@ Example 6:
               <Table.Cell className="whitespace-nowrap">
                 {row.subject}
               </Table.Cell>
-              <Table.Cell className="whitespace-nowrap">
-                {row.from}
-              </Table.Cell>
-              <Table.Cell className="whitespace-nowrap">
-                {row.date}
-              </Table.Cell>
+              <Table.Cell className="whitespace-nowrap">{row.from}</Table.Cell>
+              <Table.Cell className="whitespace-nowrap">{row.date}</Table.Cell>
               <Table.Cell className="whitespace-nowrap">
                 {row.tags ? (
                   <div className="inline-flex gap-1">
@@ -8768,7 +8643,7 @@ Example 6:
                     ))}
                   </div>
                 ) : (
-                  "-"
+                  "—"
                 )}
               </Table.Cell>
               <Table.Cell sticky="right" className="text-right">
@@ -8803,8 +8678,6 @@ Example 6:
       </Table>
     </LayerCard>
 ```
-
-Example 7:
 
 ```tsx
 <LayerCard className="w-full max-w-md overflow-x-auto p-0">
@@ -8826,12 +8699,8 @@ Example 7:
               <Table.Cell className="whitespace-nowrap">
                 {row.subject}
               </Table.Cell>
-              <Table.Cell className="whitespace-nowrap">
-                {row.from}
-              </Table.Cell>
-              <Table.Cell className="whitespace-nowrap">
-                {row.date}
-              </Table.Cell>
+              <Table.Cell className="whitespace-nowrap">{row.from}</Table.Cell>
+              <Table.Cell className="whitespace-nowrap">{row.date}</Table.Cell>
               <Table.Cell className="whitespace-nowrap">
                 {row.tags ? (
                   <div className="inline-flex gap-1">
@@ -8840,7 +8709,7 @@ Example 7:
                     ))}
                   </div>
                 ) : (
-                  "-"
+                  "—"
                 )}
               </Table.Cell>
               <Table.Cell sticky="right" className="text-right">
@@ -8875,8 +8744,6 @@ Example 7:
       </Table>
     </LayerCard>
 ```
-
-Example 8:
 
 ```tsx
 <LayerCard className="w-full overflow-x-auto p-0">
@@ -8969,70 +8836,61 @@ Example 8:
 ```
 
 
-## TableOfContents
+---
 
-- Type: component
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: TableOfContents - presentational compound component for section navigation.  Purely visual; all interaction logic (scroll tracking, active state management) is left to the consumer.
+### TableOfContents
 
-**Props**
+TableOfContents — presentational compound component for section navigation.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `id` | string | No | - | - | - |
-| `lang` | string | No | - | - | - |
-| `title` | string | No | - | - | - |
+**Type:** component
 
-**Subcomponents**
+**Import:** `import { TableOfContents } from "@cloudflare/kumo";`
 
-### TableOfContents.Title
+**Category:** Other
 
-- Description: Title sub-component
+**Props:**
 
-Props:
+- `children`: ReactNode
+- `className`: string
+- `id`: string
+- `lang`: string
+- `title`: string
 
-- None
-
-### TableOfContents.List
-
-- Description: List sub-component
-
-Props:
-
-- None
-
-### TableOfContents.Item
-
-- Description: Item sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `active` | boolean | No | - | - | - |
-
-### TableOfContents.Group
-
-- Description: Group sub-component
-
-Props:
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `label` | string | Yes | - | - | - |
-| `href` | string | No | - | - | - |
-| `active` | boolean | No | - | - | - |
-
-**Kumo Color Tokens**
+**Colors (kumo tokens used):**
 
 `border-kumo-brand`, `border-kumo-hairline`, `border-kumo-line`, `text-kumo-default`, `text-kumo-subtle`
 
-**Examples**
+**Sub-Components:**
 
-Example 1:
+This is a compound component. Use these sub-components:
+
+#### TableOfContents.Title
+
+Title sub-component
+
+#### TableOfContents.List
+
+List sub-component
+
+#### TableOfContents.Item
+
+Item sub-component
+
+Props:
+- `active`: boolean - Whether this item represents the currently active section.
+- `render`: React.ReactElement - Custom element to render as the link. Use this to integrate with framework routers (e.g., Next.js `<Link>`, React Router `<NavLink>`). The element receives all anchor props including `href`, `className`, and `children`.
+
+#### TableOfContents.Group
+
+Group sub-component
+
+Props:
+- `label`: string (required) - Label displayed above the group's items.
+- `href`: string - URL the group label links to. When provided, the label renders as a clickable link with item styling.
+- `active`: boolean - Whether this group's label represents the currently active section. Only applies when `href` is provided.
+
+
+**Examples:**
 
 ```tsx
 <DemoWrapper>
@@ -9052,8 +8910,6 @@ Example 1:
       </TableOfContents>
     </DemoWrapper>
 ```
-
-Example 2:
 
 ```tsx
 <DemoWrapper>
@@ -9075,8 +8931,6 @@ Example 2:
     </DemoWrapper>
 ```
 
-Example 3:
-
 ```tsx
 <DemoWrapper>
       <TableOfContents>
@@ -9091,8 +8945,6 @@ Example 3:
       </TableOfContents>
     </DemoWrapper>
 ```
-
-Example 4:
 
 ```tsx
 <DemoWrapper>
@@ -9131,27 +8983,55 @@ Example 4:
     </DemoWrapper>
 ```
 
-Example 5:
-
 ```tsx
-<DemoWrapper>
-      <TableOfContents>
-        <TableOfContents.List>
-          {headings.slice(0, 3).map((heading) => (
-            <TableOfContents.Item
-              key={heading.text}
-              active={heading.text === "Introduction"}
-              className="cursor-pointer"
+<div className="flex w-full max-w-xl gap-6">
+      <div className="min-w-40">
+        <TableOfContents>
+          <TableOfContents.Title>On this page</TableOfContents.Title>
+          <TableOfContents.List>
+            {scrollspySections.map((section) => (
+              <TableOfContents.Item
+                key={section.id}
+                render={<button type="button" />}
+                active={activeId === section.id}
+                onClick={() => {
+                  selectSection(section.id);
+                  root
+                    ?.querySelector(`#${section.id}`)
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                {section.title}
+              </TableOfContents.Item>
+            ))}
+          </TableOfContents.List>
+        </TableOfContents>
+      </div>
+      <div
+        ref={setRoot}
+        className="h-64 flex-1 overflow-y-auto rounded-lg border border-kumo-hairline p-4"
+      >
+        {scrollspySections.map((section) => (
+          <section key={section.id}>
+            <h4
+              id={section.id}
+              className="mb-2 scroll-mt-2 text-sm font-semibold"
             >
-              {heading.text}
-            </TableOfContents.Item>
-          ))}
-        </TableOfContents.List>
-      </TableOfContents>
-    </DemoWrapper>
+              {section.title}
+            </h4>
+            <p className="mb-6 text-sm text-kumo-subtle">
+              {Array.from(
+                { length: 6 },
+                () =>
+                  `Scrollable placeholder copy for the ${section.title} section. `,
+              ).join("")}
+            </p>
+          </section>
+        ))}
+        <div className="h-40" />
+      </div>
+    </div>
 ```
-
-Example 6:
 
 ```tsx
 <DemoWrapper>
@@ -9178,64 +9058,55 @@ Example 6:
 ```
 
 
-## Tabs
+---
 
-- Type: component
-- Category: Navigation
-- Import path: `@cloudflare/kumo`
-- Description: Tab navigation component with segmented or underline style. Built on Base UI Tabs with animated active indicator.
+### Tabs
 
-**Props**
+Tab navigation component with segmented or underline style. Built on Base UI Tabs with animated active indicator.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `tabs` | TabsItem[] | No | - | - | Array of tab items to render. |
-| `value` | string | No | - | - | Controlled value. When set, component becomes controlled. |
-| `selectedValue` | string | No | - | - | Default selected value for uncontrolled mode. Ignored when `value` is set. |
-| `activateOnFocus` | boolean | No | - | - | When `true`, tabs are activated immediately upon receiving focus via arrow keys. When `false` (default), tabs receive focus but require Enter/Space to activate. |
-| `className` | string | No | - | - | Additional CSS classes for the root element. |
-| `listClassName` | string | No | - | - | Additional CSS classes for the tab list element. |
-| `indicatorClassName` | string | No | - | - | Additional CSS classes for the indicator element. |
-| `variant` | enum | No | segmented | `segmented`, `underline` | Tab style. - `"segmented"` - Pill-shaped indicator on a filled track - `"underline"` - Underline indicator below tab text |
-| `size` | enum | No | base | `base`, `sm` | Tab size. - `"base"` - Default size (h-9, text-base) - `"sm"` - Compact size (h-6.5, text-xs) - matches Input size="sm" |
-| `onValueChange` | (value: string) => void | No | - | - | Callback when active tab changes |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Tabs } from "@cloudflare/kumo";`
+
+**Category:** Navigation
+
+**Props:**
+
+- `tabs`: TabsItem[]
+  Array of tab items to render.
+- `value`: string
+  Controlled value. When set, component becomes controlled.
+- `selectedValue`: string
+  Default selected value for uncontrolled mode. Ignored when `value` is set.
+- `activateOnFocus`: boolean
+  When `true`, tabs are activated immediately upon receiving focus via arrow keys. When `false` (default), tabs receive focus but require Enter/Space to activate.
+- `className`: string
+  Additional CSS classes for the root element.
+- `listClassName`: string
+  Additional CSS classes for the tab list element.
+- `indicatorClassName`: string
+  Additional CSS classes for the indicator element.
+- `labels`: TabsLabels
+  Labels for internationalization of aria-labels. All labels have English defaults.
+- `variant`: enum [default: segmented]
+  Tab style.
+- `"segmented"` — Pill-shaped indicator on a filled track
+- `"underline"` — Underline indicator below tab text
+- `size`: enum [default: base]
+  Tab size.
+- `"base"` — Default size (h-9, text-base)
+- `"sm"` — Compact size (h-6.5, text-xs) — matches Input size="sm"
+- `onValueChange`: (value: string) => void
+  Callback when active tab changes
+
+**Colors (kumo tokens used):**
 
 `bg-kumo-base`, `bg-kumo-brand`, `bg-kumo-recessed`, `bg-kumo-tint`, `border-kumo-hairline`, `ring-kumo-brand`, `ring-kumo-focus`, `ring-kumo-hairline`, `ring-kumo-line`, `text-kumo-default`, `text-kumo-subtle`
 
-**Styling**
-
-```json
-{
-  "container": {
-    "height": 34,
-    "borderRadius": 8,
-    "background": "color-accent",
-    "padding": 1
-  },
-  "tab": {
-    "paddingX": 10,
-    "verticalMargin": 1,
-    "fontSize": 16,
-    "fontWeight": 500,
-    "borderRadius": 8,
-    "activeColor": "text-color-surface",
-    "inactiveColor": "text-color-label"
-  },
-  "indicator": {
-    "background": "color-surface-secondary",
-    "ring": "color-color-2",
-    "borderRadius": 6,
-    "shadow": "shadow-sm"
-  }
-}
-```
+**Styling:**
 
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <div className="flex flex-col gap-6">
@@ -9266,8 +9137,6 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <Tabs
       variant="segmented"
@@ -9279,22 +9148,6 @@ Example 2:
       selectedValue="tab1"
     />
 ```
-
-Example 3:
-
-```tsx
-<Tabs
-      variant="underline"
-      tabs={[
-        { value: "tab1", label: "Tab 1" },
-        { value: "tab2", label: "Tab 2" },
-        { value: "tab3", label: "Tab 3" },
-      ]}
-      selectedValue="tab1"
-    />
-```
-
-Example 4:
 
 ```tsx
 <div className="space-y-4">
@@ -9312,8 +9165,6 @@ Example 4:
       </p>
     </div>
 ```
-
-Example 5:
 
 ```tsx
 <div className="w-full max-w-md">
@@ -9333,7 +9184,23 @@ Example 5:
     </div>
 ```
 
-Example 6:
+```tsx
+<div className="space-y-3">
+      <div className="w-full max-w-[588px]">
+        <Tabs tabs={tabs} selectedValue="settings" />
+      </div>
+      <div className="flex items-center gap-3 text-sm text-kumo-subtle">
+        <button
+          type="button"
+          className="rounded-md border border-kumo-line bg-kumo-base px-2.5 py-1 text-kumo-default hover:bg-kumo-tint focus:ring-2 focus:ring-kumo-brand focus:outline-none"
+          onClick={() => setShowExtraTabs((current) => !current)}
+        >
+          Toggle extra tabs
+        </button>
+        <span>{showExtraTabs ? "10 tabs" : "7 tabs"}</span>
+      </div>
+    </div>
+```
 
 ```tsx
 <div className="flex flex-col gap-6">
@@ -9366,8 +9233,6 @@ Example 6:
     </div>
 ```
 
-Example 7:
-
 ```tsx
 <Tabs
       tabs={[
@@ -9378,11 +9243,13 @@ Example 7:
         {
           value: "tab2",
           label: "Link Tab",
+          nativeButton: false,
           render: (props) => <a {...props} href="#tab2" />,
         },
         {
           value: "tab3",
           label: "Cloudflare",
+          nativeButton: false,
           render: (props) => (
             <a {...props} href="https://cloudflare.com" target="_blank" />
           ),
@@ -9393,66 +9260,55 @@ Example 7:
 ```
 
 
-## Text
+---
 
-- Type: component
-- Category: Display
-- Import path: `@cloudflare/kumo`
-- Description: Text component
+### Text
 
-**Props**
+Text component
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | body | `heading1`, `heading2`, `heading3`, `body`, `secondary`, `success`, `error`, `mono`, `mono-secondary` | Text style variant. Determines color, font, and weight. - `"heading1"` - Large page title (30px, semibold) - `"heading2"` - Section title (24px, semibold) - `"heading3"` - Subsection title (18px, semibold) - `"body"` - Default body text - `"secondary"` - Muted text for secondary information - `"success"` - Success state text - `"error"` - Error state text - `"mono"` - Monospace text for code - `"mono-secondary"` - Muted monospace text |
-| `size` | enum | No | base | `xs`, `sm`, `base`, `lg` | Text size (only applies to body/secondary/success/error variants). - `"xs"` - 12px - `"sm"` - 14px - `"base"` - 16px - `"lg"` - 18px |
-| `bold` | boolean | No | - | - | Whether to use bold font weight (only applies to body variants). |
-| `truncate` | boolean | No | - | - | Whether to truncate overflowing text with an ellipsis. Adds `truncate min-w-0` classes. |
-| `as` | enum | No | - | `h1`, `h2`, `h3`, `h4`, `h5`, `h6`, `p`, `span`, `label`, `dt`, `dd`, `li`, `figcaption`, `legend`, `pre`, `code`, `em`, `strong`, `small`, `abbr`, `time` | The HTML element to render. Accepts headings (`"h1"`-`"h6"`), block text (`"p"`, `"pre"`), inline text (`"span"`, `"code"`, `"em"`, `"strong"`, `"small"`, `"abbr"`, `"time"`), form-related (`"label"`, `"legend"`), list/definition (`"dt"`, `"dd"`, `"li"`), and `"figcaption"`.  - **Required** for heading variants (`"heading1"`, `"heading2"`,   `"heading3"`) - pick the element that reflects this text's place in   the document outline, or `"span"` for decorative heading-styled text   that is not a section heading. - **Optional** for body variants (defaults to `"p"`) and monospace   variants (defaults to `"span"`). |
-| `children` | ReactNode | No | - | - | Text content. |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { Text } from "@cloudflare/kumo";`
+
+**Category:** Display
+
+**Props:**
+
+- `variant`: enum [default: body]
+  - `"heading1"`: Large heading for page titles
+  - `"heading2"`: Medium heading for section titles
+  - `"heading3"`: Small heading for subsections
+  - `"body"`: Default body text
+  - `"secondary"`: Muted text for secondary information
+  - `"success"`: Success state text
+  - `"error"`: Error state text
+  - `"mono"`: Monospace text for code
+  - `"mono-secondary"`: Muted monospace text
+- `size`: enum [default: base]
+  - `"xs"`: Extra small text
+  - `"sm"`: Small text
+  - `"base"`: Default text size
+  - `"lg"`: Large text
+- `bold`: boolean
+  Whether to use bold font weight (only applies to body variants).
+- `truncate`: boolean
+  Whether to truncate overflowing text with an ellipsis. Adds `truncate min-w-0` classes.
+- `as`: enum
+  The HTML element to render. Accepts headings (`"h1"`–`"h6"`), block text (`"p"`, `"pre"`), inline text (`"span"`, `"code"`, `"em"`, `"strong"`, `"small"`, `"abbr"`, `"time"`), form-related (`"label"`, `"legend"`), list/definition (`"dt"`, `"dd"`, `"li"`), and `"figcaption"`.
+
+- **Required** for heading variants (`"heading1"`, `"heading2"`,   `"heading3"`) — pick the element that reflects this text's place in   the document outline, or `"span"` for decorative heading-styled text   that is not a section heading.
+- **Optional** for body variants (defaults to `"p"`) and monospace   variants (defaults to `"span"`).
+- `children`: ReactNode
+  Text content.
+
+**Colors (kumo tokens used):**
 
 `text-kumo-danger`, `text-kumo-default`, `text-kumo-link`, `text-kumo-subtle`
 
-**Styling**
-
-```json
-{
-  "fontSizes": {
-    "xs": 12,
-    "sm": 14,
-    "base": 16,
-    "lg": 18,
-    "xl": 20,
-    "2xl": 24,
-    "3xl": 30
-  },
-  "fontWeights": {
-    "normal": 400,
-    "medium": 500,
-    "semibold": 600
-  },
-  "baseColor": "text-kumo-default",
-  "variantColors": {
-    "body": "text-kumo-default",
-    "secondary": "text-kumo-subtle",
-    "success": "text-kumo-link",
-    "error": "text-kumo-danger",
-    "mono": "text-kumo-default",
-    "mono-secondary": "text-kumo-subtle"
-  },
-  "fontFamilies": {
-    "default": "sans-serif",
-    "mono": "monospace"
-  }
-}
-```
+**Styling:**
 
 
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -9523,8 +9379,6 @@ Example 1:
     </div>
 ```
 
-Example 2:
-
 ```tsx
 <div className="w-64 rounded-lg border border-kumo-hairline bg-kumo-base p-4">
       <Text truncate>
@@ -9535,72 +9389,501 @@ Example 2:
 ```
 
 
-## Toasty
+---
 
-- Type: component
-- Category: Feedback
-- Import path: `@cloudflare/kumo`
-- Description: Toasty - toast notification provider and viewport.  Renders a `Toast.Provider` with a fixed-position viewport in the bottom-right corner. Toasts stack with smooth enter/exit animations, swipe-to-dismiss, and expand-on-hover.  Built on `@base-ui/react/toast`.
+### TimeseriesChart
 
-**Props**
+TimeseriesChart — a time-series line or bar chart.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `variant` | enum | No | default | `default`, `success`, `error`, `warning`, `info` | `{"default":"Default toast style","success":"Success toast for confirmations and positive outcomes","error":"Error toast for critical issues","warning":"Warning toast for cautionary messages","info":"Info toast for neutral informational messages"}` |
-| `className` | string | No | - | - | Additional CSS classes |
-| `children` | ReactNode | No | - | - | Child elements |
+**Type:** component
 
-**Kumo Color Tokens**
+**Import:** `import { TimeseriesChart } from "@cloudflare/kumo";`
 
-`bg-kumo-base`, `bg-kumo-contrast`, `bg-kumo-control`, `bg-kumo-danger-tint`, `bg-kumo-fill-hover`, `bg-kumo-info-tint`, `bg-kumo-success-tint`, `bg-kumo-warning-tint`, `border-kumo-fill`, `ring-kumo-danger`, `ring-kumo-hairline`, `ring-kumo-info`, `ring-kumo-line`, `ring-kumo-success`, `ring-kumo-warning`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-info`, `text-kumo-subtle`, `text-kumo-success`, `text-kumo-warning`
+**Category:** Data Visualization
 
-**Styling**
+**Props:**
 
-```json
-{
-  "container": {
-    "width": 300,
-    "padding": 16,
-    "borderRadius": 8,
-    "background": "bg-kumo-base",
-    "border": "ring-[0.3px] ring-kumo-hairline",
-    "shadow": "shadow-lg",
-    "gap": 4
-  },
-  "title": {
-    "fontSize": 16,
-    "fontWeight": 500,
-    "color": "text-color-surface"
-  },
-  "description": {
-    "fontSize": 15,
-    "fontWeight": 400,
-    "color": "text-color-muted"
-  },
-  "closeButton": {
-    "size": 20,
-    "iconSize": 16,
-    "iconName": "ph-x",
-    "iconColor": "text-color-muted",
-    "hoverBackground": "color-color-2",
-    "hoverColor": "text-color-label",
-    "borderRadius": 4
-  }
-}
-```
+- `echarts`: typeof echarts (required)
+  The ECharts core instance imported by the consumer. Passed in rather than imported directly so the consumer controls which ECharts modules are bundled (tree-shaking).
+- `type`: "line" | "bar"
+  Visual style of each series. Defaults to `"line"`.
+- `data`: TimeseriesData[] (required)
+  Array of time series data to display on the chart
+- `markers`: TimeseriesMarker[]
+  Vertical reference markers rendered on the time axis.
+- `thresholds`: TimeseriesThreshold[]
+  Horizontal threshold lines rendered on the value axis.
+- `xAxisName`: string
+  Label for the x-axis (time axis)
+- `xAxisTickCount`: number
+  Number of ticks to display on the x-axis
+- `xAxisTickFormat`: (value: number) => string
+  Custom formatter for x-axis tick labels. Receives the raw timestamp in milliseconds and returns a display string, overriding ECharts' built-in time formatting.
+- `yAxisTickFormat`: (value: number) => string
+  Custom formatter for y-axis tick labels. Receives the raw value and returns a display string. When omitted, ECharts' built-in formatter is used.
+- `yAxisTickLabelFormat`: (value: number) => string
+- `yAxisName`: string
+  Label for the y-axis (value axis)
+- `yAxisTickCount`: number
+  Number of ticks to display on the y-axis
+- `tooltipValueFormat`: (value: number) => string
+  Custom formatter for tooltip values. Receives the raw y-value and returns a display string. When omitted, the raw value is shown. Takes precedence over the deprecated `yAxisTickLabelFormat` prop.
+- `tooltipMode`: "all" | "single"
+  Controls which series are shown in the tooltip. - `"all"` — show all series at the hovered timestamp (default) - `"single"` — show only the series whose value is closest to the cursor
+- `tooltipMaxItems`: number
+  Maximum number of series rows shown in the tooltip when `tooltipMode` is `"all"`. Additional series are hidden with a `+N more` footer. Defaults to `10`.
+- `tooltipBoundary`: "clipping-ancestors" | Element | Element[]
+  Constrains the tooltip to stay within a specific element or region. By default the tooltip avoids overflowing any clipping ancestor (scroll containers, viewports, etc.). Pass an `Element` or array of elements to restrict the tooltip to a specific container.
+- `tooltipFollowCursor`: "both" | "x"
+  Which axis the tooltip follows the cursor on. - `"both"` — tooltip tracks the cursor on both axes, staying near the pointer at all times. This is the default and matches the behaviour of ECharts' built-in tooltip. - `"x"` — tooltip follows the cursor horizontally but is locked to a fixed vertical position relative to the chart. This keeps the tooltip out of the way of the data and avoids vertical jitter as series values change — the same approach used by Recharts and many dashboard UIs. Only these two modes are offered because the x-axis is always time in a `TimeseriesChart`: y-only tracking and fully-fixed positioning don't produce useful tooltip behaviour for time-series data. Powered by Base UI Tooltip's `trackCursorAxis` under the hood.
+- `incomplete`: { before?: number; after?: number }
+  Indicates incomplete data periods with optional before/after timestamps in ms
+- `enableLegendSelection`: boolean
+  When `true`, adds a hidden ECharts legend so consumers can drive series visibility imperatively via the `legendSelect` / `legendUnSelect` / `legendToggleSelect` actions (e.g. to build a custom interactive legend). Toggled-off series are also excluded from the tooltip. Requires the consumer to register ECharts' `LegendComponent` (`echarts.use([LegendComponent])`); otherwise the legend actions no-op and, in development, ECharts logs a "component legend is used but not imported" warning.
+- `height`: number
+  Height of the chart in pixels. Defaults to `350`.
+- `isDarkMode`: boolean
+  When `true`, switches the chart to ECharts' built-in dark theme
+- `gradient`: boolean
+  When `true`, renders a vertical gradient fill beneath each line series. The gradient fades from the series' color at the top to transparent at the bottom. Has no effect when `type` is `"bar"`.
+- `loading`: boolean
+  When `true`, hides the chart and displays a skeleton matching the chart type with a subtle shimmer.
+- `ariaDescription`: string
+  Accessible description for screen readers. When provided, it is passed to ECharts' `aria.label.description` and announced when the chart receives focus. Consumers are responsible for writing a meaningful description — see the W3C guidance on complex images for recommendations.
+- `optionUpdateBehavior`: SetOptionOpts
+  Additional options passed as the second argument to `chart.setOption()`. Defaults to `{ notMerge: false, lazyUpdate: true }`.
 
+**Colors (kumo tokens used):**
 
-**Examples**
+`bg-kumo-base`, `outline-kumo-fill`
 
-Example 1:
+**Examples:**
 
 ```tsx
-<Toasty>
-      <ToastTriggerButton />
-    </Toasty>
+<Chart
+      echarts={echarts}
+      options={options}
+      height={400}
+      isDarkMode={isDarkMode}
+    />
 ```
 
-Example 2:
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Count"
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      markers={markers}
+      xAxisName="Time (UTC)"
+      yAxisName="Count"
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      thresholds={[
+        {
+          value: 55,
+          label: "Memory limit",
+          color: ChartPalette.semantic("Attention", isDarkMode),
+        },
+      ]}
+      xAxisName="Time (UTC)"
+      yAxisName="Memory (MB)"
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Requests"
+      xAxisTickFormat={(ts) => {
+        const d = new Date(ts);
+        return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+      }}
+      yAxisTickFormat={(value) => {
+        if (value >= 1000) return `${value / 1000}k`;
+        return value.toString();
+      }}
+      tooltipValueFormat={(value) => `${(value / 1000).toFixed(1)}k requests`}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      yAxisTickCount={2}
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      height={160}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Mbps"
+      incomplete={{ after: incompleteTimestamp }}
+    />
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="%"
+      onTimeRangeChange={(from, to) => {
+        alert(
+          `Selected range:\nFrom: ${new Date(from).toLocaleString()}\nTo: ${new Date(to).toLocaleString()}`,
+        );
+      }}
+    />
+```
+
+```tsx
+<div className="space-y-4">
+      <h3 className="text-sm font-medium">Active State</h3>
+
+      <div className="flex flex-wrap gap-4 divide-x divide-kumo-hairline">
+        <ChartLegend.LargeItem
+          name="Requests"
+          color={ChartPalette.semantic("Neutral", isDarkMode)}
+          value="1,234"
+          unit="req/s"
+        />
+        <ChartLegend.LargeItem
+          name="Storage"
+          color={ChartPalette.semantic("Attention", isDarkMode)}
+          value="56"
+          unit="GB"
+        />
+        <ChartLegend.LargeItem
+          name="Warnings"
+          color={ChartPalette.semantic("Warning", isDarkMode)}
+          value="128"
+        />
+      </div>
+
+      <h3 className="mt-12 text-sm font-medium">Inactive State</h3>
+
+      <div className="flex flex-wrap gap-4 divide-x divide-kumo-hairline">
+        <ChartLegend.LargeItem
+          name="Requests"
+          color={ChartPalette.semantic("Neutral", isDarkMode)}
+          value="1,234"
+          unit="req/s"
+          inactive
+        />
+        <ChartLegend.LargeItem
+          name="Storage"
+          color={ChartPalette.semantic("Attention", isDarkMode)}
+          value="56"
+          unit="GB"
+          inactive
+        />
+        <ChartLegend.LargeItem
+          name="Warnings"
+          color={ChartPalette.semantic("Warning", isDarkMode)}
+          value="128"
+          inactive
+        />
+      </div>
+
+      <h3 className="mt-12 text-sm font-medium">Loading state</h3>
+
+      <div className="flex flex-wrap gap-4 divide-x divide-kumo-hairline">
+        <ChartLegend.LargeItem loading />
+      </div>
+    </div>
+```
+
+```tsx
+<TimeseriesChart
+      echarts={echarts}
+      isDarkMode={isDarkMode}
+      type="bar"
+      data={data}
+      xAxisName="Time (UTC)"
+      yAxisName="Count"
+      tooltipValueFormat={(r) => r.toFixed(2)}
+    />
+```
+
+```tsx
+<div className="flex w-full flex-1 flex-col">
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        data={[]}
+        loading
+      />
+    </div>
+```
+
+```tsx
+<div className="flex w-full flex-1 flex-col">
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        type="bar"
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        data={[]}
+        loading
+      />
+    </div>
+```
+
+```tsx
+<div className="flex w-full flex-1 flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="flex flex-wrap gap-4">
+          {data.map((series) => (
+            <ChartLegend.SmallItem
+              loading={loading}
+              key={series.name}
+              name={series.name}
+              color={series.color}
+              value={Math.round(series.data.at(-1)?.[1] ?? 0).toLocaleString()}
+            />
+          ))}
+        </div>
+        <Switch
+          label="Loading"
+          checked={loading}
+          onCheckedChange={setLoading}
+        />
+      </div>
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        data={loading ? [] : data}
+        loading={loading}
+      />
+    </div>
+```
+
+```tsx
+<LayerCard>
+      <LayerCard.Secondary>Read latency</LayerCard.Secondary>
+      <LayerCard.Primary>
+        <div className="mb-2 flex gap-4 divide-x divide-kumo-hairline px-2">
+          <ChartLegend.LargeItem
+            name="P99"
+            color={ChartPalette.semantic("Attention", isDarkMode)}
+            value="124"
+            unit="ms"
+          />
+          <ChartLegend.LargeItem
+            name="P95"
+            color={ChartPalette.semantic("Warning", isDarkMode)}
+            value="76"
+            unit="ms"
+          />
+          <ChartLegend.LargeItem
+            name="P75"
+            color={ChartPalette.semantic("Neutral", isDarkMode)}
+            value="32"
+            unit="ms"
+          />
+          <ChartLegend.LargeItem
+            name="P50"
+            color={ChartPalette.semantic("Neutral", isDarkMode)}
+            value="10"
+            unit="ms"
+          />
+        </div>
+        <TimeseriesChart
+          xAxisName="Time (UTC)"
+          echarts={echarts}
+          isDarkMode={isDarkMode}
+          data={data}
+          height={300}
+        />
+      </LayerCard.Primary>
+    </LayerCard>
+```
+
+```tsx
+<LayerCard>
+      <LayerCard.Secondary>Read latency</LayerCard.Secondary>
+      <LayerCard.Primary>
+        <div className="mb-2 flex divide-x divide-kumo-line px-2">
+          {series.map((s) => (
+            <ChartLegend.LargeItem
+              key={s.name}
+              name={s.name}
+              color={s.color}
+              value={s.value}
+              unit={s.unit}
+              inactive={hoveredSeries !== null && hoveredSeries !== s.name}
+              onPointerEnter={() => {
+                setHoveredSeries(s.name);
+                chartRef.current?.dispatchAction({
+                  type: "highlight",
+                  seriesName: s.name,
+                });
+              }}
+              onPointerLeave={() => {
+                setHoveredSeries(null);
+                chartRef.current?.dispatchAction({
+                  type: "downplay",
+                  seriesName: s.name,
+                });
+              }}
+              className="not-first:pl-4"
+            />
+          ))}
+        </div>
+        <TimeseriesChart
+          ref={chartRef}
+          xAxisName="Time (UTC)"
+          echarts={echarts}
+          isDarkMode={isDarkMode}
+          data={data}
+          height={300}
+        />
+      </LayerCard.Primary>
+    </LayerCard>
+```
+
+```tsx
+<LayerCard>
+      <LayerCard.Secondary>Read latency</LayerCard.Secondary>
+      <LayerCard.Primary>
+        <div className="mb-2 flex divide-x divide-kumo-line px-2">
+          {series.map((s) => (
+            <ChartLegend.LargeItem
+              key={s.name}
+              name={s.name}
+              color={s.color}
+              value={s.value}
+              unit={s.unit}
+              inactive={hiddenSeries[s.name] ?? false}
+              onClick={() => handleClick(s.name)}
+              className="not-first:pl-4"
+            />
+          ))}
+        </div>
+        <TimeseriesChart
+          ref={chartRef}
+          xAxisName="Time (UTC)"
+          echarts={echarts}
+          isDarkMode={isDarkMode}
+          data={data}
+          height={300}
+          enableLegendSelection
+        />
+      </LayerCard.Primary>
+    </LayerCard>
+```
+
+```tsx
+<div className="flex w-full flex-col gap-4">
+      <Select
+        label="Tooltip follow cursor"
+        value={selected}
+        onValueChange={(v) => {
+          if (v) setSelected(v);
+        }}
+        renderValue={(v) => v.label}
+      >
+        {FOLLOW_CURSOR_OPTIONS.map((opt) => (
+          <Select.Option key={opt.value} value={opt}>
+            {opt.label}
+          </Select.Option>
+        ))}
+      </Select>
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        data={data}
+        xAxisName="Time (UTC)"
+        yAxisName="Latency (ms)"
+        tooltipFollowCursor={selected.value}
+      />
+    </div>
+```
+
+```tsx
+<div
+      ref={boundaryRef}
+      className="w-full overflow-auto rounded-lg border border-kumo-line"
+      style={{ height: 300 }}
+    >
+      <TimeseriesChart
+        echarts={echarts}
+        isDarkMode={isDarkMode}
+        data={data}
+        xAxisName="Time (UTC)"
+        yAxisName="Count"
+        height={280}
+        tooltipBoundary={boundary ?? undefined}
+      />
+    </div>
+```
+
+
+---
+
+### Toasty
+
+Toasty — toast notification provider and viewport.
+
+**Type:** component
+
+**Import:** `import { Toasty } from "@cloudflare/kumo";`
+
+**Category:** Feedback
+
+**Props:**
+
+- `variant`: enum [default: default]
+  - `"default"`: Default toast style
+  - `"success"`: Success toast for confirmations and positive outcomes
+  - `"error"`: Error toast for critical issues
+  - `"warning"`: Warning toast for cautionary messages
+  - `"info"`: Info toast for neutral informational messages
+- `children`: React.ReactNode (required)
+  Application content. Toasts render via a portal above this.
+- `container`: PortalContainer
+  Container element for the portal. Use this to render toasts inside a Shadow DOM or custom container. Overrides `KumoPortalProvider` context.
+- `toastManager`: ReturnType<typeof createKumoToastManager>
+  Optional toast manager created by `createKumoToastManager()`. When provided, allows code outside the React tree (timers, module-load callbacks, query-cache listeners) to dispatch toasts via the same dedupe-aware manager that `useKumoToastManager()` returns inside the tree. Forwarded to the underlying `@base-ui/react/toast` `Toast.Provider` `toastManager` prop — see https://base-ui.com/react/components/toast for the upstream primitive.
+
+**Colors (kumo tokens used):**
+
+`bg-kumo-base`, `bg-kumo-control`, `bg-kumo-danger-tint`, `bg-kumo-info-tint`, `bg-kumo-success-tint`, `bg-kumo-warning-tint`, `border-kumo-fill`, `ring-kumo-danger`, `ring-kumo-hairline`, `ring-kumo-info`, `ring-kumo-line`, `ring-kumo-success`, `ring-kumo-warning`, `text-kumo-danger`, `text-kumo-default`, `text-kumo-info`, `text-kumo-subtle`, `text-kumo-success`, `text-kumo-warning`
+
+**Styling:**
+
+
+**Examples:**
 
 ```tsx
 <Toasty>
@@ -9608,127 +9891,214 @@ Example 2:
     </Toasty>
 ```
 
-Example 3:
+
+---
+
+### Toolbar
+
+Toolbar component
+
+**Type:** component
+
+**Import:** `import { Toolbar } from "@cloudflare/kumo";`
+
+**Category:** Other
+
+**Props:**
+
+- `disabled`: boolean
+- `orientation`: ToolbarRoot.Orientation
+  The orientation of the toolbar.
+- `loopFocus`: boolean
+  If `true`, using keyboard navigation will wrap focus to the other end of the toolbar once the end is reached.
+- `id`: string
+- `lang`: string
+- `title`: string
+- `className`: string | object
+  CSS class applied to the element, or a function that returns a class based on the component's state.
+- `render`: ReactNode
+  Allows you to replace the component's HTML element with a different tag, or compose it with another component.
+
+Accepts a `ReactElement` or a function that returns the element to render.
+- `children`: ReactNode
+  Toolbar controls rendered as one grouped card.
+- `size`: enum [default: base]
+  - `"xs"`: Extra small toolbar for compact UIs
+  - `"sm"`: Small toolbar for secondary controls
+  - `"base"`: Default toolbar size
+  - `"lg"`: Large toolbar for prominent controls
+
+**Colors (kumo tokens used):**
+
+`bg-kumo-control`, `border-kumo-line`, `ring-kumo-line`
+
+**Sub-Components:**
+
+This is a compound component. Use these sub-components:
+
+#### Toolbar.Button
+
+Button sub-component
+
+#### Toolbar.Input
+
+Input sub-component
+
+#### Toolbar.InputGroup
+
+InputGroup sub-component
+
+
+**Examples:**
 
 ```tsx
-<Toasty>
-      <ToastDescriptionOnlyButton />
-    </Toasty>
+<Toolbar className="w-full max-w-md">
+      <Toolbar.InputGroup aria-label="Search DNS records" className="flex-1">
+        <InputGroup.Addon>
+          <MagnifyingGlassIcon />
+        </InputGroup.Addon>
+        <InputGroup.Input placeholder="Search DNS records" />
+      </Toolbar.InputGroup>
+      <Toolbar.Button icon={FunnelSimpleIcon} aria-label="Filter" />
+      <Toolbar.Button icon={GearSixIcon} aria-label="Settings" />
+    </Toolbar>
 ```
-
-Example 4:
 
 ```tsx
-<Toasty>
-      <ToastSuccessButton />
-    </Toasty>
+<div className="grid gap-3">
+      {(["xs", "sm", "base", "lg"] as const).map((size) => (
+        <div key={size} className="flex items-center gap-3">
+          <span className="w-10 text-sm text-kumo-subtle">{size}</span>
+          <Toolbar size={size} className="w-fit">
+            <Toolbar.Input
+              aria-label={`${size} search`}
+              placeholder="Search..."
+            />
+            <Toolbar.Button>Apply</Toolbar.Button>
+          </Toolbar>
+        </div>
+      ))}
+    </div>
 ```
-
-Example 5:
 
 ```tsx
-<Toasty>
-      <ToastMultipleButton />
-    </Toasty>
+<Toolbar className="w-full max-w-lg">
+      <Toolbar.InputGroup aria-label="Worker subdomain" className="flex-1">
+        <InputGroup.Input placeholder="my-worker" />
+        <InputGroup.Suffix>.workers.dev</InputGroup.Suffix>
+      </Toolbar.InputGroup>
+      <Toolbar.Button>Visit</Toolbar.Button>
+    </Toolbar>
 ```
-
-Example 6:
 
 ```tsx
-<Toasty>
-      <ToastErrorButton />
-    </Toasty>
+<Toolbar>
+      <Toolbar.Button icon={UploadSimpleIcon}>Upload</Toolbar.Button>
+      <Toolbar.Button icon={DownloadSimpleIcon}>Download</Toolbar.Button>
+    </Toolbar>
 ```
-
-Example 7:
 
 ```tsx
-<Toasty>
-      <ToastWarningButton />
-    </Toasty>
+<Toolbar className="w-full max-w-lg">
+      <Toolbar.Input
+        aria-label="Search records"
+        className="flex-1"
+        placeholder="Search"
+      />
+      <Toolbar.Button icon={MagnifyingGlassIcon} aria-label="Search" />
+    </Toolbar>
 ```
-
-Example 8:
 
 ```tsx
-<Toasty>
-      <ToastInfoButton />
-    </Toasty>
+<Toolbar>
+      <Toolbar.Button icon={FunnelSimpleIcon}>Filter</Toolbar.Button>
+      <Select
+        aria-label="Sort records"
+        defaultValue="name"
+        items={{ name: "Name", created: "Created date", status: "Status" }}
+        render={<Toolbar.Button />}
+      />
+      <Toolbar.Button icon={GearSixIcon} aria-label="View settings" />
+    </Toolbar>
 ```
-
-Example 9:
 
 ```tsx
-<Toasty>
-      <ToastCustomContentButton />
-    </Toasty>
+<Toolbar className="w-full max-w-md">
+      <Toolbar.Button icon={FunnelSimpleIcon}>Status</Toolbar.Button>
+      <Combobox items={toolbarComboboxItems}>
+        <Combobox.TriggerInput
+          aria-label="Filter status"
+          className="flex-1"
+          placeholder="Filter status…"
+          render={<Toolbar.Input />}
+        />
+        <Combobox.Content>
+          <Combobox.List>
+            {(item: string) => (
+              <Combobox.Item key={item} value={item}>
+                {item}
+              </Combobox.Item>
+            )}
+          </Combobox.List>
+          <Combobox.Empty>No matching statuses.</Combobox.Empty>
+        </Combobox.Content>
+      </Combobox>
+    </Toolbar>
 ```
 
-Example 10:
 
-```tsx
-<Toasty>
-      <ToastActionsButton />
-    </Toasty>
-```
+---
 
-Example 11:
+### Tooltip
 
-```tsx
-<Toasty>
-      <ToastPromiseButton />
-    </Toasty>
-```
+Accessible popup that shows additional information on hover/focus. Wrap your app or section with `<TooltipProvider>` to enable delay grouping.
 
+**Type:** component
 
-## Tooltip
+**Import:** `import { Tooltip } from "@cloudflare/kumo";`
 
-- Type: component
-- Category: Overlay
-- Import path: `@cloudflare/kumo`
-- Description: Accessible popup that shows additional information on hover/focus. Wrap your app or section with `<TooltipProvider>` to enable delay grouping.
+**Category:** Overlay
 
-**Props**
+**Props:**
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `side` | enum | No | top | `top`, `bottom`, `left`, `right` | `{"top":"Tooltip appears above the trigger","bottom":"Tooltip appears below the trigger","left":"Tooltip appears to the left of the trigger","right":"Tooltip appears to the right of the trigger"}` |
-| `className` | string | No | - | - | Additional CSS classes |
-| `children` | ReactNode | No | - | - | Child elements |
-| `content` | ReactNode | Yes | - | - | Content to display in the tooltip |
+- `side`: enum [default: top]
+  - `"top"`: Tooltip appears above the trigger
+  - `"bottom"`: Tooltip appears below the trigger
+  - `"left"`: Tooltip appears to the left of the trigger
+  - `"right"`: Tooltip appears to the right of the trigger
+- `className`: string
+  Additional CSS classes
+- `children`: ReactNode
+  Child elements
+- `content`: ReactNode (required)
+  Content to display in the tooltip
 
-**Subcomponents**
+**Colors (kumo tokens used):**
 
-### Tooltip.Provider
+`bg-kumo-base`, `fill-kumo-base`, `fill-kumo-tip-shadow`, `fill-kumo-tip-stroke`, `outline-kumo-fill`, `text-kumo-default`
 
-- Description: Groups multiple tooltips so that after the first tooltip is shown, switching to another skips the open delay. Place once at your app root or layout.
-- Pass through: Yes, base: `TooltipBase.Provider`
+**Sub-Components:**
+
+This is a compound component. Use these sub-components:
+
+#### Tooltip.Provider
+
+Groups multiple tooltips so that after the first tooltip is shown, switching to another skips the open delay. Place once at your app root or layout.
 
 Props:
+- `delay`: number [default: 600] - How long to wait (ms) before opening a tooltip once the pointer enters the trigger.
+- `closeDelay`: number [default: 0] - How long to wait (ms) before closing a tooltip.
+- `timeout`: number [default: 400] - Grace period (ms) during which a just-closed tooltip's delay is skipped when another tooltip opens.
 
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `delay` | number | No | 600 | - | How long to wait (ms) before opening a tooltip once the pointer enters the trigger. |
-| `closeDelay` | number | No | 0 | - | How long to wait (ms) before closing a tooltip. |
-| `timeout` | number | No | 400 | - | Grace period (ms) during which a just-closed tooltip's delay is skipped when another tooltip opens. |
-
-Usage examples:
-
-Example 1:
-
+Usage:
 ```tsx
 <TooltipProvider>
   <App />
 </TooltipProvider>
 ```
 
-**Kumo Color Tokens**
 
-`bg-kumo-base`, `fill-kumo-base`, `fill-kumo-tip-shadow`, `fill-kumo-tip-stroke`, `outline-kumo-fill`, `text-kumo-default`
-
-**Examples**
-
-Example 1:
+**Examples:**
 
 ```tsx
 <TooltipProvider>
@@ -9740,19 +10110,6 @@ Example 1:
       />
     </TooltipProvider>
 ```
-
-Example 2:
-
-```tsx
-<TooltipProvider>
-      <Tooltip
-        content="Add"
-        render={<Button shape="square" icon={PlusIcon} aria-label="Add" />}
-      />
-    </TooltipProvider>
-```
-
-Example 3:
 
 ```tsx
 <TooltipProvider>
@@ -9775,8 +10132,6 @@ Example 3:
     </TooltipProvider>
 ```
 
-Example 4:
-
 ```tsx
 <TooltipProvider>
       <Tooltip
@@ -9788,8 +10143,6 @@ Example 4:
       </Tooltip>
     </TooltipProvider>
 ```
-
-Example 5:
 
 ```tsx
 <TooltipProvider>
@@ -9818,8 +10171,6 @@ Example 5:
       </div>
     </TooltipProvider>
 ```
-
-Example 6:
 
 ```tsx
 <TooltipProvider>
@@ -9851,493 +10202,61 @@ Example 6:
 ```
 
 
-## Blocks
-
-## DeleteResource
-
-- Type: block
-- Category: Other
-- Import path: `@cloudflare/kumo`
-- Description: DeleteResource component
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `size` | enum | No | base | `sm`, `base` | `{"sm":"Small dialog for simple delete confirmations","base":"Default delete confirmation dialog size"}` |
-| `open` | boolean | Yes | - | - | Whether the dialog is open |
-| `resourceType` | string | Yes | - | - | The type of resource being deleted (e.g., "Zone", "Worker", "KV Namespace") |
-| `resourceName` | string | Yes | - | - | The name of the specific resource being deleted |
-| `isDeleting` | boolean | No | - | - | Whether the delete action is in progress |
-| `caseSensitive` | boolean | No | - | - | Whether the confirmation input should be case-sensitive (default: true) |
-| `deleteButtonText` | string | No | - | - | Custom delete button text (defaults to "Delete {resourceType}") |
-| `className` | string | No | - | - | Additional className for the dialog |
-| `errorMessage` | string | No | - | - | Error message to display if the delete action fails |
-
-**Kumo Color Tokens**
-
-`bg-kumo-fill`, `bg-kumo-tint`, `border-kumo-line`, `text-kumo-default`, `text-kumo-subtle`
-
-**Block Files**
-
-- `delete-resource/delete-resource.tsx`
-
-**Dependencies**
-
-`Banner`, `Button`, `Dialog`, `DialogClose`, `DialogRoot`, `DialogTitle`, `Input`
-
-**Examples**
-
-Example 1:
-
-```tsx
-<>
-      <Button variant="destructive" onClick={() => setOpen(true)}>
-        Delete Zone
-      </Button>
-      <DeleteResource
-        open={open}
-        onOpenChange={setOpen}
-        resourceType="Zone"
-        resourceName="example.com"
-        onDelete={handleDelete}
-        isDeleting={isDeleting}
-      />
-    </>
-```
-
-Example 2:
-
-```tsx
-<>
-      <Button variant="destructive" onClick={() => setOpen(true)}>
-        Delete Worker
-      </Button>
-      <DeleteResource
-        open={open}
-        onOpenChange={setOpen}
-        resourceType="Worker"
-        resourceName="api-gateway-worker"
-        onDelete={handleDelete}
-        isDeleting={isDeleting}
-      />
-    </>
-```
-
-Example 3:
-
-```tsx
-<>
-      <Button variant="destructive" onClick={() => setOpen(true)}>
-        Delete Zone
-      </Button>
-      <DeleteResource
-        open={open}
-        onOpenChange={setOpen}
-        resourceType="Zone"
-        resourceName="example.com"
-        onDelete={handleDelete}
-        isDeleting={isDeleting}
-        errorMessage={errorMsg}
-      />
-    </>
-```
-
-
-## PageHeader
-
-- Type: block
-- Category: Layout
-- Import path: `@cloudflare/kumo`
-- Description: PageHeader component
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `spacing` | enum | No | base | `compact`, `base`, `relaxed` | `{"compact":"Compact spacing between header elements","base":"Default spacing between header elements","relaxed":"Relaxed spacing for more prominent headers"}` |
-| `breadcrumbs` | ReactNode | No | - | - | - |
-| `title` | string | No | - | - | - |
-| `description` | string | No | - | - | - |
-| `tabs` | TabsItem[] | No | - | - | - |
-| `defaultTab` | string | No | - | - | - |
-| `className` | string | No | - | - | - |
-| `children` | ReactNode | No | - | - | - |
-
-**Kumo Color Tokens**
-
-`border-kumo-line`, `text-kumo-default`, `text-kumo-subtle`
-
-**Block Files**
-
-- `page-header/page-header.tsx`
-
-**Dependencies**
-
-`Tabs`
-
-**Examples**
-
-Example 1:
-
-```tsx
-<PageHeader
-      className="w-full"
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link icon={<HouseIcon size={16} />} href="#">
-            Workers & Pages
-          </Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>cloudflare-dev-platform</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-      tabs={[
-        { label: "Overview", value: "overview" },
-        { label: "Metrics", value: "metrics" },
-        { label: "Deployments", value: "deployments" },
-        { label: "Bindings", value: "bindings" },
-        { label: "Observability", value: "observability" },
-        { label: "Settings", value: "settings" },
-      ]}
-      defaultTab="overview"
-      onValueChange={(v) => console.log(v)}
-    >
-      <Button icon={<CodeIcon />} className="h-8">
-        Edit code
-      </Button>
-      <Button icon={<GlobeIcon />} variant="primary" className="h-8">
-        Visit
-      </Button>
-    </PageHeader>
-```
-
-Example 2:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link href="#">Home</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>Dashboard</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-    />
-```
-
-Example 3:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link icon={<HouseIcon size={16} />} href="#">
-            Home
-          </Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current icon={<GearIcon size={16} />}>
-            Settings
-          </Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-    />
-```
-
-Example 4:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link href="#">Home</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>Settings</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-      tabs={[
-        { label: "General", value: "general" },
-        { label: "Security", value: "security" },
-        { label: "Notifications", value: "notifications" },
-      ]}
-      defaultTab="general"
-    />
-```
-
-Example 5:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link href="#">Home</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Link href="#">Projects</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>My Project</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-      tabs={[
-        { label: "Overview", value: "overview" },
-        { label: "Settings", value: "settings" },
-      ]}
-      defaultTab="overview"
-    >
-      <Button variant="primary" size="base">
-        Deploy
-      </Button>
-    </PageHeader>
-```
-
-Example 6:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link href="#">Home</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Link href="#">Products</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>Page title</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-      title="Page title"
-    />
-```
-
-Example 7:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link href="#">Home</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Link href="#">Products</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>Page title</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-      title="Page title"
-      description="Action-led, value-oriented description of what this page does. Optional second sentence with use cases or prerequisites."
-    />
-```
-
-Example 8:
-
-```tsx
-<PageHeader
-      breadcrumbs={
-        <Breadcrumbs>
-          <Breadcrumbs.Link href="#">Home</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Link href="#">Products</Breadcrumbs.Link>
-          <Breadcrumbs.Separator />
-          <Breadcrumbs.Current>Page title</Breadcrumbs.Current>
-        </Breadcrumbs>
-      }
-      title="Page title"
-      description="Action-led, value-oriented description of what this page does."
-      tabs={[
-        { label: "Overview", value: "overview" },
-        { label: "Analytics", value: "analytics" },
-        { label: "Settings", value: "settings" },
-      ]}
-      defaultTab="overview"
-    >
-      <Button variant="outline" size="sm">
-        Export
-      </Button>
-      <Button variant="primary" size="sm" icon={<PlusIcon size={16} />}>
-        New Item
-      </Button>
-    </PageHeader>
-```
-
-
-## ResourceListPage
-
-- Type: block
-- Category: Layout
-- Import path: `@cloudflare/kumo`
-- Description: ResourceListPage - A layout component for resource list pages  Layouts are page-level components that provide consistent structure for common page patterns like resource lists, dashboards, and settings.
-
-**Props**
-
-| Prop | Type | Required | Default | Values | Description |
-| --- | --- | --- | --- | --- | --- |
-| `title` | string | No | - | - | - |
-| `description` | string | No | - | - | - |
-| `icon` | ReactNode | No | - | - | - |
-| `usage` | ReactNode | No | - | - | - |
-| `additionalContent` | ReactNode | No | - | - | - |
-| `children` | ReactNode | No | - | - | - |
-| `className` | string | No | - | - | - |
-
-**Kumo Color Tokens**
-
-`bg-kumo-overlay`, `text-kumo-subtle`
-
-**Block Files**
-
-- `resource-list/resource-list.tsx`
-- `resource-list/resource-list.test.tsx`
-
-**Examples**
-
-Example 1:
-
-```tsx
-<ResourceListPage
-      title="Databases"
-      description="Manage your database instances and configurations"
-      icon={<DatabaseIcon size={32} className="text-kumo-subtle" />}
-    >
-      <Surface className="p-6">
-        <p>Main content area - your resource list would go here</p>
-      </Surface>
-    </ResourceListPage>
-```
-
-Example 2:
-
-```tsx
-<ResourceListPage
-      title="API Keys"
-      description="Create and manage API keys for your applications"
-      usage={
-        <Surface className="p-4">
-          <h3 className="mb-2 font-semibold">Quick Start</h3>
-          <p className="mb-3 text-sm text-kumo-subtle">
-            Generate an API key to authenticate your requests
-          </p>
-          <Code
-            lang="bash"
-            code='curl -H "Authorization: Bearer <API_KEY>" https://api.example.com'
-          />
-        </Surface>
-      }
-    >
-      <Surface className="p-6">
-        <p>API keys list would appear here</p>
-      </Surface>
-    </ResourceListPage>
-```
-
-Example 3:
-
-```tsx
-<ResourceListPage
-      title="KV Namespaces"
-      description="Store key-value data globally with low-latency access"
-      icon={<DatabaseIcon size={32} className="text-kumo-subtle" />}
-      usage={
-        <Surface className="p-4">
-          <h3 className="mb-2 font-semibold">Usage Example</h3>
-          <Code
-            lang="ts"
-            code={`// Read from KV
-const value = await KV.get('key');
-
-// Write to KV
-await KV.put('key', 'value');`}
-          />
-        </Surface>
-      }
-      additionalContent={
-        <Surface className="p-4">
-          <h3 className="mb-2 font-semibold">Learn More</h3>
-          <p className="text-sm text-kumo-subtle">
-            Check out our documentation to learn more about KV storage.
-          </p>
-        </Surface>
-      }
-    >
-      <div className="space-y-4">
-        <Surface className="p-6">
-          <h4 className="mb-2 font-semibold">production-kv</h4>
-          <p className="text-sm text-kumo-subtle">Created 2 days ago</p>
-        </Surface>
-        <Surface className="p-6">
-          <h4 className="mb-2 font-semibold">staging-kv</h4>
-          <p className="text-sm text-kumo-subtle">Created 1 week ago</p>
-        </Surface>
-      </div>
-    </ResourceListPage>
-```
-
-
-## Search Metadata
-
-### By Type
-
-- component: `Autocomplete`, `Badge`, `Banner`, `Breadcrumbs`, `Button`, `Checkbox`, `ClipboardText`, `CloudflareLogo`, `Code`, `Collapsible`, `Combobox`, `CommandPalette`, `DatePicker`, `DateRangePicker`, `Dialog`, `DropdownMenu`, `Empty`, `Field`, `Grid`, `Input`, `InputGroup`, `Label`, `LayerCard`, `Link`, `Loader`, `MenuBar`, `Meter`, `Pagination`, `Popover`, `Radio`, `Select`, `SensitiveInput`, `Sidebar`, `Surface`, `Switch`, `Table`, `TableOfContents`, `Tabs`, `Text`, `Toasty`, `Tooltip`
-- block: `DeleteResource`, `PageHeader`, `ResourceListPage`
-
-### By Category Raw
-
-```json
-{
-  "Other": [
-    "Autocomplete",
-    "CloudflareLogo",
-    "DatePicker",
-    "Label",
-    "Link",
-    "SensitiveInput",
-    "Sidebar",
-    "Table",
-    "TableOfContents",
-    "DeleteResource"
-  ],
-  "Display": [
-    "Badge",
-    "Breadcrumbs",
-    "Code",
-    "Collapsible",
-    "Empty",
-    "LayerCard",
-    "Meter",
-    "Text"
-  ],
-  "Feedback": [
-    "Banner",
-    "Loader",
-    "Toasty"
-  ],
-  "Action": [
-    "Button",
-    "ClipboardText"
-  ],
-  "Input": [
-    "Checkbox",
-    "Combobox",
-    "DateRangePicker",
-    "Field",
-    "Input",
-    "InputGroup",
-    "Radio",
-    "Select",
-    "Switch"
-  ],
-  "Navigation": [
-    "CommandPalette",
-    "MenuBar",
-    "Pagination",
-    "Tabs"
-  ],
-  "Overlay": [
-    "Dialog",
-    "DropdownMenu",
-    "Popover",
-    "Tooltip"
-  ],
-  "Layout": [
-    "Grid",
-    "Surface",
-    "PageHeader",
-    "ResourceListPage"
-  ]
-}
-```
+---
+
+### InputArea
+
+Multi-line textarea input with Input variants and InputArea-specific dimensions
+
+**Type:** component
+
+**Import:** `import { InputArea } from "@cloudflare/kumo (synthetic - uses Input component)";`
+
+**Category:** Input
+
+**Props:**
+
+- `size`: enum [default: base]
+  - `"xs"`: Extra small for compact UIs
+  - `"sm"`: Small for secondary fields
+  - `"base"`: Default size
+  - `"lg"`: Large for prominent fields
+- `variant`: enum [default: default]
+  Visual variant of the textarea.
+- `label`: ReactNode
+  Label content for the textarea (enables Field wrapper) — can be a string or any React node.
+- `labelTooltip`: ReactNode
+  Tooltip content to display next to the label via an info icon.
+- `description`: ReactNode
+  Helper text displayed below the textarea.
+- `error`: string | { message: ReactNode; match: FieldErrorMatch }
+  Error message or validation error object.
+- `autoResize`: boolean [default: false]
+  Automatically resize the textarea based on its content.
+- `minRows`: number [default: 1]
+  Minimum number of rows to display when `autoResize` is enabled.
+- `maxRows`: number
+  Maximum number of rows to grow to when `autoResize` is enabled; content beyond this scrolls.
+- `onValueChange`: (value: string) => void
+  Callback fired with the new string value on every change.
+
+**Styling:**
+
+- **Size Variants:**
+  - `xs`:
+  - `sm`:
+  - `base`:
+  - `lg`:
+
+## Quick Reference
+
+**Components by Category:**
+- **Other:** Autocomplete, CloudflareLogo, DatePicker, Label, Link, SensitiveInput, Sidebar, Table, TableOfContents, Toolbar, DeleteResource
+- **Display:** Badge, Breadcrumbs, Code, Collapsible, Empty, LayerCard, Meter, Text
+- **Feedback:** Banner, Loader, Toasty
+- **Data Visualization:** BubbleMap, Chart, ChoroplethMap, SankeyChart, TimeseriesChart
+- **Action:** Button, ClipboardText
+- **Input:** Checkbox, Combobox, DateRangePicker, Field, Input, InputGroup, Radio, Select, Switch
+- **Navigation:** CommandPalette, MenuBar, Pagination, Tabs
+- **Overlay:** Dialog, DropdownMenu, Popover, Tooltip
+- **Layout:** Grid, Surface, PageHeader, ResourceListPage

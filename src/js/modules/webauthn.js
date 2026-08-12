@@ -74,7 +74,7 @@ export const browserSupportsWebAuthn = () => (
 
 export const createPasskeyCredential = async (options) => {
   if (!browserSupportsWebAuthn()) {
-    throw new Error('当前浏览器不支持通行密钥');
+    throw new Error('浏览器不支持通行密钥');
   }
   const credential = await navigator.credentials.create(normalizeRegistrationOptions(options));
   return serializeCredential(credential);
@@ -82,7 +82,7 @@ export const createPasskeyCredential = async (options) => {
 
 export const getPasskeyAssertion = async (options) => {
   if (!browserSupportsWebAuthn()) {
-    throw new Error('当前浏览器不支持通行密钥');
+    throw new Error('浏览器不支持通行密钥');
   }
   const credential = await navigator.credentials.get(normalizeAuthenticationOptions(options));
   return serializeCredential(credential);

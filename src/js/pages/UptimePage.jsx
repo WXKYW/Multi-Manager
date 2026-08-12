@@ -13,16 +13,18 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { ChartPalette, ClipboardText, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, Loader, Tabs, TimeseriesChart, Toolbar } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
-import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, SectionCard, StatusBadge } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, ResponsiveSearchInput, SectionCard, StatusBadge, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
+import { PublicPageBrandIcon } from '../components/public/PublicPageIconPicker.jsx';
 import useStore from '../store.js';
 import {
   Activity,
@@ -406,6 +408,7 @@ function UptimeMonitorDetails({
   onDelete,
   expanded = true,
 }) {
+  const { isArmed, confirmPress } = useConfirmPress();
   const chartData = useMemo(() => {
     return [{
       name: '响应时间',
@@ -446,7 +449,7 @@ function UptimeMonitorDetails({
             编辑
           </Button>
           <Button size="sm"
-            variant="destructive"
+            variant={isArmed(`monitor:${monitor.id}`) ? 'destructive' : 'secondary-destructive'}
             onClick={(e) => {
               e.stopPropagation();
               onDelete(monitor.id);
@@ -508,6 +511,7 @@ function UptimeMonitorDetails({
 
 // ==================== 主 UptimePage 组件 ====================
 function UptimePage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const theme = useStore((state) => state.theme);
   const isDarkMode = theme === 'dark';
   const [uptimeCurrentTab, setUptimeCurrentTab] = useState('list'); // 'list' | 'add' | 'stats'
@@ -827,10 +831,7 @@ function UptimePage() {
   };
 
   const deleteStatusPage = async (page) => {
-    if (!(await dialog.deleteResource({
-      resourceType: '状态页',
-      resourceName: page.title || page.slug,
-    }))) return;
+    if (!confirmPress(`status-page:${page.id}`, `删除状态页「${page.title || page.slug}」`)) return;
     setUptimeMetaLoading(true);
     try {
       const response = await fetch(`/api/uptime/status-pages/${page.id}`, {
@@ -1143,10 +1144,7 @@ function UptimePage() {
 
   const handleDeleteMonitor = async (id) => {
     const monitor = uptimeMonitors.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '监测目标',
-      resourceName: monitor?.name || `#${id}`,
-    }))) return;
+    if (!confirmPress(`monitor:${id}`, `删除监测目标「${monitor?.name || '#' + id}」`)) return;
     try {
       const res = await fetch(`/api/uptime/monitors/${id}`, {
         method: 'DELETE',
@@ -1190,11 +1188,7 @@ function UptimePage() {
 
   const handleBatchDelete = async () => {
     if (selectedMonitorIds.length === 0) return;
-    if (!(await dialog.deleteResource({
-      resourceType: '监测目标',
-      resourceName: `选中的 ${selectedMonitorIds.length} 个监测目标`,
-      confirmText: '批量删除',
-    }))) return;
+    if (!confirmPress('batch-delete-monitors', `批量删除选中的 ${selectedMonitorIds.length} 个监测目标`)) return;
 
     try {
       const res = await fetch('/api/uptime/monitors/batch-delete', {
@@ -1352,7 +1346,7 @@ function UptimePage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
-      <div className="flex flex-wrap items-center justify-between border-b border-kumo-line pb-3 gap-4">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={uptimeCurrentTab}
@@ -1375,25 +1369,26 @@ function UptimePage() {
         />
 
         {uptimeCurrentTab === 'list' && (
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            {/* 搜索框 */}
-            <div className="relative flex-1 md:w-56">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
-                <Search className="w-3.5 h-3.5" />
-              </span>
-              <Input size="sm"
-                type="text"
-                aria-label="搜索监测目标"
-                placeholder="搜索监测目标..."
-                value={uptimeSearchText}
-                onChange={(e) => setUptimeSearchText(e.target.value)}
-                className="w-full text-kumo-strong text-xs pl-8 pr-3 py-1.5"
-              />
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <ResponsiveSearchInput
+              value={uptimeSearchText}
+              onChange={(e) => setUptimeSearchText(e.target.value)}
+              placeholder="搜索监测目标..."
+              ariaLabel="搜索监测目标"
+              className="md:w-56"
+            />
 
-            <Button size="sm" variant="primary" icon={<Plus className="w-4 h-4" />} onClick={handleOpenAdd}>
-              新建目标
-            </Button>
+            <TabBarOverflowActions
+              items={[
+                {
+                  key: 'add-target',
+                  label: '新建目标',
+                  icon: <Plus className="w-4 h-4" />,
+                  onClick: handleOpenAdd,
+                  variant: 'primary',
+                },
+              ]}
+            />
           </div>
         )}
       </div>
@@ -1460,7 +1455,7 @@ function UptimePage() {
 
           {uptimeLoading && uptimeMonitors.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-kumo-subtle">
-              <RotateCw className="w-8 h-8 animate-spin text-kumo-brand mb-4" />
+              <Loader size={32} className="text-kumo-brand mb-4" />
               <span>载入监控目标中...</span>
             </div>
           ) : filteredMonitors.length === 0 ? (
@@ -1487,7 +1482,7 @@ function UptimePage() {
                   />
                   {selectedMonitorIds.length > 0 && (
                     <Button
-                      variant="destructive" size="sm"
+                      variant={isArmed('batch-delete-monitors') ? 'destructive' : 'secondary-destructive'} size="sm"
                       onClick={handleBatchDelete}
                       icon={<Trash className="w-3 h-3" />}
                     >
@@ -1667,7 +1662,6 @@ function UptimePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
           <SectionCard
             title={statusPageForm.id ? '编辑状态页' : '新建状态页'}
-            description="公开状态页，可绑定域名"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             action={statusPageForm.id ? (
               <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
@@ -1806,7 +1800,6 @@ function UptimePage() {
 
           <SectionCard
             title="已发布状态页"
-            description="已创建的状态页"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             className="self-start"
             actions={(
@@ -1839,6 +1832,9 @@ function UptimePage() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand">
+                              <PublicPageBrandIcon pageKind="uptime" config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
+                            </span>
                             <span className="truncate text-sm font-bold text-kumo-strong">{page.title || page.slug}</span>
                             <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${page.public ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-line/30 text-kumo-subtle'}`}>
                               {page.public ? '公开' : '私有'}
@@ -1852,7 +1848,7 @@ function UptimePage() {
                           <Button size="sm" variant="secondary" shape="square" icon={<Edit className="h-3.5 w-3.5" />} onClick={() => editStatusPage(page)} aria-label="编辑状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => window.open(statusUrl, '_blank', 'noopener,noreferrer')} aria-label="打开状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyStatusUrl(statusUrl)} aria-label="复制状态页地址" />
-                          <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteStatusPage(page)} aria-label="删除状态页" />
+                          <Button size="sm" variant={isArmed(`status-page:${page.id}`) ? 'destructive' : 'secondary-destructive'} shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteStatusPage(page)} aria-label="删除状态页" />
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2 text-xs">
@@ -2278,7 +2274,6 @@ function UptimePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <SectionCard
             title="配置导入预览"
-            description="导出配置，或预览导入内容"
             icon={<Upload className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
@@ -2290,12 +2285,14 @@ function UptimePage() {
                   className="hidden"
                   onChange={previewUptimeImportFile}
                 />
-                <Button size="sm" variant="secondary" onClick={exportUptimeConfig} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
-                  导出当前配置
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Download className="w-3.5 h-3.5" />}>
-                  选择配置文件
-                </Button>
+                <Toolbar size="sm" aria-label="导出导入 Uptime 配置" className="shrink-0">
+                    <Toolbar.Button onClick={exportUptimeConfig} loading={uptimeMetaLoading} aria-label="导出当前配置" icon={<Upload className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导出</span>
+                    </Toolbar.Button>
+                    <Toolbar.Button onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} aria-label="导入配置文件" icon={<Download className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导入</span>
+                    </Toolbar.Button>
+                  </Toolbar>
               </>
             )}
             bodyPadding="lg"

@@ -403,6 +403,7 @@ func TestOpenAIRoutesAreGoOwned(t *testing.T) {
 		"/api/openai/export",
 		"/api/openai/import",
 		"/v1/chat/completions",
+		"/v1/responses",
 		"/v1/models",
 	} {
 		route, ok := Match(path)

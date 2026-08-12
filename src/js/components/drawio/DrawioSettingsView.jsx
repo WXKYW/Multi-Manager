@@ -20,7 +20,6 @@ export default function DrawioSettingsView({
     <div className="min-h-0 flex-1 overflow-y-auto pr-1 scrollbar-thin">
       <SectionCard
         title="编辑器默认设置"
-        description=""
         className="max-w-4xl self-start"
         bodyClassName="grid gap-4"
       >

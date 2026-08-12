@@ -9,6 +9,7 @@ import {
   Tabs,
   Text,
   TimeseriesChart,
+  Toolbar,
 } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
@@ -23,6 +24,7 @@ import { AriaComponent, GridComponent, TooltipComponent } from 'echarts/componen
 import { CanvasRenderer } from 'echarts/renderers';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
 import { normalizeWorkflowJobName, workflowJobMatchesDefinition } from '../modules/githubWorkflowJobs.js';
 import { useNowTick } from '../modules/usePageVisibility.js';
@@ -30,7 +32,7 @@ import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import useStore from '../store.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
-import { AppTable, ChartBoundaryBox, DataTableFrame } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, ChartBoundaryBox, DataTableFrame, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import GitHubPublicPagesPanel from '../components/github/GitHubPublicPagesPanel.jsx';
 import {
   Activity,
@@ -53,6 +55,8 @@ import {
   Star,
   Trash,
   TrendingUp,
+  Upload,
+  Download,
   Users,
   X,
 } from '../components/Icons.jsx';
@@ -100,6 +104,39 @@ const rangeOptions = [
 
 const GITHUB_ACTIONS_TABLE_WIDTHS = [132, 220, 480, 132, 168, 124];
 const GITHUB_EVENTS_TABLE_WIDTHS = [420, 120, 140, 200];
+
+const SCOPE_BADGE_VARIANTS = {
+  'admin:org': 'red',
+  'admin:org_hook': 'red',
+  'admin:packages': 'red',
+  'admin:repo_hook': 'red',
+  'admin:gpg_key': 'purple',
+  'admin:public_key': 'purple',
+  'audit_log': 'red',
+  'delete_repo': 'red',
+  gist: 'teal',
+  notifications: 'teal',
+  project: 'orange',
+  'read:gpg_key': 'purple',
+  'read:org': 'orange',
+  'read:packages': 'orange',
+  'read:project': 'orange',
+  'read:public_key': 'purple',
+  'read:repo_hook': 'orange',
+  'read:user': 'green',
+  repo: 'blue',
+  'repo:status': 'blue',
+  repo_deployment: 'blue',
+  security_events: 'purple',
+  'user:email': 'green',
+  'user:follow': 'green',
+  workflow: 'purple',
+  'write:org': 'red',
+  'write:packages': 'orange',
+  'write:repo_hook': 'orange',
+};
+
+const scopeBadgeVariant = (scope) => SCOPE_BADGE_VARIANTS[String(scope || '')] || 'neutral';
 
 const statusTone = (status) => {
   const value = String(status || '').toLowerCase();
@@ -181,26 +218,26 @@ const formatActionDuration = (startedAt, finishedAt, now) => {
 const actionFlowStatusDotClass = (status) => {
   const value = String(status || '').toLowerCase();
   if (['success', 'completed', 'active'].includes(value)) {
-    return 'bg-emerald-500 ring-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.28)]';
+    return 'bg-kumo-success ring-1 ring-kumo-success/30';
   }
   if (['partial', 'partial_success', 'partial-success', 'in_progress', 'queued', 'pending', 'requested', 'waiting', 'running', 'warning', 'rate_limited'].includes(value)) {
-    return 'bg-amber-500 ring-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.24)]';
+    return 'bg-kumo-warning ring-1 ring-kumo-warning/30';
   }
   if (['failure', 'failed', 'error', 'timed_out', 'action_required', 'startup_failure', 'critical'].includes(value)) {
-    return 'bg-rose-500 ring-rose-200 shadow-[0_0_0_1px_rgba(244,63,94,0.24)]';
+    return 'bg-kumo-danger ring-1 ring-kumo-danger/30';
   }
   if (['cancelled', 'skipped', 'stale', 'disabled'].includes(value)) {
-    return 'bg-slate-700 ring-slate-300 shadow-[0_0_0_1px_rgba(51,65,85,0.26)]';
+    return 'bg-kumo-line ring-1 ring-kumo-line/40';
   }
-  return 'bg-sky-600 ring-sky-200 shadow-[0_0_0_1px_rgba(2,132,199,0.24)]';
+  return 'bg-kumo-info ring-1 ring-kumo-info/30';
 };
 
 const actionFlowStatusMetaClass = (status, muted = false) => {
   if (muted) return 'text-kumo-subtle/80';
   const tone = statusTone(status);
-  if (tone === 'success') return 'text-emerald-700';
-  if (tone === 'error') return 'text-rose-700';
-  if (tone === 'warning') return 'text-amber-800';
+  if (tone === 'success') return 'text-kumo-success';
+  if (tone === 'error') return 'text-kumo-danger';
+  if (tone === 'warning') return 'text-kumo-warning';
   return 'text-kumo-subtle';
 };
 
@@ -1630,7 +1667,7 @@ function PermissionChecks({ token }) {
   const scopes = Array.isArray(permissions.scopes) ? permissions.scopes : [];
   if (checks.length === 0 && scopes.length === 0 && !token.last_test_error) {
     if (token.last_test_status === 'success' && token.last_test_at) {
-      return <Text variant="secondary" size="xs">基础认证通过。选择仓库后再次检测，可验证 Actions 和 Traffic 权限。检测时间：{formatDateTime(token.last_test_at)}</Text>;
+      return <Text variant="secondary" size="xs">基础认证通过。选择仓库后再次检测可验证 Actions 和 Traffic 权限。检测时间：{formatDateTime(token.last_test_at)}</Text>;
     }
     return <Text variant="secondary" size="xs">尚未检测。点击“检测权限”验证 Token；选择仓库后可同时验证仓库权限。</Text>;
   }
@@ -1639,7 +1676,7 @@ function PermissionChecks({ token }) {
       {scopes.length > 0 && (
         <div className="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-kumo-subtle">
           <span>Classic scopes</span>
-          {scopes.map((scope) => <Badge key={scope} variant="neutral">{scope}</Badge>)}
+          {scopes.map((scope) => <Badge key={scope} variant={scopeBadgeVariant(scope)}>{scope}</Badge>)}
         </div>
       )}
       {checks.length > 0 && (
@@ -1664,6 +1701,7 @@ function PermissionChecks({ token }) {
 
 function GitHubPage() {
   const { theme } = useStore();
+  const { isArmed, confirmPress } = useConfirmPress();
   const isDarkMode = theme === 'dark';
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -1751,6 +1789,91 @@ function GitHubPage() {
       toast.error(error.message || '加载 GitHub 模块失败');
     }
   }, [api]);
+
+  const repoImportInputRef = useRef(null);
+  const [repoImporting, setRepoImporting] = useState(false);
+
+  const exportRepositories = () => {
+    if (repositories.length === 0) { toast.warning('暂无仓库可导出'); return; }
+    const payload = {
+      version: '1.0',
+      repositories: repositories.map((repo) => ({
+        owner: repo.owner,
+        name: repo.name,
+        tags: Array.isArray(repo.tags) ? repo.tags : [],
+        note: repo.note || '',
+        enabled: repo.enabled !== false,
+        notify_enabled: repo.notify_enabled !== false,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `github-repositories-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`已导出 ${payload.repositories.length} 个仓库`);
+  };
+
+  const importRepositoriesFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setRepoImporting(true);
+    try {
+      const data = JSON.parse(await file.text());
+      const list = Array.isArray(data) ? data : (data.repositories || []);
+      const normalized = list.map((item) => {
+        const rawFull = String(item.full_name || '').trim();
+        let owner = String(item.owner || '').trim();
+        let name = String(item.name || '').trim();
+        if (!owner && rawFull.includes('/')) {
+          [owner, name] = [rawFull.slice(0, rawFull.indexOf('/')), rawFull.slice(rawFull.indexOf('/') + 1)];
+        }
+        if (owner && !name && rawFull.includes('/')) {
+          name = rawFull.slice(rawFull.indexOf('/') + 1);
+        }
+        return { ...item, owner, name };
+      });
+      const valid = normalized.filter((item) => String(item.owner || '').trim() && String(item.name || '').trim());
+      if (valid.length === 0) throw new Error('文件中没有可导入的仓库（需要 owner 和 name）');
+      if (!(await dialog.confirm(`确认导入 ${valid.length} 个仓库？重复仓库由 GitHub 侧自动去重。`))) return;
+      const results = [];
+      // 分批提交（10 个/批），避免一次性并发几十个请求压垮后端与 GitHub 限流。
+      const CHUNK = 10;
+      for (let i = 0; i < valid.length; i += CHUNK) {
+        const chunk = valid.slice(i, i + CHUNK);
+        const chunkResults = await Promise.allSettled(chunk.map((item) => api('/api/github/repositories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner: String(item.owner || '').trim(),
+            name: String(item.name || '').trim(),
+            tags: Array.isArray(item.tags) ? item.tags : [],
+            note: item.note || '',
+            enabled: item.enabled !== false,
+            notify_enabled: item.notify_enabled !== false,
+          }),
+        })));
+        results.push(...chunkResults);
+      }
+      const imported = results.filter((result) => result.status === 'fulfilled').length;
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      if (failed > 0) {
+        toast.warning(`导入完成：成功 ${imported} 个，失败 ${failed} 个（已存在的仓库会跳过）`);
+      } else {
+        toast.success(`导入完成：成功 ${imported} 个`);
+      }
+      loadOverview();
+    } catch (error) {
+      toast.error(error.message || '导入仓库失败');
+    } finally {
+      setRepoImporting(false);
+    }
+  };
 
   const loadRepoDetails = useCallback(async (repoId = selectedRepo?.id) => {
     if (!repoId) return;
@@ -1904,7 +2027,7 @@ function GitHubPage() {
   };
 
   const deleteToken = async (token) => {
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub Token', resourceName: token.name }))) return;
+    if (!confirmPress(`github-token:${token.id}`, `删除 Token「${token.name}」`)) return;
     try {
       await api(`/api/github/tokens/${token.id}`, { method: 'DELETE' });
       toast.success('Token 已删除');
@@ -2041,7 +2164,7 @@ function GitHubPage() {
 
   const deleteRepository = async (id) => {
     const repo = repositories.find((item) => item.id === id);
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub 仓库', resourceName: repo?.full_name || String(id) }))) return;
+    if (!confirmPress(`github-repo:${id}`, `删除仓库「${repo?.full_name || String(id)}」`)) return;
     try {
       await api(`/api/github/repositories/${id}?clean=false`, { method: 'DELETE' });
       toast.success('仓库已删除');
@@ -2263,16 +2386,24 @@ function GitHubPage() {
 
   return (
     <div className="flex min-h-full w-full min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
           tabs={tabs}
         />
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={runCollector}>立即采集</Button>
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'collect',
+              label: '立即采集',
+              icon: <Play className="h-3.5 w-3.5" />,
+              onClick: runCollector,
+              variant: 'primary',
+            },
+          ]}
+        />
       </div>
 
       {activeTab === 'repositories' && (
@@ -2287,7 +2418,37 @@ function GitHubPage() {
                   {collector?.running ? '后台采集中' : '采集器待命'}
                 </Badge>
               </div>
-              <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setRepoDialogOpen(true)}>添加仓库</Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <Input
+                  ref={repoImportInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  aria-label="导入仓库 JSON"
+                  className="hidden"
+                  onChange={importRepositoriesFromFile}
+                />
+                <Toolbar size="sm" aria-label="导出导入仓库" className="shrink-0">
+                  <Toolbar.Button
+                    onClick={exportRepositories}
+                    disabled={repositories.length === 0}
+                    aria-label="导出仓库列表"
+                    title="导出仓库列表"
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button
+                    onClick={() => repoImportInputRef.current?.click()}
+                    disabled={repoImporting}
+                    aria-label="导入仓库列表"
+                    title="导入仓库列表"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
+                <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setRepoDialogOpen(true)}>添加仓库</Button>
+              </div>
             </LayerCard.Secondary>
             <LayerCard.Primary className="p-0">
             {repositories.length === 0 ? (
@@ -2351,8 +2512,8 @@ function GitHubPage() {
 
                         <div className="flex items-center justify-end gap-1 border-t border-kumo-line pt-2">
                           {repo.html_url && <Button size="sm" shape="square" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(repo.html_url, '_blank'); }} aria-label="打开 GitHub" title="打开 GitHub" />}
-                          <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(repo.id) ? 'animate-spin' : ''}`} />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} disabled={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" title="刷新仓库" />
-                          <Button size="sm" shape="square" variant="secondary-destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" title="删除仓库" />
+                          <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} loading={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" title="刷新仓库" />
+                          <Button size="sm" shape="square" variant={isArmed(`github-repo:${repo.id}`) ? 'destructive' : 'secondary-destructive'} icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" title="删除仓库" />
                         </div>
                       </LayerCard.Primary>
                     </LayerCard>
@@ -2389,7 +2550,7 @@ function GitHubPage() {
                   onValueChange={setSelectedRepoId}
                   items={repoOptions}
                 />
-                <Button size="sm" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(selectedRepo.id) ? 'animate-spin' : ''}`} />} onClick={() => refreshRepository(selectedRepo.id)} disabled={refreshingRepositoryId === String(selectedRepo.id)}>刷新仓库</Button>
+                <Button size="sm" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => refreshRepository(selectedRepo.id)} loading={refreshingRepositoryId === String(selectedRepo.id)}>刷新仓库</Button>
               </div>
             </LayerCard.Secondary>
             <LayerCard.Primary className="p-4">
@@ -2624,7 +2785,7 @@ function GitHubPage() {
             </LayerCard.Secondary>
             <LayerCard.Primary className="grid gap-3 p-4">
               <Text variant="secondary" size="xs">
-                组织仓库请在 GitHub 创建页将 Resource owner 设为仓库所属组织，并等待组织审批；仓库 Webhook 使用的是仓库级 Webhooks: read/write，不需要额外申请组织级 Webhooks 权限。
+                组织仓库请在 GitHub 创建页将 Resource owner 设为仓库所属组织，并等待组织审批；仓库 Webhook 使用仓库级 Webhooks: read/write，无需申请组织级权限。
               </Text>
               <Input size="sm" label="Token 名称" value={tokenForm.name} onChange={(e) => setTokenForm((p) => ({ ...p, name: e.target.value }))} placeholder="生产账号" />
               <Input size="sm" label="Token" value={tokenForm.token} onChange={(e) => setTokenForm((p) => ({ ...p, token: e.target.value }))} placeholder="github_pat_..." autoComplete="off" spellCheck={false} className="font-mono" />
@@ -2655,7 +2816,7 @@ function GitHubPage() {
                           <Button size="sm" variant="secondary" onClick={() => testToken(token.id)} loading={testingTokenId === String(token.id)}>
                             {selectedRepo ? '检测并用于当前仓库' : '检测权限'}
                           </Button>
-                          <Button size="sm" shape="square" variant="secondary-destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" title="删除 Token" />
+                          <Button size="sm" shape="square" variant={isArmed(`github-token:${token.id}`) ? 'destructive' : 'secondary-destructive'} icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" title="删除 Token" />
                         </div>
                       </LayerCard.Primary>
                     </LayerCard>
@@ -2719,7 +2880,7 @@ function GitHubPage() {
                   默认按全部仓库执行。当前作用范围：{historyScopeLabel}。
                 </Text>
                 <Text variant="secondary" size="xs">
-                  “清理历史”会删除旧的趋势、Actions、事件、Webhook 和审计记录；“压缩已有 Payload”会把旧的大 JSON 改写为摘要，并在结束后回收数据库空间。
+                  “清理历史”删除旧的趋势、Actions、事件、Webhook 和审计记录；“压缩 Payload”将旧的大 JSON 改写为摘要，并在结束后回收数据库空间。
                 </Text>
                 <div className="flex flex-wrap gap-2">
                   <Button

@@ -99,7 +99,7 @@ export default function PromptDetailsPanel({ entry, versions, onUpdate, onRestor
           <span className="text-[11px] text-kumo-subtle">{versions.length} 个版本</span>
         </div>
         {versions.length === 0 ? (
-          <Empty size="sm" title="暂无发布版本" />
+          <Empty size="sm" title="暂无版本" />
         ) : (
           <div className="max-h-64 space-y-1 overflow-y-auto pr-1 scrollbar-thin">
             {versions.map(version => (

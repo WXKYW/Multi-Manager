@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { collapseNotificationHistory, parseLifecycleHistoryMeta } from '../modules/notificationHistory.js';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -12,7 +13,7 @@ import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import {
   Bell,
   Plus,
@@ -162,6 +163,7 @@ const parseNotificationPreviewLine = (line = '') => {
 };
 
 function NotificationPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [notificationCurrentTab, setNotificationCurrentTab] = useState('channels'); // 'channels' | 'rules' | 'history' | 'settings'
   const [notificationChannels, setNotificationChannels] = useState([]);
   const [notificationRules, setNotificationRules] = useState([]);
@@ -440,10 +442,7 @@ function NotificationPage() {
 
   const handleDeleteChannel = async (id) => {
     const channel = notificationChannels.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '通知渠道',
-      resourceName: channel?.name || `#${id}`,
-    }))) return;
+    if (!confirmPress(`channel:${id}`, `删除通知渠道「${channel?.name || '#' + id}」`)) return;
     try {
       const res = await fetch(`/api/notification/channels/${id}`, {
         method: 'DELETE',
@@ -600,10 +599,7 @@ function NotificationPage() {
 
   const handleDeleteRule = async (id) => {
     const rule = notificationRules.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '告警规则',
-      resourceName: rule?.name || `#${id}`,
-    }))) return;
+    if (!confirmPress(`rule:${id}`, `删除告警规则「${rule?.name || '#' + id}」`)) return;
     try {
       const res = await fetch(`/api/notification/rules/${id}`, {
         method: 'DELETE',
@@ -773,7 +769,7 @@ function NotificationPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
-      <div className="flex flex-wrap items-center justify-between border-b border-kumo-line pb-3 gap-4">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={notificationCurrentTab}
@@ -787,17 +783,31 @@ function NotificationPage() {
           ]}
         />
 
-        {notificationCurrentTab === 'channels' && (
-          <Button size="sm" variant="primary" icon={<Plus className="w-4 h-4" />} onClick={handleOpenAddChannel}>
-            添加渠道
-          </Button>
-        )}
-
-        {notificationCurrentTab === 'rules' && (
-          <Button size="sm" variant="primary" icon={<Plus className="w-4 h-4" />} onClick={handleOpenAddRule}>
-            添加规则
-          </Button>
-        )}
+        <TabBarOverflowActions
+          items={
+            notificationCurrentTab === 'channels'
+              ? [
+                  {
+                    key: 'add-channel',
+                    label: '添加渠道',
+                    icon: <Plus className="w-4 h-4" />,
+                    onClick: handleOpenAddChannel,
+                    variant: 'primary',
+                  },
+                ]
+              : notificationCurrentTab === 'rules'
+                ? [
+                    {
+                      key: 'add-rule',
+                      label: '添加规则',
+                      icon: <Plus className="w-4 h-4" />,
+                      onClick: handleOpenAddRule,
+                      variant: 'primary',
+                    },
+                  ]
+                : []
+          }
+        />
       </div>
 
       {/* ==================== 1. 通知渠道 Tab ==================== */}
@@ -821,7 +831,7 @@ function NotificationPage() {
           ) : notificationChannels.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-kumo-subtle app-empty-panel">
               <Bell className="w-12 h-12 opacity-30 mb-4" />
-              <div className="text-sm">暂无通知渠道，配置通知以便发生故障时接收提醒</div>
+              <div className="text-sm">暂无通知渠道，配置通知以便故障时接收提醒</div>
               <Button size="sm" variant="primary" className="mt-4" onClick={handleOpenAddChannel}>
                 创建第一个渠道
               </Button>
@@ -876,7 +886,7 @@ function NotificationPage() {
                       />
                       <Button
                         onClick={() => handleDeleteChannel(channel.id)}
-                        variant="secondary-destructive" size="sm"
+                        variant={isArmed(`channel:${channel.id}`) ? 'destructive' : 'secondary-destructive'} size="sm"
                         shape="square"
                         aria-label="删除通知渠道"
                         title="删除"
@@ -915,13 +925,13 @@ function NotificationPage() {
 
             <Button
               onClick={loadNotificationRules}
-              disabled={notificationLoading}
+              loading={notificationLoading}
               variant="secondary" size="sm"
               shape="square"
               aria-label="刷新告警规则"
               className="text-kumo-subtle hover:text-kumo-strong"
               title="刷新"
-              icon={<RotateCw className={`w-3.5 h-3.5 ${notificationLoading ? 'animate-spin' : ''}`} />}
+              icon={<RotateCw className="w-3.5 h-3.5" />}
             />
           </div>
 
@@ -1015,7 +1025,7 @@ function NotificationPage() {
                       />
                       <Button
                         onClick={() => handleDeleteRule(rule.id)}
-                        variant="secondary-destructive" size="sm"
+                        variant={isArmed(`rule:${rule.id}`) ? 'destructive' : 'secondary-destructive'} size="sm"
                         shape="square"
                         aria-label="删除告警规则"
                         title="删除"
@@ -1130,13 +1140,13 @@ function NotificationPage() {
 
               <Button
                 onClick={loadNotificationHistory}
-                disabled={notificationLoading}
+                loading={notificationLoading}
               variant="secondary" size="sm"
               shape="square"
               aria-label="刷新通知历史"
               className="text-kumo-subtle hover:text-kumo-strong"
               title="刷新"
-                icon={<RotateCw className={`w-3.5 h-3.5 ${notificationLoading ? 'animate-spin' : ''}`} />}
+                icon={<RotateCw className="w-3.5 h-3.5" />}
               />
             </div>
 
@@ -1302,7 +1312,6 @@ function NotificationPage() {
       {notificationCurrentTab === 'settings' && (
         <SectionCard
           title="全局配置选项"
-          description="聚合、限频与看板链接"
           icon={<Settings className="w-4 h-4 text-kumo-brand" />}
           bodyPadding="sm"
           bodyClassName="space-y-4"

@@ -15,16 +15,17 @@ import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
-import { CheckDouble, FileText, Plus, Star } from '../components/Icons.jsx';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
+import { CheckDouble, FileText, Folder, Grid, Plus, Settings, Star } from '../components/Icons.jsx';
 import { AlertTriangle } from '../components/IconsCore.jsx';
 import { iconButtonIconClass } from '../components/ui/AppPrimitives.jsx';
 
 const API = '/api/prompts';
 const TABS = [
-  { value: 'workspace', label: '工作区' },
-  { value: 'collections', label: '集合' },
-  { value: 'published', label: '已发布' },
-  { value: 'settings', label: '设置' },
+  { value: 'workspace', label: <span className="inline-flex items-center gap-1.5"><Grid className="h-3.5 w-3.5" />工作区</span> },
+  { value: 'collections', label: <span className="inline-flex items-center gap-1.5"><Folder className="h-3.5 w-3.5" />集合</span> },
+  { value: 'published', label: <span className="inline-flex items-center gap-1.5"><Star className="h-3.5 w-3.5" />已发布</span> },
+  { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />设置</span> },
 ];
 
 async function apiFetch(path, options = {}) {
@@ -43,6 +44,7 @@ async function apiFetch(path, options = {}) {
 }
 
 export default function PromptLibraryPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('workspace');
   const [collections, setCollections] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -142,7 +144,7 @@ export default function PromptLibraryPage() {
         .catch(error => toast.error(`标题保存失败：${error.message}`));
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [entry?.id, entry?.title]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entry?.id, entry?.title]);  
 
   const createCollection = async () => {
     const name = await dialog.prompt({
@@ -175,11 +177,7 @@ export default function PromptLibraryPage() {
   };
 
   const deleteCollection = async collection => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '集合',
-      resourceName: collection.name,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`collection-${collection.id}`, `删除集合「${collection.name}」`)) return;
     try {
       await apiFetch(`/collections/${collection.id}`, { method: 'DELETE' });
       if (selectedCollectionId === collection.id) setSelectedCollectionId(null);
@@ -279,11 +277,7 @@ export default function PromptLibraryPage() {
   };
 
   const deleteEntry = async target => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '提示词',
-      resourceName: target.title,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`entry-${target.id}`, `删除提示词「${target.title}」`)) return;
     try {
       await apiFetch(`/entries/${target.id}`, { method: 'DELETE' });
       if (selectedEntryId === target.id) {
@@ -328,7 +322,7 @@ export default function PromptLibraryPage() {
       />
     ),
     [collections, entries, search, selectedCollectionId, selectedEntryId, starredOnly]
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+  );  
 
   const detailsPanel = entry ? (
     <PromptDetailsPanel
@@ -448,6 +442,7 @@ export default function PromptLibraryPage() {
             onCreate={createCollection}
             onRename={renameCollection}
             onDelete={deleteCollection}
+            deleteIsArmed={id => isArmed(`collection-${id}`)}
             onOpenCollection={collectionId => {
               setSelectedCollectionId(collectionId);
               setActiveTab('workspace');
@@ -462,6 +457,7 @@ export default function PromptLibraryPage() {
               setActiveTab('workspace');
             }}
             onDelete={deleteEntry}
+            deleteIsArmed={id => isArmed(`entry-${id}`)}
           />
         )}
         {activeTab === 'settings' && (

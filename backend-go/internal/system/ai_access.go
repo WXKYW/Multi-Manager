@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,6 +157,10 @@ func (s *Service) aiAccessOverview(r *http.Request) (map[string]interface{}, err
 	manifestURL := baseURL + "/api/ai/manifest"
 	openAPIURL := baseURL + "/api/openapi.json"
 	tools := s.aiTools()
+	writeEnabled, err := s.getAIAgentWriteEnabled(r.Context(), db)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]interface{}{
 		"agentKey": map[string]interface{}{
 			"value":     key,
@@ -168,34 +173,15 @@ func (s *Service) aiAccessOverview(r *http.Request) (map[string]interface{}, err
 			"mcp":      mcpURL,
 			"openapi":  openAPIURL,
 		},
-		"configs": map[string]interface{}{
-			"codex": map[string]interface{}{
-				"mcpServers": map[string]interface{}{
-					"api-monitor": map[string]interface{}{
-						"url": mcpURL,
-						"headers": map[string]string{
-							"Authorization": "Bearer " + key,
-						},
-					},
-				},
-			},
-			"claudeDesktop": map[string]interface{}{
-				"mcpServers": map[string]interface{}{
-					"api-monitor": map[string]interface{}{
-						"command": "npx",
-						"args":    []string{"mcp-remote", mcpURL, "--header", "Authorization: Bearer " + key},
-					},
-				},
-			},
-			"curl": fmt.Sprintf("curl -H \"Authorization: Bearer %s\" %s", key, manifestURL),
-		},
+		"guide": s.aiAccessGuide(mcpURL, manifestURL, openAPIURL, key, tools),
 		"tools": tools,
 		"policy": map[string]interface{}{
 			"allowedMethods": []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
-			"blockedPaths":   []string{"/api/ai/*", "/api/system/ai-access/key/*"},
+			"blockedPaths":   []string{"/api/ai/*", "/api/system/ai-access/key/*", "/api/ai-access/key/*"},
 			"blockedModes":   []string{string(manifest.ResponseStream), string(manifest.ResponseWebSocket)},
 			"bodyLimitBytes": 1024 * 1024,
-			"auth":           "Agent Key 作为系统级接入密钥使用；调用会写入审计记录。",
+			"writeEnabled":   writeEnabled,
+			"auth":           "Agent Key 作为系统级接入密钥使用；默认只读，写入需在设置中开启，所有调用都会写入审计记录。",
 		},
 		"mcpServers": mcpServers,
 		"skills":     skills,
@@ -232,6 +218,8 @@ func (s *Service) rotateAIAgentKey(r *http.Request) (map[string]interface{}, err
 	return s.aiAccessOverview(r)
 }
 
+const aiAgentWriteEnabledKey = "ai_agent_write_enabled"
+
 func (s *Service) getOrCreateAIAgentKey(ctx context.Context, db *sql.DB) (string, string, error) {
 	var key string
 	if err := db.QueryRowContext(ctx, "SELECT value FROM system_config WHERE key = 'ai_agent_key'").Scan(&key); err == nil && key != "" {
@@ -248,6 +236,58 @@ func (s *Service) getOrCreateAIAgentKey(ctx context.Context, db *sql.DB) (string
 		('ai_agent_key', ?, 'AI access bearer key', ?),
 		('ai_agent_key_created_at', ?, 'AI access bearer key creation time', ?)`, key, now, now, now)
 	return key, now, err
+}
+
+func (s *Service) getAIAgentWriteEnabled(ctx context.Context, db *sql.DB) (bool, error) {
+	var value string
+	err := db.QueryRowContext(ctx, "SELECT value FROM system_config WHERE key = ?", aiAgentWriteEnabledKey).Scan(&value)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return value == "1" || strings.EqualFold(value, "true"), nil
+}
+
+func (s *Service) AIAgentWriteAllowed(ctx context.Context) (bool, error) {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	return s.getAIAgentWriteEnabled(ctx, db)
+}
+
+func (s *Service) setAIAgentWriteEnabled(r *http.Request) (map[string]interface{}, error) {
+	var payload struct {
+		WriteEnabled bool `json:"writeEnabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	db, err := s.store.Open(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	now := time.Now().UTC().Format(time.RFC3339)
+	value := "0"
+	if payload.WriteEnabled {
+		value = "1"
+	}
+	if _, err := db.ExecContext(r.Context(), `INSERT OR REPLACE INTO system_config (key, value, description, updated_at) VALUES (?, ?, ?, ?)`,
+		aiAgentWriteEnabledKey, value, "AI agent write access toggle", now); err != nil {
+		return nil, err
+	}
+	status := "disabled"
+	detail := "AI 写入已关闭"
+	if payload.WriteEnabled {
+		status = "enabled"
+		detail = "AI 写入已开启"
+	}
+	_ = s.insertAIAudit(r.Context(), db, "admin", "toggle_write", aiAgentWriteEnabledKey, status, 0, detail, s.clientIP(r), r.UserAgent())
+	return s.aiAccessOverview(r)
 }
 
 func (s *Service) validateAIAgent(r *http.Request, db *sql.DB) bool {
@@ -319,19 +359,23 @@ func (s *Service) handleMCP(r *http.Request) (interface{}, int, error) {
 			"server":    "api-monitor",
 			"protocol":  "mcp-json-rpc",
 			"tools":     s.aiTools(),
-			"resources": []map[string]string{{"uri": "api-monitor://routes", "name": "接口清单"}, {"uri": "api-monitor://openapi", "name": "OpenAPI"}},
+			"resources": s.mcpResources(),
 		}, http.StatusOK, nil
 	}
 	var req aiMCPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		return nil, http.StatusBadRequest, err
 	}
+	if strings.HasPrefix(req.Method, "notifications/") {
+		_ = s.insertAIAudit(r.Context(), db, "external", req.Method, "/api/ai/mcp", "success", time.Since(start).Milliseconds(), truncate(string(req.Params), 500), s.clientIP(r), r.UserAgent())
+		return nil, http.StatusAccepted, nil
+	}
 	result, callErr := s.dispatchMCPTool(r, req)
 	status := "success"
 	if callErr != nil {
 		status = "error"
 	}
-	_ = s.insertAIAudit(r.Context(), db, "external", req.Method, "/api/ai/mcp", status, time.Since(start).Milliseconds(), truncate(fmt.Sprint(req.Params), 500), s.clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "external", req.Method, "/api/ai/mcp", status, time.Since(start).Milliseconds(), truncate(string(req.Params), 500), s.clientIP(r), r.UserAgent())
 	if callErr != nil {
 		return mcpError(req.ID, -32000, callErr.Error()), http.StatusOK, nil
 	}
@@ -341,7 +385,19 @@ func (s *Service) handleMCP(r *http.Request) (interface{}, int, error) {
 func (s *Service) dispatchMCPTool(r *http.Request, req aiMCPRequest) (interface{}, error) {
 	switch req.Method {
 	case "initialize":
-		return map[string]interface{}{"protocolVersion": "2024-11-05", "serverInfo": map[string]string{"name": "api-monitor", "version": s.cfg.Version}, "capabilities": map[string]interface{}{"tools": map[string]bool{"listChanged": true}}}, nil
+		return map[string]interface{}{"protocolVersion": "2024-11-05", "serverInfo": map[string]string{"name": "api-monitor", "version": s.cfg.Version}, "capabilities": map[string]interface{}{"tools": map[string]bool{"listChanged": true}, "resources": map[string]bool{"listChanged": false}}}, nil
+	case "ping":
+		return map[string]interface{}{}, nil
+	case "resources/list":
+		return map[string]interface{}{"resources": s.mcpResources()}, nil
+	case "resources/read":
+		var params struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return nil, err
+		}
+		return s.mcpReadResource(r, params.URI)
 	case "tools/list":
 		return map[string]interface{}{"tools": s.aiTools()}, nil
 	case "tools/call":
@@ -352,16 +408,38 @@ func (s *Service) dispatchMCPTool(r *http.Request, req aiMCPRequest) (interface{
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return s.callAITool(r, params.Name, params.Arguments)
+		toolResult, err := s.callAITool(r, params.Name, params.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		// MCP 规范要求 tools/call 结果包含 content 数组，否则多数客户端
+		// （Claude、opencode 等）会把工具输出渲染为空。structuredContent
+		// 同时保留结构化数据，供支持该字段的客户端使用。
+		return mcpToolResult(toolResult), nil
 	default:
 		return nil, fmt.Errorf("unsupported MCP method: %s", req.Method)
+	}
+}
+
+func mcpToolResult(result interface{}) map[string]interface{} {
+	text := ""
+	if encoded, err := json.Marshal(result); err == nil {
+		text = string(encoded)
+	} else {
+		text = fmt.Sprint(result)
+	}
+	return map[string]interface{}{
+		"content":           []map[string]interface{}{{"type": "text", "text": text}},
+		"structuredContent": result,
 	}
 }
 
 func (s *Service) callAITool(r *http.Request, name string, args map[string]interface{}) (interface{}, error) {
 	switch name {
 	case "list_apis":
-		return s.apiDocs(), nil
+		return s.aiRouteCatalog(args)
+	case "get_route":
+		return s.getRouteContract(args)
 	case "get_openapi":
 		return s.openapiDocument(r), nil
 	case "get_ai_manifest":
@@ -377,6 +455,134 @@ func (s *Service) callAITool(r *http.Request, name string, args map[string]inter
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
+}
+
+// aiRouteCatalog 返回紧凑的接口目录，支持 group / module / search 过滤，用于渐进式披露。
+func (s *Service) aiRouteCatalog(args map[string]interface{}) (interface{}, error) {
+	group, _ := args["group"].(string)
+	module, _ := args["module"].(string)
+	search, _ := args["search"].(string)
+	group = strings.TrimSpace(group)
+	module = strings.TrimSpace(module)
+	search = strings.ToLower(strings.TrimSpace(search))
+
+	items := s.apiDocs()["routes"].([]apiDocRoute)
+	result := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		if group != "" && item.Group != group {
+			continue
+		}
+		if module != "" && item.Module != module {
+			continue
+		}
+		if search != "" {
+			haystack := strings.ToLower(item.Prefix + " " + item.Detail + " " + item.Description)
+			if !strings.Contains(haystack, search) {
+				continue
+			}
+		}
+		hasBody := item.RequestSchema != nil || item.RequestBody != nil
+		if !hasBody {
+			for _, method := range item.Methods {
+				if method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch {
+					hasBody = true
+					break
+				}
+			}
+		}
+		desc := item.Detail
+		if desc == "" {
+			desc = item.Description
+		}
+		result = append(result, map[string]interface{}{
+			"path":    item.Prefix,
+			"methods": item.Methods,
+			"group":   item.Group,
+			"module":  item.Module,
+			"auth":    string(item.Auth),
+			"desc":    desc,
+			"hasBody": hasBody,
+		})
+	}
+	return map[string]interface{}{"count": len(result), "routes": result}, nil
+}
+
+// getRouteContract 返回单个接口的完整契约；入参 path 可以是具体路径（会匹配到模式路由）。
+func (s *Service) getRouteContract(args map[string]interface{}) (interface{}, error) {
+	path, _ := args["path"].(string)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("path is required")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	items := s.apiDocs()["routes"].([]apiDocRoute)
+	best := (*apiDocRoute)(nil)
+	for i := range items {
+		item := &items[i]
+		if routePrefixMatches(item.Prefix, item.MatchMode, path) {
+			if best == nil || len(item.Prefix) > len(best.Prefix) {
+				best = item
+			}
+		}
+	}
+	if best == nil {
+		return nil, fmt.Errorf("API 路由不存在: %s", path)
+	}
+	desc := best.Detail
+	if desc == "" {
+		desc = best.Description
+	}
+	return map[string]interface{}{
+		"path":               best.Prefix,
+		"matchedPath":        path,
+		"methods":            best.Methods,
+		"group":              best.Group,
+		"module":             best.Module,
+		"auth":               string(best.Auth),
+		"responseMode":       string(best.ResponseMode),
+		"matchMode":          string(best.MatchMode),
+		"status":             best.Status,
+		"description":        desc,
+		"pathParams":         best.PathParams,
+		"queryParams":        best.QueryParams,
+		"headers":            best.Headers,
+		"requestContentType": best.RequestType,
+		"requestSchema":      best.RequestSchema,
+		"requestExample":     best.RequestBody,
+		"responseExample":    best.ResponseBody,
+		"notes":              best.Notes,
+	}, nil
+}
+
+func routePrefixMatches(prefix string, mode manifest.MatchMode, path string) bool {
+	switch mode {
+	case manifest.MatchExact:
+		return path == prefix
+	case manifest.MatchPattern:
+		return routePatternMatches(prefix, path)
+	default:
+		return path == prefix || strings.HasPrefix(path, prefix+"/")
+	}
+}
+
+func routePatternMatches(prefix, path string) bool {
+	parts := strings.Split(prefix, "/")
+	target := strings.Split(path, "/")
+	if len(parts) != len(target) {
+		return false
+	}
+	for i, part := range parts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+			continue
+		}
+		if part != target[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Service) callAPIFromAI(ctx context.Context, args map[string]interface{}) (interface{}, error) {
@@ -442,12 +648,102 @@ func (s *Service) readOnlyAICall(req AICallRequest) (interface{}, error) {
 
 func (s *Service) aiTools() []map[string]interface{} {
 	return []map[string]interface{}{
-		{"name": "list_apis", "description": "读取系统自动生成的接口清单", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}},
+		{"name": "list_apis", "description": "读取接口目录（紧凑版，支持 group/module/search 过滤），先扫目录再按需取详情", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"group": map[string]interface{}{"type": "string", "description": "按分组过滤（如 模型网关 / Cloudflare / 主机实例）"}, "module": map[string]interface{}{"type": "string", "description": "按模块过滤（如 flyio / cloudflare-dns）"}, "search": map[string]interface{}{"type": "string", "description": "按路径或描述关键词过滤"}}}},
+		{"name": "get_route", "description": "读取单个接口的完整契约（参数、请求体 schema、示例、鉴权）；调用 call_api 前必须先用本工具确认请求体结构", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"path": map[string]interface{}{"type": "string", "description": "接口路径，如 /api/flyio/apps/{appName}/update-image 或具体路径"}}, "required": []string{"path"}}},
 		{"name": "get_openapi", "description": "读取 OpenAPI 3.1 文档", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}},
 		{"name": "get_ai_manifest", "description": "读取 AI 接入能力清单", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}},
 		{"name": "get_system_status", "description": "读取本机系统运行状态", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}},
-		{"name": "call_api", "description": "调用 API Monitor 内部接口，支持 GET/POST/PUT/PATCH/DELETE、请求头和 JSON 请求体", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"method": map[string]interface{}{"type": "string", "enum": []string{"GET", "POST", "PUT", "PATCH", "DELETE"}}, "path": map[string]interface{}{"type": "string", "description": "以 / 开头的系统接口路径"}, "headers": map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}}, "body": map[string]interface{}{"type": "object", "description": "JSON 请求体"}}, "required": []string{"path"}}},
+		{"name": "call_api", "description": "调用 API Monitor 内部接口，支持 GET/POST/PUT/PATCH/DELETE、请求头和 JSON 请求体；请求体结构先用 get_route 获取", "inputSchema": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"method": map[string]interface{}{"type": "string", "enum": []string{"GET", "POST", "PUT", "PATCH", "DELETE"}}, "path": map[string]interface{}{"type": "string", "description": "以 / 开头的系统接口路径"}, "headers": map[string]interface{}{"type": "object", "additionalProperties": map[string]string{"type": "string"}}, "body": map[string]interface{}{"type": "object", "additionalProperties": true, "description": "JSON 请求体，字段以 get_route 返回的 requestSchema/requestExample 为准"}}, "required": []string{"path"}}},
 	}
+}
+
+func (s *Service) aiAccessGuide(mcpURL, manifestURL, openAPIURL, key string, tools []map[string]interface{}) string {
+	toolLines := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		name, _ := tool["name"].(string)
+		desc, _ := tool["description"].(string)
+		toolLines = append(toolLines, "- "+name+"："+desc)
+	}
+	toolsText := strings.Join(toolLines, "\n")
+	return fmt.Sprintf(`# API Monitor AI 接入指南
+
+你是 API Monitor 的 AI 访问面接入说明。阅读本指南即可完成自我配置与连接。
+
+## 服务信息
+- 服务名称：api-monitor
+- 协议：MCP（Streamable HTTP / JSON-RPC 2.0）
+- 版本：%s
+- 接入密钥（Agent Key）：%s
+- 鉴权头：Authorization: Bearer %s
+- 权限：默认只读；写操作需管理员在「API 文档 → AI 接入」开启「允许写入」
+
+## 端点
+- 能力清单（manifest，GET）：%s
+- MCP 服务：%s
+- OpenAPI 文档：%s（需登录会话，也可用 MCP 工具 get_openapi 获取）
+
+## 连接流程
+1. 复制 Agent Key，客户端以 Bearer 鉴权接入。
+2. 在 AI 客户端注册 MCP 接入地址（支持 MCP Streamable HTTP 的客户端，如 Claude、Cursor、VS Code、Cline、Roo）：
+~~~json
+{
+  "mcpServers": {
+    "api-monitor": {
+      "url": "%s",
+      "headers": { "Authorization": "Bearer %s" }
+    }
+  }
+}
+~~~
+客户端仅支持 stdio 时，可用 mcp-remote 桥接：npx mcp-remote %s --header "Authorization: Bearer %s"
+3. 连接成功后即可调用系统接口；全部调用都会写入审计记录。
+
+## 可用工具
+%s
+
+## 可用资源
+- api-monitor://routes：完整接口清单
+- api-monitor://openapi：OpenAPI 3.1 文档
+
+## 接入步骤（渐进式披露）
+1. 用 list_apis 扫目录（可按 group / module / search 过滤，先只看目标模块，省 token）。
+2. 确定要调用的接口后，用 get_route <path> 获取该接口的完整契约（路径参数、请求体 schema、示例、鉴权）。
+3. 按契约用 call_api 调用；请求体字段以 get_route 返回的 requestSchema / requestExample 为准，不要猜。
+4. 默认只读；写操作（POST/PUT/PATCH/DELETE）会返回「写入未启用」提示，需管理员在「API 文档 → AI 接入」开启「允许写入」。
+5. 密钥可随时在「API 文档 → AI 接入」页面轮换；请勿将密钥写入公开仓库。
+`, s.cfg.Version, key, key, manifestURL, mcpURL, openAPIURL, mcpURL, key, mcpURL, key, toolsText)
+}
+
+func (s *Service) mcpResources() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"uri": "api-monitor://routes", "name": "接口清单", "mimeType": "application/json"},
+		{"uri": "api-monitor://openapi", "name": "OpenAPI", "mimeType": "application/json"},
+	}
+}
+
+func (s *Service) mcpReadResource(r *http.Request, uri string) (interface{}, error) {
+	var content string
+	switch uri {
+	case "api-monitor://routes":
+		encoded, err := json.Marshal(s.apiDocs())
+		if err != nil {
+			return nil, err
+		}
+		content = string(encoded)
+	case "api-monitor://openapi":
+		encoded, err := json.Marshal(s.openapiDocument(r))
+		if err != nil {
+			return nil, err
+		}
+		content = string(encoded)
+	default:
+		return nil, fmt.Errorf("unknown resource: %s", uri)
+	}
+	return map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{"uri": uri, "mimeType": "application/json", "text": content},
+		},
+	}, nil
 }
 
 func (s *Service) listMCPServers(ctx context.Context, db *sql.DB) ([]aiMCPServer, error) {
@@ -619,6 +915,64 @@ func (s *Service) listAIAudit(ctx context.Context, db *sql.DB, limit int) ([]aiA
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// listAIAuditPage returns paginated AI access audit entries filtered by recent days.
+// Supports days (default 7), page (default 1) and pageSize (default 20, max 100) query params.
+func (s *Service) listAIAuditPage(r *http.Request) (map[string]interface{}, error) {
+	db, err := s.store.Open(r.Context())
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	if err := s.ensureAIAccessSchema(r.Context(), db); err != nil {
+		return nil, err
+	}
+
+	query := r.URL.Query()
+	page, pageSize, days := 1, 20, 7
+	if p, err := strconv.Atoi(query.Get("page")); err == nil && p > 0 {
+		page = p
+	}
+	if ps, err := strconv.Atoi(query.Get("pageSize")); err == nil && ps > 0 {
+		pageSize = ps
+		if pageSize > 100 {
+			pageSize = 100
+		}
+	}
+	if d, err := strconv.Atoi(query.Get("days")); err == nil && d > 0 {
+		days = d
+	}
+
+	offset := (page - 1) * pageSize
+	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+
+	var total int
+	if err := db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM ai_access_audit WHERE created_at >= ?`, timeFilter).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	rows, err := db.QueryContext(r.Context(), `SELECT id, COALESCE(agent_name,''), action, COALESCE(target,''), status, latency_ms, COALESCE(details,''), COALESCE(ip_address,''), COALESCE(user_agent,''), created_at FROM ai_access_audit WHERE created_at >= ? ORDER BY id DESC LIMIT ? OFFSET ?`, timeFilter, pageSize, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := []aiAuditEntry{}
+	for rows.Next() {
+		var item aiAuditEntry
+		if err := rows.Scan(&item.ID, &item.AgentName, &item.Action, &item.Target, &item.Status, &item.LatencyMS, &item.Details, &item.IPAddress, &item.UserAgent, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		records = append(records, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"total":   total,
+		"records": records,
+	}, nil
 }
 
 func (s *Service) clearAIAudit(r *http.Request) (map[string]interface{}, error) {

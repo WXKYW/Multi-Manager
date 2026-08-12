@@ -130,7 +130,7 @@ export default function PromptWorkspaceSidebar({
             <Empty
               size="sm"
               title={search ? '没有匹配的提示词' : '当前集合为空'}
-              description={search ? '尝试更换关键词。' : '新建一条提示词开始整理。'}
+              description={search ? '更换关键词。' : '新建提示词开始整理。'}
             />
           )}
         </div>

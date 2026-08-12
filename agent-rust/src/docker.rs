@@ -1220,12 +1220,12 @@ impl DockerBridge {
                 }
                 let (registry, repo, tag) = parse_image_name(&status.image);
                 let cache_key = remote_digest_cache_key(&registry, &repo, &tag);
-                match remote_results.remove(&cache_key) {
+                match remote_results.get(&cache_key) {
                     Some(Ok(remote_digest)) => {
                         status.latest_digest = remote_digest.clone();
                         status.has_update = !status.current_digest.is_empty()
                             && !remote_digest.is_empty()
-                            && status.current_digest != remote_digest;
+                            && status.current_digest != *remote_digest;
                     }
                     Some(Err(e)) => {
                         status.error = Some(format!("获取远程镜像信息失败: {}", e));
@@ -1743,8 +1743,14 @@ fn select_local_digest(repo_digests: Option<&[String]>, image_ref: &str) -> Opti
 }
 
 fn split_repo_digest(repo_digest: &str) -> Option<(&str, &str)> {
-    let (repo, digest) = repo_digest.split_once('@')?;
-    Some((repo.trim(), digest.trim()))
+    let trimmed = repo_digest.trim();
+    if let Some((repo, digest)) = trimmed.split_once('@') {
+        return Some((repo.trim(), digest.trim()));
+    }
+    if trimmed.starts_with("sha256:") {
+        return Some(("", trimmed));
+    }
+    None
 }
 
 fn canonical_repository_key(image_ref: &str) -> Option<String> {
@@ -2478,6 +2484,40 @@ mod tests {
             select_local_digest(Some(images[0].repo_digests.as_slice()), "nginx"),
             Some("sha256:def".to_string())
         );
+    }
+
+    #[test]
+    fn local_image_digest_lookup_accepts_bare_digests_from_containerd_store() {
+        let images = vec![bollard::models::ImageSummary {
+            id: "sha256:ba477170cd8f473f".to_string(),
+            parent_id: String::new(),
+            repo_tags: vec!["iwvw/halowebui:latest".to_string()],
+            repo_digests: vec!["sha256:ba477170cd8f473f".to_string()],
+            created: 0,
+            size: 0,
+            shared_size: 0,
+            virtual_size: Some(0),
+            labels: HashMap::new(),
+            containers: 0,
+        }];
+        let lookup = build_local_image_digest_lookup(&images);
+
+        assert_eq!(
+            lookup_local_image_digest(&lookup, "iwvw/halowebui:latest"),
+            Some("sha256:ba477170cd8f473f".to_string())
+        );
+        assert_eq!(
+            select_local_digest(
+                Some(images[0].repo_digests.as_slice()),
+                "iwvw/halowebui:latest"
+            ),
+            Some("sha256:ba477170cd8f473f".to_string())
+        );
+        assert_eq!(
+            split_repo_digest("sha256:ba477170cd8f473f"),
+            Some(("", "sha256:ba477170cd8f473f"))
+        );
+        assert_eq!(split_repo_digest("no-digest-here"), None);
     }
 
     #[test]

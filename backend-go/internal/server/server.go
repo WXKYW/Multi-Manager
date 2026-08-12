@@ -29,6 +29,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/openai"
 	"github.com/iwvw/api-monitor/backend-go/internal/oracle"
 	promptsmodule "github.com/iwvw/api-monitor/backend-go/internal/prompts"
+	"github.com/iwvw/api-monitor/backend-go/internal/publicpageicon"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/serveragent"
 	"github.com/iwvw/api-monitor/backend-go/internal/settings"
@@ -65,6 +66,10 @@ type Server struct {
 	sub      *subscription.Service
 	drawio   *drawiomodule.Service
 	prompts  *promptsmodule.Service
+
+	// warmupCancel 在 Shutdown 时取消代理池预热 goroutine，避免后台任务
+	// 在 Gate 结束后继续访问数据目录（测试 teardown 也会受影响）。
+	warmupCancel context.CancelFunc
 }
 
 func New(cfg config.Config) http.Handler {
@@ -119,10 +124,12 @@ func newServer(cfg config.Config) (*Server, error) {
 	systemService.SetNotifier(notifyService)
 	backupService := backup.New(cfg)
 	backupService.SetNotifier(notifyService)
+	settingsService := settings.New(cfg)
+	settingsService.StartBackgroundCleanup()
 	server := &Server{
 		cfg:      cfg,
 		auth:     authService,
-		settings: settings.New(cfg),
+		settings: settingsService,
 		system:   systemService,
 		totp:     totp.New(cfg),
 		cron:     cronService,
@@ -146,12 +153,22 @@ func newServer(cfg config.Config) (*Server, error) {
 		prompts:  promptsService,
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
+	// 启动代理池预热：预建立各代理到上游的连接，缓解首次请求冷启动握手延迟。
+	warmupCtx, warmupCancel := context.WithCancel(context.Background())
+	server.warmupCancel = warmupCancel
+	server.openai.StartWarmup(warmupCtx)
 	return server, nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.warmupCancel != nil {
+		s.warmupCancel()
+	}
 	if s.server != nil {
 		s.server.Stop()
+	}
+	if s.settings != nil {
+		s.settings.Stop()
 	}
 	if s.uptime != nil {
 		s.uptime.Stop()
@@ -246,6 +263,8 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 		strings.HasPrefix(path, "/api/system/api-keys") ||
 		path == "/api/ai-access" ||
 		path == "/api/ai-access/key/rotate" ||
+		path == "/api/ai-access/write" ||
+		path == "/api/ai-access/audit" ||
 		path == "/api/ai-access/audit/clear" ||
 		path == "/api/ai-access/mcp-servers" ||
 		path == "/api/ai-access/skills" ||
@@ -253,6 +272,8 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 		strings.HasPrefix(path, "/api/ai-access/skills/") ||
 		path == "/api/system/ai-access" ||
 		path == "/api/system/ai-access/key/rotate" ||
+		path == "/api/system/ai-access/write" ||
+		path == "/api/system/ai-access/audit" ||
 		path == "/api/system/ai-access/audit/clear" ||
 		path == "/api/system/ai-access/mcp-servers" ||
 		path == "/api/system/ai-access/skills" ||
@@ -276,7 +297,7 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) authorizeGoRoute(w http.ResponseWriter, r *http.Request, route manifest.Route) bool {
-	if route.Auth == manifest.AuthAPIKey && route.Module == "openai-compatible" {
+	if route.Auth == manifest.AuthAPIKey && (route.Module == "openai-compatible" || route.Module == "anthropic-compatible") {
 		authorizedRequest, err := s.openai.AuthorizeGatewayRequest(r)
 		if err != nil {
 			response.JSON(w, http.StatusUnauthorized, map[string]interface{}{
@@ -384,7 +405,7 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		})
 	case "/api/settings", "/api/settings/site-brand/icons", "/api/settings/site-brand/icons/{id}", "/api/settings/database-stats", "/api/settings/migration-self-check", "/api/settings/database-analysis", "/api/settings/deprecated-tables", "/api/settings/cleanup-deprecated-tables", "/api/settings/export-database", "/api/settings/database/import", "/api/settings/import-database", "/api/settings/operation-logs", "/api/settings/sys-logs", "/api/settings/app-log-file", "/api/settings/log-settings", "/api/settings/clear-app-logs", "/api/settings/vacuum-database", "/api/settings/clear-logs", "/api/settings/enforce-log-limits", "/api/settings/clear-chat-messages":
 		s.settings.ServeHTTP(w, r)
-	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/api-keys", "/api/system/api-keys", "/api/system/ai-access/key/rotate", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
+	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/api-keys", "/api/system/api-keys", "/api/system/ai-access/key/rotate", "/api/system/ai-access/write", "/api/system/ai-access/audit", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/write", "/api/ai-access/audit", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
 		s.system.ServeHTTP(w, r)
 	case "/api/system/logs/stream", "/api/system/logs/download":
 		s.logs.ServeHTTP(w, r)
@@ -420,7 +441,7 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.oracle.ServeHTTP(w, r)
 	case "/api/m365":
 		s.m365.ServeHTTP(w, r)
-	case "/api/cloudflare/accounts", "/api/cloudflare/accounts/export", "/api/cloudflare/export/accounts", "/api/cloudflare/import/accounts", "/api/cloudflare/templates", "/api/cloudflare/templates/{id}", "/api/cloudflare/templates/{templateId}/apply", "/api/cloudflare/import/templates", "/api/cloudflare/accounts/{id}", "/api/cloudflare/accounts/{id}/verify", "/api/cloudflare/accounts/{id}/token", "/api/cloudflare/accounts/{id}/cf-account-id", "/api/cloudflare/accounts/{id}/pages", "/api/cloudflare/accounts/{id}/pages/{projectName}", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments/{deploymentId}", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains/{domain}", "/api/cloudflare/accounts/{id}/workers", "/api/cloudflare/accounts/{id}/workers/{scriptName}", "/api/cloudflare/accounts/{id}/workers/{scriptName}/toggle", "/api/cloudflare/accounts/{id}/workers/{scriptName}/analytics", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains/{domainId}", "/api/cloudflare/accounts/{accountId}/r2/buckets", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview", "/api/cloudflare/accounts/{id}/tunnels", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/configuration", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/token", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/connections", "/api/cloudflare/record-types", "/api/cloudflare/zones", "/api/cloudflare/accounts/{id}/zones", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes/{routeId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records/{recordId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/purge", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/ssl", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/analytics", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/switch", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/batch":
+	case "/api/cloudflare/accounts", "/api/cloudflare/accounts/export", "/api/cloudflare/export/accounts", "/api/cloudflare/import/accounts", "/api/cloudflare/templates", "/api/cloudflare/templates/{id}", "/api/cloudflare/templates/{templateId}/apply", "/api/cloudflare/import/templates", "/api/cloudflare/accounts/{id}", "/api/cloudflare/accounts/{id}/verify", "/api/cloudflare/accounts/{id}/token", "/api/cloudflare/accounts/{id}/cf-account-id", "/api/cloudflare/accounts/{id}/pages", "/api/cloudflare/accounts/{id}/pages/{projectName}", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments/{deploymentId}", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains/{domain}", "/api/cloudflare/accounts/{id}/workers", "/api/cloudflare/accounts/{id}/workers/{scriptName}", "/api/cloudflare/accounts/{id}/workers/{scriptName}/toggle", "/api/cloudflare/accounts/{id}/workers/{scriptName}/analytics", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains/{domainId}", "/api/cloudflare/accounts/{accountId}/r2/buckets", "/api/cloudflare/accounts/{accountId}/r2/metrics", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/folder-download", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview", "/api/cloudflare/accounts/{id}/tunnels", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/configuration", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/token", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/connections", "/api/cloudflare/record-types", "/api/cloudflare/zones", "/api/cloudflare/accounts/{id}/zones", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes/{routeId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records/{recordId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/purge", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/ssl", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/analytics", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/switch", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/batch":
 		s.cf.ServeHTTP(w, r)
 	case "/api/openai":
 		s.openai.ServeHTTP(w, r)
@@ -429,6 +450,8 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 	case "/sub/{token}":
 		s.sub.ServeHTTP(w, r)
 	case "/v1":
+		s.serveV1Route(w, r)
+	case "/v1/messages":
 		s.serveV1Route(w, r)
 	case "/ws/ssh", "/ws/agent-terminal":
 		s.server.ServeHTTP(w, r)
@@ -473,6 +496,10 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.servePublicPageFavicon(w, r) {
+		return
+	}
+
 	// 尝试从 dist 和 public 查找文件
 	foundInDist := s.tryServeFile(w, r, s.cfg.DistDir)
 	if foundInDist {
@@ -505,6 +532,90 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Error(w, http.StatusNotFound, "static asset not found")
+}
+
+// servePublicPageFavicon 处理公开页 favicon 解析端点：
+//
+//	/public-page-favicon/{kind}/{slug}   kind 为 uptime/server/github
+//	/public-page-favicon/domain/{host}   按域名探测三类公开页
+//
+// 浏览器首次拉取 favicon 时就能拿到正确的图标，避免「默认图标 → 自定义图标」的闪变。
+// 自定义图标 302 到 /site-brand-icons/{id}（已有不可变缓存）；未自定义直接返回
+// 该类型默认 glyph；页面不存在或解析失败时回退到站点默认 logo。
+func (s *Server) servePublicPageFavicon(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	// 直接基于 r.URL.Path 解析分段；不走 cleanStaticRequestPath，
+	// 因为 filepath.Clean 在 Windows 上会引入反斜杠破坏前缀匹配。
+	cleanPath := strings.TrimPrefix(r.URL.Path, "/")
+	if !strings.HasPrefix(cleanPath, "public-page-favicon/") {
+		return false
+	}
+	parts := strings.Split(strings.TrimPrefix(cleanPath, "public-page-favicon/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	kind, lookup := parts[0], parts[1]
+
+	var iconID, resolvedKind string
+	var found bool
+	var err error
+	ctx := r.Context()
+	switch kind {
+	case publicpageicon.KindUptime:
+		iconID, found, err = s.uptime.PublicPageIconID(ctx, lookup, false)
+	case publicpageicon.KindServer:
+		iconID, found, err = s.server.PublicPageIconID(ctx, lookup, false)
+	case publicpageicon.KindGitHub:
+		iconID, found, err = s.github.PublicPageIconID(ctx, lookup, false)
+	case "domain":
+		resolvedKind, iconID, found, err = s.publicPageFaviconByDomain(ctx, lookup)
+	default:
+		return false
+	}
+	if err != nil || !found {
+		http.Redirect(w, r, "/logo-default.svg", http.StatusTemporaryRedirect)
+		return true
+	}
+	// 仅当图标 ID 是安全路径格式时才 302 到品牌图标资产；
+	// 否则视为未配置，直接返回默认 glyph。
+	if iconID != "" && publicpageicon.ValidIconID(iconID) {
+		w.Header().Set("Cache-Control", "public, max-age=600")
+		http.Redirect(w, r, "/site-brand-icons/"+iconID, http.StatusTemporaryRedirect)
+		return true
+	}
+	if resolvedKind == "" {
+		resolvedKind = kind
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write([]byte(publicpageicon.DefaultGlyphSVG(resolvedKind)))
+	return true
+}
+
+// publicPageFaviconByDomain 与前端 DomainPublicStatusResolver 的探测顺序一致：
+// uptime → server → github。
+func (s *Server) publicPageFaviconByDomain(ctx context.Context, host string) (kind, iconID string, found bool, err error) {
+	lookups := []struct {
+		kind string
+		svc  func(context.Context, string, bool) (string, bool, error)
+	}{
+		{publicpageicon.KindUptime, s.uptime.PublicPageIconID},
+		{publicpageicon.KindServer, s.server.PublicPageIconID},
+		{publicpageicon.KindGitHub, s.github.PublicPageIconID},
+	}
+	for _, lookup := range lookups {
+		iconID, ok, lookupErr := lookup.svc(ctx, host, true)
+		if lookupErr != nil {
+			return "", "", false, lookupErr
+		}
+		if ok {
+			return lookup.kind, iconID, true, nil
+		}
+	}
+	return "", "", false, nil
 }
 
 func (s *Server) tryServeFile(w http.ResponseWriter, r *http.Request, dir string) bool {
@@ -719,6 +830,41 @@ func (s *Server) isTrustedProxy(ip net.IP) bool {
 	return false
 }
 
+func (s *Server) gatewayClientIP(r *http.Request) string {
+	direct := ""
+	if host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil {
+		direct = host
+	} else if r.RemoteAddr != "" {
+		direct = strings.Trim(strings.TrimSpace(r.RemoteAddr), "[]")
+	}
+	if direct == "" {
+		return ""
+	}
+	ip := net.ParseIP(direct)
+	trusted := false
+	if ip != nil {
+		if s.isTrustedProxy(ip) {
+			trusted = true
+		} else if !s.cfg.IsProduction() && ip.IsLoopback() {
+			trusted = true
+		}
+	}
+	if trusted {
+		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+			candidate := strings.TrimSpace(strings.Split(forwarded, ",")[0])
+			if parsed := net.ParseIP(candidate); parsed != nil {
+				return parsed.String()
+			}
+		}
+		if candidate := strings.TrimSpace(r.Header.Get("X-Real-IP")); candidate != "" {
+			if parsed := net.ParseIP(candidate); parsed != nil {
+				return parsed.String()
+			}
+		}
+	}
+	return direct
+}
+
 func firstForwardedValue(value string) string {
 	if value == "" {
 		return ""
@@ -745,11 +891,11 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
 	startedAt := time.Now()
+	clientIP := s.gatewayClientIP(r)
 
 	// 1. Models endpoint
 	if method == http.MethodGet && (path == "/v1/models" || path == "/v1/model") {
-		statusCode := s.serveV1Models(w, r)
-		s.openai.RecordAnalytics(r.Context(), "models", "", "", statusCode, time.Since(startedAt).Milliseconds(), 0, 0, 0)
+		s.serveV1Models(w, r)
 		return
 	}
 
@@ -759,8 +905,20 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. Responses endpoint（OpenAI Responses API，/v1/responses）
+	if method == http.MethodPost && path == "/v1/responses" {
+		s.openai.ServeHTTP(w, r)
+		return
+	}
+
+	// 4. Anthropic Messages endpoint（/v1/messages）
+	if method == http.MethodPost && path == "/v1/messages" {
+		s.openai.ServeHTTP(w, r)
+		return
+	}
+
 	response.Error(w, http.StatusNotFound, "v1 endpoint not found")
-	s.openai.RecordAnalytics(r.Context(), strings.TrimPrefix(path, "/v1/"), "", "", http.StatusNotFound, time.Since(startedAt).Milliseconds(), 0, 0, 0)
+	s.openai.RecordAnalytics(r.Context(), strings.TrimPrefix(path, "/v1/"), "", "", http.StatusNotFound, time.Since(startedAt).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
 }
 
 func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) int {

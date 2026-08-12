@@ -39,14 +39,14 @@ if (container) {
     console.error('React app boot failed:', error);
     window.__API_MONITOR_BOOTED = false;
     if (typeof window.__API_MONITOR_SHOW_BOOT_ERROR === 'function') {
-      window.__API_MONITOR_SHOW_BOOT_ERROR(error?.message || 'React 应用启动失败');
+      window.__API_MONITOR_SHOW_BOOT_ERROR(error?.message || '应用启动失败');
     } else {
       const loader = document.getElementById('app-loading');
       if (loader) {
-        loader.textContent = '页面启动失败，请刷新后重试';
+        loader.textContent = '启动失败，请刷新重试';
       }
     }
   }
 } else if (typeof window.__API_MONITOR_SHOW_BOOT_ERROR === 'function') {
-  window.__API_MONITOR_SHOW_BOOT_ERROR('页面缺少 root 挂载节点');
+  window.__API_MONITOR_SHOW_BOOT_ERROR('缺少 root 挂载节点');
 }

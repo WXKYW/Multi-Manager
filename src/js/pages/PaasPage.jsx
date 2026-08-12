@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
-import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Tabs, Text } from '@cloudflare/kumo';
+import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Loader, Tabs, Text, Toolbar } from '@cloudflare/kumo';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { getStatusPillClass, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { getStatusPillClass, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import {
   Server,
   Users,
@@ -85,6 +86,7 @@ const normalizeFlyImageForInput = (image) => {
 
 function PaasPage() {
   const { theme } = useStore();
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('fly'); // 'fly' | 'koyeb' | 'config'
   const didInitialLoadRef = useRef(false);
 
@@ -710,6 +712,14 @@ function PaasPage() {
     return 'neutral';
   };
 
+  const koyebServiceTypeVariant = (type) => {
+    const value = String(type || 'web').toLowerCase();
+    if (value === 'web') return 'blue';
+    if (value === 'worker') return 'purple';
+    if (value === 'job') return 'orange';
+    return 'neutral';
+  };
+
   // ==================== 4. Fly.io State & Logic ====================
   const [flyAccounts, setFlyAccounts] = useState([]);
   const [flyLoading, setFlyLoading] = useState(false);
@@ -1067,7 +1077,7 @@ function PaasPage() {
   };
 
   const deleteFlyMachine = async (account, app, machine) => {
-    if (!(await dialog.confirm(`确定要删除 Fly.io 机器 "${machine.id}" 吗？`))) return;
+    if (!confirmPress(`fly-machine:${machine.id}`, `删除 Fly.io 机器「${machine.id}」`)) return;
     try {
       await callFlyMachineEndpoint(account, app, machine, '', { method: 'DELETE', body: { force: true } });
       toast.success('机器已删除');
@@ -1173,7 +1183,7 @@ function PaasPage() {
           }
           return [{ timestamp: Date.now(), level: 'INFO', message: '暂无容器日志或系统事件。' }];
         } catch (e) {
-          throw new Error('加载日志失败: ' + e.message);
+          throw new Error('加载日志失败: ' + e.message, { cause: e });
         }
       }
     });
@@ -1287,7 +1297,7 @@ function PaasPage() {
   };
 
   const deleteFlyApp = async (account, app) => {
-    if (!(await dialog.confirm(`确定要永久删除 Fly.io 应用 "${app.name}" 吗？此操作会销毁所有底层的机器并且不可逆！`))) return;
+    if (!confirmPress(`fly-app:${app.id}`, `永久删除应用「${app.name}」`)) return;
     try {
       const response = await fetch(`/api/flyio/apps/${app.name}`, {
         method: 'DELETE',
@@ -1423,7 +1433,7 @@ function PaasPage() {
   };
 
   const removeKoyebAccount = async (id) => {
-    if (!(await dialog.confirm('确认删除此 Koyeb 账号吗？'))) return;
+    if (!confirmPress(`koyeb-account:${id}`, '删除 Koyeb 账号')) return;
     try {
       const response = await fetch(`/api/koyeb/accounts/${id}`, {
         method: 'DELETE',
@@ -1478,7 +1488,7 @@ function PaasPage() {
   };
 
   const removeFlyAccount = async (id, name) => {
-    if (!(await dialog.confirm(`确认删除 Fly.io 账号 "${name}" 吗？`))) return;
+    if (!confirmPress(`fly-account:${id}`, `删除 Fly.io 账号「${name}」`)) return;
     try {
       const response = await fetch(`/api/flyio/accounts/${id}`, {
         method: 'DELETE',
@@ -1675,7 +1685,7 @@ function PaasPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <div className="min-w-0 w-full md:w-auto">
           <Tabs
             {...MODULE_TABS_PROPS}
@@ -1689,18 +1699,22 @@ function PaasPage() {
           />
         </div>
 
-        {(activeTab === 'koyeb' || activeTab === 'fly') && (
-          <Button
-            onClick={() => (activeTab === 'koyeb' ? loadKoyebData(true) : loadFlyData(true))}
-            disabled={activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing}
-            variant="secondary"
-            size="sm"
-            shape="square"
-            aria-label="刷新"
-            title="刷新"
-            icon={<RefreshCw className={`w-3.5 h-3.5 ${(activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing) ? 'animate-spin' : ''}`} />}
-          />
-        )}
+        <TabBarOverflowActions
+          items={
+            activeTab === 'koyeb' || activeTab === 'fly'
+              ? [
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className="w-3.5 h-3.5" />,
+                    onClick: () => (activeTab === 'koyeb' ? loadKoyebData(true) : loadFlyData(true)),
+                    disabled: activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing,
+                    loading: activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing,
+                  },
+                ]
+              : []
+          }
+        />
       </div>
 
       <div className="min-w-0">
@@ -1711,7 +1725,7 @@ function PaasPage() {
           {koyebLoading && koyebAccounts.length === 0 ? (
             <Empty
               size="base"
-              icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-info" />}
+              icon={<Loader size={32} className="text-kumo-info" />}
               title="正在加载 Koyeb"
               description="同步应用和域名状态"
             />
@@ -1894,7 +1908,7 @@ function PaasPage() {
                                                 </Button>
                                               )}
                                               <div className="flex flex-wrap items-center gap-1.5">
-                                                <Badge variant="neutral">{service.type || 'web'}</Badge>
+                                                <Badge variant={koyebServiceTypeVariant(service.type)}>{service.type || 'web'}</Badge>
                                                 {service.resourceLimit?.cpu || service.resourceLimit?.memory ? (
                                                   <Badge variant="outline">
                                                     {service.resourceLimit?.cpu || '-'} CPU / {service.resourceLimit?.memory || '-'} RAM
@@ -1964,7 +1978,7 @@ function PaasPage() {
                                           <div className="flex flex-wrap justify-end gap-1">
                                             <Button shape="square" size="sm" variant="secondary" aria-label="重启服务" onClick={() => restartKoyebService(account, app, service)} title={service.status === 'SUSPENDED' ? '启动服务' : '重启服务'} icon={<RefreshCw className="h-3.5 w-3.5" />} />
                                             <Button shape="square" size="sm" variant="secondary" aria-label="重新部署服务" onClick={() => redeployKoyebService(account, app, service)} title="重新部署" icon={<Rocket className="h-3.5 w-3.5" />} />
-                                            <Button shape="square" size="sm" variant="secondary" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" icon={<Server className={`h-3.5 w-3.5 ${service.loadingInstances ? 'animate-spin' : ''}`} />} />
+                                            <Button shape="square" size="sm" variant="secondary" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" loading={service.loadingInstances} icon={<Server className="h-3.5 w-3.5" />} />
                                             <Button shape="square" size="sm" variant="secondary" aria-label="查看服务日志" onClick={() => showKoyebServiceLogs(account, app, service)} title="查看日志" icon={<FileText className="h-3.5 w-3.5" />} />
                                           </div>
                                         </div>
@@ -1992,7 +2006,7 @@ function PaasPage() {
           {flyLoading && flyAccounts.length === 0 ? (
             <Empty
               size="base"
-              icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-brand" />}
+              icon={<Loader size={32} className="text-kumo-brand" />}
               title="正在加载 Fly.io"
               description="同步应用和域名状态"
             />
@@ -2179,7 +2193,7 @@ function PaasPage() {
                                             <Button shape="square" size="xs" variant="secondary" aria-label="恢复调度" title="Uncordon" onClick={() => runFlyMachineAction(account, app, m, 'uncordon', '机器已 uncordon')} icon={<ExternalLink className="h-3 w-3" />} />
                                             <Button shape="square" size="xs" variant="secondary" aria-label="获取 lease" title="获取 lease" onClick={() => acquireFlyMachineLease(account, app, m)} icon={<Lock className="h-3 w-3" />} />
                                             <Button shape="square" size="xs" variant="secondary" aria-label="设置 metadata" title="设置 metadata" onClick={() => setFlyMachineMetadata(account, app, m)} icon={<Settings className="h-3 w-3" />} />
-                                            <Button shape="square" size="xs" variant="secondary-destructive" aria-label="删除机器" title="删除机器" onClick={() => deleteFlyMachine(account, app, m)} icon={<Trash className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant={isArmed(`fly-machine:${m.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除机器" title="删除机器" onClick={() => deleteFlyMachine(account, app, m)} icon={<Trash className="h-3 w-3" />} />
                                           </div>
                                       </div>
                                     ))}
@@ -2191,10 +2205,10 @@ function PaasPage() {
                                     <Button shape="square" size="sm" variant="secondary" aria-label="重启应用" onClick={() => redeployFlyApp(account, app)} title="重启应用" icon={<RefreshCw className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="更新容器镜像" onClick={() => updateFlyAppImage(account, app)} title="更新容器镜像" icon={<Rocket className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="创建机器" onClick={() => createFlyMachine(account, app)} title="创建机器" icon={<Plus className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" icon={<Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" loading={app.loadingMachines} icon={<Server className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" icon={<FileText className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" icon={<Terminal className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="secondary-destructive" aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant={isArmed(`fly-app:${app.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
                                 </div>
                               </LayerCard.Primary>
                             </LayerCard>
@@ -2270,8 +2284,14 @@ function PaasPage() {
                 <>
                   <Button size="sm" onClick={() => setShowAddKoyebModal(true)} icon={<KoyebBrand className="h-3.5 w-3.5" />}>添加 Koyeb</Button>
                   <Button size="sm" onClick={() => setShowAddFlyModal(true)} icon={<FlyIoBrand className="h-3.5 w-3.5" />}>添加 Fly.io</Button>
-                  <Button size="sm" shape="square" variant="secondary" onClick={exportPaasAccounts} aria-label="导出 PaaS 账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />} />
-                  <Button size="sm" shape="square" variant="secondary" onClick={importPaasAccounts} aria-label="导入 PaaS 账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />} />
+                  <Toolbar size="sm" aria-label="导出导入 PaaS 账号" className="shrink-0">
+                    <Toolbar.Button onClick={exportPaasAccounts} aria-label="导出 PaaS 账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导出</span>
+                    </Toolbar.Button>
+                    <Toolbar.Button onClick={importPaasAccounts} aria-label="导入 PaaS 账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导入</span>
+                    </Toolbar.Button>
+                  </Toolbar>
               </>
             )}
             bodyPadding="none"
@@ -2313,7 +2333,7 @@ function PaasPage() {
                           <Table.Cell className="truncate font-mono text-xs text-kumo-subtle">{account.email || '-'}</Table.Cell>
                           <Table.Cell className="text-right font-mono text-xs text-kumo-info">${(account.balance || 0).toFixed(2)}</Table.Cell>
                           <Table.Cell className="text-right">
-                            <Button shape="square" size="sm" variant="ghost" aria-label="删除 Koyeb 账号" title="删除" onClick={() => removeKoyebAccount(account.id)} icon={<Trash className="h-4 w-4" />} />
+                            <Button shape="square" size="sm" variant={isArmed(`koyeb-account:${account.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Koyeb 账号" title="删除" onClick={() => removeKoyebAccount(account.id)} icon={<Trash className="h-4 w-4" />} />
                           </Table.Cell>
                         </Table.Row>
                       ))}
@@ -2329,7 +2349,7 @@ function PaasPage() {
                           <Table.Cell className="truncate font-mono text-xs text-kumo-subtle">{account.email || '-'}</Table.Cell>
                           <Table.Cell className="text-right font-mono text-xs text-kumo-subtle">-</Table.Cell>
                           <Table.Cell className="text-right">
-                            <Button shape="square" size="sm" variant="ghost" aria-label="删除 Fly.io 账号" title="删除" onClick={() => removeFlyAccount(account.id, account.name)} icon={<Trash className="h-4 w-4" />} />
+                            <Button shape="square" size="sm" variant={isArmed(`fly-account:${account.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Fly.io 账号" title="删除" onClick={() => removeFlyAccount(account.id, account.name)} icon={<Trash className="h-4 w-4" />} />
                           </Table.Cell>
                         </Table.Row>
                       ))}
@@ -2494,14 +2514,12 @@ function PaasPage() {
           {/* Log Controls */}
           <div className="p-3 border-b border-kumo-line flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-xs bg-kumo-base">
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Search className="w-3.5 h-3.5 text-kumo-subtle" />
-              <Input size="sm"
-                aria-label="搜索日志消息"
-                type="text"
+              <ResponsiveSearchInput
                 value={logFilterText}
                 onChange={(e) => setLogFilterText(e.target.value)}
                 placeholder="搜索日志消息..."
-                className="px-2 py-1 w-full sm:w-48 text-kumo-strong"
+                ariaLabel="搜索日志消息"
+                className="sm:w-48"
               />
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[10px]">
@@ -2558,7 +2576,7 @@ function PaasPage() {
           >
             {logLoading ? (
               <div className="h-full flex items-center justify-center text-kumo-subtle gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <Loader size={16} />
                 <span>正在获取日志流中...</span>
               </div>
             ) : filteredLogs.length === 0 ? (

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/cloudflare"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
@@ -205,6 +206,21 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 		fail("validate_state", errors.New("existing Tunnel account or zone differs; uninstall it before changing ownership"))
 		return
 	}
+	if state.TunnelID != "" {
+		// The stored tunnel may have been deleted outside the panel (or by an
+		// earlier partial cleanup). Rebuilding it in place keeps the deploy
+		// idempotent instead of failing with "Tunnel not found".
+		progress(8, "verify_tunnel", "正在确认 Named Tunnel 仍存在")
+		exists, checkErr := s.cloudflare.ManagedTunnelExists(ctx, accountID, state.TunnelID)
+		if checkErr != nil {
+			fail("verify_tunnel", checkErr)
+			return
+		}
+		if !exists {
+			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET tunnel_id='',tunnel_name='',token_encrypted='',updated_at=datetime('now') WHERE server_id=?`, serverID)
+			state.TunnelID, state.TunnelName = "", ""
+		}
+	}
 	if state.TunnelID != "" && state.Hostname != "" && state.Hostname != hostname {
 		// The owned record is removed only after the replacement was created.
 		progress(10, "hostname_change", "检测到域名变更，将在新记录生效后清理旧记录")
@@ -330,6 +346,94 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 	}
 	_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET apply_status='running',last_stage='completed',last_error='',updated_at=datetime('now') WHERE server_id=?`, serverID)
 	s.taskRegistry.Complete(taskID, fmt.Sprintf("Named Tunnel %s is connected", hostname))
+}
+
+// startManagedTunnelHealthLoop periodically re-verifies the real Cloudflare
+// edge connectivity of managed tunnels. apply_status='running' previously
+// meant "deploy completed", which never reflected a later cloudflared
+// disconnect. This loop reconciles that status against the authoritative
+// Cloudflare connector count so the panel stops showing a fake "已连接".
+func (s *Service) startManagedTunnelHealthLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.tunnelHealthCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if s.cloudflare == nil {
+			continue
+		}
+		s.reconcileManagedTunnelHealth(ctx)
+	}
+}
+
+func (s *Service) reconcileManagedTunnelHealth(ctx context.Context) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT server_id FROM managed_proxy_tunnels WHERE desired_status='running' AND apply_status IN ('running','disconnected') ORDER BY updated_at ASC`)
+	if err != nil {
+		return
+	}
+	serverIDs := []string{}
+	for rows.Next() {
+		var serverID string
+		if rows.Scan(&serverID) == nil {
+			serverIDs = append(serverIDs, serverID)
+		}
+	}
+	rows.Close()
+	for _, serverID := range serverIDs {
+		go s.reconcileManagedTunnelConnection(serverID)
+	}
+}
+
+func (s *Service) reconcileManagedTunnelConnection(serverID string) {
+	if s.cloudflare == nil {
+		return
+	}
+	if _, busy := s.taskRegistry.ActiveTask(proxyTaskResource(serverID)); busy {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	var accountID, tunnelID string
+	if err := db.QueryRowContext(ctx, `SELECT account_id,tunnel_id FROM managed_proxy_tunnels WHERE server_id=? AND desired_status='running'`, serverID).Scan(&accountID, &tunnelID); err != nil || tunnelID == "" {
+		return
+	}
+	connected := false
+	var checkErr error
+	for attempt := 0; attempt < s.tunnelHealthCheckAttempts; attempt++ {
+		var count int
+		count, checkErr = s.cloudflare.ManagedTunnelConnections(ctx, accountID, tunnelID)
+		if checkErr == nil && count > 0 {
+			connected = true
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.tunnelHealthCheckDelay):
+		}
+	}
+	if connected {
+		_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET apply_status='running',last_stage='health_check',last_error='',updated_at=datetime('now') WHERE server_id=? AND desired_status='running'`, serverID)
+		return
+	}
+	if checkErr != nil {
+		applog.Warn(ctx, "serveragent", "managed tunnel health check failed", "server_id", serverID, "error", checkErr.Error())
+		return
+	}
+	_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET apply_status='disconnected',last_stage='health_check',last_error='Cloudflare 未检测到 cloudflared 连接',updated_at=datetime('now') WHERE server_id=? AND desired_status='running'`, serverID)
 }
 
 func rewriteTunnelClientURI(raw, oldHostname, newHostname string) (string, error) {

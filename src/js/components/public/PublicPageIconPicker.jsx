@@ -143,13 +143,15 @@ function PublicPageIconOption({
         {content}
       </button>
       <div className="flex w-8 shrink-0 items-center justify-center">
-        <button
-          type="button"
+        <Button
+          shape="square"
+          size="sm"
+          variant="ghost"
           className={cx(
-            'inline-flex h-7 w-7 items-center justify-center rounded-md border border-kumo-line bg-kumo-base text-kumo-subtle shadow-sm transition-all',
+            'border border-kumo-line !bg-kumo-base shadow-sm transition-all',
             deleteBusy
               ? 'cursor-wait opacity-100'
-              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:border-kumo-danger/45 hover:text-kumo-danger',
+              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:!border-kumo-danger/45 hover:!bg-kumo-danger/10 hover:!text-kumo-danger',
           )}
           onMouseDown={(event) => {
             event.preventDefault();
@@ -165,11 +167,12 @@ function PublicPageIconOption({
             onDelete();
           }}
           disabled={disabled || deleteBusy}
+          loading={deleteBusy}
           aria-label="删除图标"
           title="删除图标"
         >
-          {deleteBusy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-        </button>
+          {!deleteBusy && <Trash className="h-3.5 w-3.5" />}
+        </Button>
       </div>
     </div>
   );
@@ -315,7 +318,7 @@ export default function PublicPageIconPicker({
               <div>
                 <Dialog.Title className="text-base font-semibold text-kumo-strong">公开页图标</Dialog.Title>
                 <Dialog.Description className="mt-1 text-xs leading-relaxed text-kumo-subtle">
-                  只修改当前这个公开页。上传后可直接切换，也可以随时恢复默认。
+                  只影响当前公开页，可随时恢复默认。
                 </Dialog.Description>
               </div>
               <Dialog.Close />
@@ -361,7 +364,7 @@ export default function PublicPageIconPicker({
                 <PublicPageIconOption
                   active={!selectedIconId}
                   title="默认图标"
-                  description="恢复当前公开页自己的默认图标。"
+                  description="恢复该公开页的默认图标。"
                   onClick={() => commitChange('')}
                   disabled={saving}
                   preview={<PublicPageBrandIcon pageKind={pageKind} config={{}} iconClassName="h-6 w-6" />}

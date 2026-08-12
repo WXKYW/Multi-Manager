@@ -31,6 +31,15 @@ type Service struct {
 	store          *database.Store
 	pendingImports map[string]pendingDatabaseImport
 	importsMu      sync.Mutex
+	cleanupCancel  context.CancelFunc
+	cleanupWG      sync.WaitGroup
+	vacuumMu       sync.Mutex
+	vacuumRunning  bool
+	vacuumStarted  time.Time
+	vacuumDone     time.Time
+	vacuumError    string
+	vacuumBefore   int64
+	vacuumAfter    int64
 }
 
 type userSettingsRow struct {
@@ -53,6 +62,7 @@ type userSettingsRow struct {
 	AgentDownloadURL      sql.NullString
 	PublicAPIURL          sql.NullString
 	TimeZone              sql.NullString
+	UIFont                sql.NullString
 }
 
 type tableAnalysis struct {
@@ -96,6 +106,90 @@ func New(cfg config.Config) *Service {
 		cfg:            cfg,
 		store:          database.New(cfg),
 		pendingImports: map[string]pendingDatabaseImport{},
+	}
+}
+
+const (
+	defaultAutoCleanupHours = 24
+	initialAutoCleanupDelay = time.Minute
+	autoCleanupTimeout      = 2 * time.Minute
+)
+
+// StartBackgroundCleanup launches the periodic log-retention enforcement loop.
+// It is idempotent and safe to call once at server startup.
+func (s *Service) StartBackgroundCleanup() {
+	if s.cleanupCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cleanupCancel = cancel
+	s.cleanupWG.Add(1)
+	go func() {
+		defer s.cleanupWG.Done()
+		s.runBackgroundCleanup(ctx)
+	}()
+}
+
+// Stop cancels the background cleanup loop and waits for it to exit.
+func (s *Service) Stop() {
+	if s.cleanupCancel == nil {
+		return
+	}
+	s.cleanupCancel()
+	s.cleanupWG.Wait()
+}
+
+func (s *Service) runBackgroundCleanup(ctx context.Context) {
+	timer := time.NewTimer(initialAutoCleanupDelay)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			s.autoCleanupOnce(ctx)
+			timer.Reset(time.Duration(s.autoCleanupInterval(ctx)) * time.Hour)
+		}
+	}
+}
+
+func (s *Service) autoCleanupInterval(ctx context.Context) int {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return defaultAutoCleanupHours
+	}
+	defer db.Close()
+	hours := getConfigInt(ctx, db, "log_auto_cleanup_hours", defaultAutoCleanupHours)
+	if hours < 1 {
+		hours = defaultAutoCleanupHours
+	}
+	return hours
+}
+
+func (s *Service) autoCleanupOnce(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, autoCleanupTimeout)
+	defer cancel()
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	if getConfigInt(ctx, db, "log_auto_cleanup", 0) == 0 {
+		return
+	}
+	days := getConfigInt(ctx, db, "log_retention_days", 0)
+	count := getConfigInt(ctx, db, "log_max_count", 0)
+	dbSizeMB := getConfigInt(ctx, db, "log_max_db_size_mb", 0)
+	if days == 0 && count == 0 && dbSizeMB == 0 {
+		return
+	}
+	result, err := enforceLogTableLimits(ctx, db, s.store.DatabasePath(), days, count, dbSizeMB, false)
+	if err != nil {
+		applog.Error(ctx, "settings", fmt.Sprintf("auto log cleanup failed: %v", err))
+		return
+	}
+	if deleted, ok := result["deleted"].(int64); ok && deleted > 0 {
+		applog.Info(ctx, "settings", fmt.Sprintf("auto log cleanup removed %d records", deleted))
 	}
 }
 
@@ -223,11 +317,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.clearAppLogs(w, r)
 	case "/api/settings/vacuum-database":
-		if r.Method != http.MethodPost {
+		switch r.Method {
+		case http.MethodGet:
+			s.vacuumStatus(w, r)
+		case http.MethodPost:
+			s.vacuumDatabase(w, r)
+		default:
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
 		}
-		s.vacuumDatabase(w, r)
 	case "/api/settings/clear-logs":
 		if r.Method != http.MethodPost {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -722,6 +819,12 @@ func (s *Service) getLogSettings(w http.ResponseWriter, r *http.Request) {
 	days := getConfigInt(r.Context(), db, "log_retention_days", 0)
 	count := getConfigInt(r.Context(), db, "log_max_count", 0)
 	dbSizeMB := getConfigInt(r.Context(), db, "log_max_db_size_mb", 0)
+	// Auto-cleanup toggles default OFF so existing deployments do not change behavior silently.
+	autoCleanup := getConfigInt(r.Context(), db, "log_auto_cleanup", 0)
+	autoCleanupHours := getConfigInt(r.Context(), db, "log_auto_cleanup_hours", defaultAutoCleanupHours)
+	if autoCleanupHours < 1 {
+		autoCleanupHours = defaultAutoCleanupHours
+	}
 	logFileSizeMB := getConfigInt(r.Context(), db, "log_file_max_size_mb", 10)
 	if logFileSizeMB < 1 {
 		logFileSizeMB = 10
@@ -730,10 +833,12 @@ func (s *Service) getLogSettings(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"data": map[string]int{
-			"days":          days,
-			"count":         count,
-			"dbSizeMB":      dbSizeMB,
-			"logFileSizeMB": logFileSizeMB,
+			"days":             days,
+			"count":            count,
+			"dbSizeMB":         dbSizeMB,
+			"logFileSizeMB":    logFileSizeMB,
+			"autoCleanup":      autoCleanup,
+			"autoCleanupHours": autoCleanupHours,
 		},
 		"logConfig": map[string]int{
 			"maxFileSizeMB": logFileSizeMB,
@@ -762,6 +867,14 @@ func (s *Service) saveLogSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		logFileSizeMB = 10
 	}
+	autoCleanup := 0
+	if value, ok := toBool(payload["autoCleanup"]); ok && value {
+		autoCleanup = 1
+	}
+	autoCleanupHours, _ := toInt(payload["autoCleanupHours"])
+	if autoCleanupHours < 1 {
+		autoCleanupHours = defaultAutoCleanupHours
+	}
 	if days < 0 {
 		days = 0
 	}
@@ -784,6 +897,8 @@ func (s *Service) saveLogSettings(w http.ResponseWriter, r *http.Request) {
 		{"log_max_count", count, "max log rows per table"},
 		{"log_max_db_size_mb", dbSizeMB, "max database size in MB"},
 		{"log_file_max_size_mb", logFileSizeMB, "max app.log size in MB"},
+		{"log_auto_cleanup", autoCleanup, "auto log cleanup enabled"},
+		{"log_auto_cleanup_hours", autoCleanupHours, "auto log cleanup interval hours"},
 	}
 	for _, item := range configs {
 		if err := setSystemConfig(r.Context(), db, item.key, strconv.Itoa(item.value), item.description); err != nil {
@@ -822,35 +937,93 @@ func (s *Service) clearAppLogs(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "Logs cleared"})
 }
 
+// vacuumDatabase 启动数据库压缩（异步执行）。
+// VACUUM 会重写整个数据库文件并持有排他写锁，在 1 核小容器上可能耗时数分钟，
+// 同步执行会阻塞单连接池（SetMaxOpenConns(1)）导致整个面板无响应，因此改为
+// 后台任务执行，请求立即返回，前端通过 GET 同路径轮询任务状态。
 func (s *Service) vacuumDatabase(w http.ResponseWriter, r *http.Request) {
-	db, err := s.store.Open(r.Context())
+	s.vacuumMu.Lock()
+	if s.vacuumRunning {
+		s.vacuumMu.Unlock()
+		response.JSON(w, http.StatusConflict, map[string]interface{}{
+			"success": false,
+			"message": "数据库压缩已在运行中",
+			"data":    s.vacuumSnapshot(),
+		})
+		return
+	}
+	s.vacuumRunning = true
+	s.vacuumStarted = time.Now()
+	s.vacuumDone = time.Time{}
+	s.vacuumError = ""
+	s.vacuumBefore = 0
+	s.vacuumAfter = 0
+	s.vacuumMu.Unlock()
+
+	s.cleanupWG.Add(1)
+	go s.runVacuum(r.Context())
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "数据库压缩已开始，将在后台执行",
+		"data":    s.vacuumSnapshot(),
+	})
+}
+
+// vacuumStatus 查询数据库压缩任务状态（GET /api/settings/vacuum-database）
+func (s *Service) vacuumStatus(w http.ResponseWriter, r *http.Request) {
+	response.OK(w, s.vacuumSnapshot())
+}
+
+func (s *Service) vacuumSnapshot() map[string]interface{} {
+	s.vacuumMu.Lock()
+	defer s.vacuumMu.Unlock()
+	return map[string]interface{}{
+		"running": s.vacuumRunning,
+		"started": s.vacuumStarted,
+		"done":    s.vacuumDone,
+		"error":   s.vacuumError,
+		"beforeSizeMB": sizeMBString(s.vacuumBefore),
+		"afterSizeMB":  sizeMBString(s.vacuumAfter),
+		"savedMB":      sizeMBString(s.vacuumBefore - s.vacuumAfter),
+	}
+}
+
+func (s *Service) runVacuum(ctx context.Context) {
+	defer s.cleanupWG.Done()
+	defer func() {
+		s.vacuumMu.Lock()
+		s.vacuumRunning = false
+		s.vacuumDone = time.Now()
+		s.vacuumMu.Unlock()
+	}()
+
+	db, err := s.store.Open(ctx)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
+		s.vacuumMu.Lock()
+		s.vacuumError = err.Error()
+		s.vacuumMu.Unlock()
 		return
 	}
 	defer db.Close()
 
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
-	beforeStorage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
-	if _, err := db.ExecContext(r.Context(), `VACUUM`); err != nil {
-		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "database vacuum failed: " + err.Error()})
+	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
+	before := databaseStorageStats(ctx, db, s.store.DatabasePath())
+	s.vacuumMu.Lock()
+	s.vacuumBefore = before.TotalSizeBytes
+	s.vacuumMu.Unlock()
+
+	if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
+		s.vacuumMu.Lock()
+		s.vacuumError = err.Error()
+		s.vacuumMu.Unlock()
 		return
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
-	afterStorage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
-	savedBytes := beforeStorage.TotalSizeBytes - afterStorage.TotalSizeBytes
-
-	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "database vacuum completed",
-		"data": map[string]interface{}{
-			"beforeSizeMB": sizeMBString(beforeStorage.TotalSizeBytes),
-			"afterSizeMB":  sizeMBString(afterStorage.TotalSizeBytes),
-			"savedMB":      sizeMBString(savedBytes),
-			"before":       beforeStorage,
-			"after":        afterStorage,
-		},
-	})
+	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
+	after := databaseStorageStats(ctx, db, s.store.DatabasePath())
+	s.vacuumMu.Lock()
+	s.vacuumAfter = after.TotalSizeBytes
+	s.vacuumMu.Unlock()
 }
 
 func (s *Service) clearLogs(w http.ResponseWriter, r *http.Request) {
@@ -872,7 +1045,7 @@ func (s *Service) clearLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -907,12 +1080,41 @@ func (s *Service) enforceLogLimits(w http.ResponseWriter, r *http.Request) {
 		dbSizeMB = 0
 	}
 
-	result, err := enforceLogTableLimits(r.Context(), db, s.store.DatabasePath(), days, count, dbSizeMB)
+	preview := false
+	if value, ok := toBool(payload["preview"]); ok {
+		preview = value
+	}
+	if preview {
+		plans, err := planLogTableLimits(r.Context(), db, days, count)
+		if err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		var totalDeleted int64
+		for _, plan := range plans {
+			totalDeleted += plan.Deleted
+		}
+		currentSize, _ := fileSize(s.store.DatabasePath())
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"success":       true,
+			"preview":       true,
+			"totalDeleted":  totalDeleted,
+			"tables":        plans,
+			"days":          days,
+			"count":         count,
+			"dbSizeMB":      dbSizeMB,
+			"sizeOverLimit": dbSizeMB > 0 && float64(currentSize)/1024/1024 > float64(dbSizeMB),
+			"currentSizeMB": sizeMBString(currentSize),
+		})
+		return
+	}
+
+	result, err := enforceLogTableLimits(r.Context(), db, s.store.DatabasePath(), days, count, dbSizeMB, true)
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1010,7 +1212,8 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 			totp_settings,
 			agent_download_url,
 			public_api_url,
-			time_zone
+			time_zone,
+			ui_font
 		FROM user_settings
 		WHERE id = 1
 	`).Scan(
@@ -1033,6 +1236,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		&row.AgentDownloadURL,
 		&row.PublicAPIURL,
 		&row.TimeZone,
+		&row.UIFont,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, insertErr := db.ExecContext(ctx, `
@@ -1103,6 +1307,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		"agentDownloadUrl":        nullString(row.AgentDownloadURL, ""),
 		"publicApiUrl":            nullString(row.PublicAPIURL, ""),
 		"timezone":                nullString(row.TimeZone, "system"),
+		"uiFont":                  nullString(row.UIFont, "default"),
 	}
 	if value := nullString(row.ThemeMode, ""); value != "" {
 		settings["themeMode"] = value
@@ -1134,6 +1339,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 	assignString(updates, "agent_download_url", settings, "agentDownloadUrl", "agent_download_url")
 	assignString(updates, "public_api_url", settings, "publicApiUrl", "public_api_url")
 	assignString(updates, "time_zone", settings, "timezone", "timeZone", "time_zone")
+	assignString(updates, "ui_font", settings, "uiFont", "ui_font")
 
 	if len(updates) == 0 {
 		return nil
@@ -1159,6 +1365,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 		"agent_download_url",
 		"public_api_url",
 		"time_zone",
+		"ui_font",
 	}
 
 	setParts := make([]string, 0, len(updates)+1)
@@ -1462,6 +1669,48 @@ func countTableRows(ctx context.Context, db *sql.DB, table string) (int64, error
 		return 0, fmt.Errorf("count rows in %s: %w", table, err)
 	}
 	return count, nil
+}
+
+// freelistPageCount 返回数据库 freelist 上空闲页数量。
+// 空闲页是可回收空间；为 0 说明无需再做空间回收。
+func freelistPageCount(ctx context.Context, db *sql.DB) (int64, error) {
+	var count int64
+	err := db.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("read freelist count: %w", err)
+	}
+	return count, nil
+}
+
+// autoVacuumMode 返回数据库 auto_vacuum 模式：0=NONE 1=FULL 2=INCREMENTAL。
+func autoVacuumMode(ctx context.Context, db *sql.DB) (int, error) {
+	var mode int
+	err := db.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode)
+	if err != nil {
+		return 0, fmt.Errorf("read auto_vacuum: %w", err)
+	}
+	return mode, nil
+}
+
+// migrateAutoVacuumIncremental 将数据库迁移到 auto_vacuum=INCREMENTAL：
+// 一次性全量 VACUUM 建立 pointer-map，此后 incremental_vacuum 可长期无痛回收空间。
+// 仅在模式为 NONE 时执行（FULL 已自动截断，无需迁移）。
+// 注意：全量 VACUUM 需要独占锁，应在低峰期/维护窗口执行一次。
+func migrateAutoVacuumIncremental(ctx context.Context, db *sql.DB) error {
+	mode, err := autoVacuumMode(ctx, db)
+	if err != nil {
+		return err
+	}
+	if mode != 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA auto_vacuum = INCREMENTAL`); err != nil {
+		return fmt.Errorf("enable auto_vacuum incremental: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
+		return fmt.Errorf("vacuum for auto_vacuum migration: %w", err)
+	}
+	return nil
 }
 
 func analyzeTable(ctx context.Context, db *sql.DB, table string) (tableAnalysis, error) {
@@ -1788,6 +2037,18 @@ func intFromPayloadOrConfig(ctx context.Context, db *sql.DB, payload map[string]
 	return getConfigInt(ctx, db, configKey, fallback)
 }
 
+// statisticsTables 是统计/趋势类表：记录使用量、趋势与聚合指标。
+// 这些数据是仪表盘与报表的数据源，删除会丢失全部历史统计，
+// 因此不参与日志清理（只按独立长保留策略清理，见 enforceLogTableLimits）。
+var statisticsTables = map[string]bool{
+	"openai_gateway_analytics":    true,
+	"system_api_stats":            true,
+	"uptime_daily_stats":          true,
+	"github_repository_snapshots": true,
+	"github_traffic_samples":      true,
+	"github_contributors":         true,
+}
+
 func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT name
@@ -1795,7 +2056,11 @@ func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 		WHERE type = 'table' AND (
 			name LIKE '%_logs'
 			OR name LIKE '%_history'
-			OR name IN ('server_network_quality_samples', 'uptime_heartbeats')
+			OR name LIKE '%_audit'
+			OR name IN (
+				'uptime_heartbeats', 'server_network_quality_samples',
+				'github_action_runs', 'github_events', 'github_webhook_deliveries'
+			)
 		)
 		ORDER BY name
 	`)
@@ -1809,6 +2074,9 @@ func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			return nil, fmt.Errorf("scan log table: %w", err)
+		}
+		if statisticsTables[name] {
+			continue
 		}
 		tables = append(tables, name)
 	}
@@ -1827,28 +2095,44 @@ func clearLogTables(ctx context.Context, db *sql.DB) (int64, error) {
 		return 0, nil
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin log cleanup: %w", err)
-	}
-	defer tx.Rollback()
-
 	var deleted int64
 	for _, table := range tables {
-		result, err := tx.ExecContext(ctx, "DELETE FROM "+quoteIdentifier(table))
-		if err != nil {
-			return 0, fmt.Errorf("clear %s: %w", table, err)
+		if ctx.Err() != nil {
+			break
 		}
-		changes, _ := result.RowsAffected()
-		deleted += changes
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit log cleanup: %w", err)
+		quotedTable := quoteIdentifier(table)
+		// 分批清空：每次只删 cleanupBatchSize 行并自动提交，
+		// 避免单条大 DELETE 长时间持有写锁导致系统卡死。
+		for ctx.Err() == nil {
+			result, err := db.ExecContext(ctx, `
+				DELETE FROM `+quotedTable+`
+				WHERE rowid IN (
+					SELECT rowid FROM `+quotedTable+` LIMIT ?
+				)
+			`, cleanupBatchSize)
+			if err != nil {
+				return 0, fmt.Errorf("clear %s: %w", table, err)
+			}
+			changes, _ := result.RowsAffected()
+			deleted += changes
+			if changes < cleanupBatchSize {
+				break
+			}
+		}
 	}
 	return deleted, nil
 }
 
-func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days, count, dbSizeMB int) (map[string]interface{}, error) {
+// cleanupBatchSize 是日志清理单批删除的行数上限。
+// 分批删除避免单条大 DELETE 长时间持有写锁导致系统卡死。
+const cleanupBatchSize = 1000
+
+// statisticsRetentionDays 是统计/趋势表的独立长保留天数。
+// 统计表不参与日志清理（避免丢失历史统计），但为避免无限增长，
+// 仍按此较长窗口清理明细——默认 180 天，足够仪表盘完整展示历史趋势。
+const statisticsRetentionDays = 180
+
+func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days, count, dbSizeMB int, allowVacuum bool) (map[string]interface{}, error) {
 	if days == 0 && count == 0 && dbSizeMB == 0 {
 		return map[string]interface{}{"deleted": int64(0), "reason": "no_limits"}, nil
 	}
@@ -1857,12 +2141,14 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 	if err != nil {
 		return nil, err
 	}
-	if len(tables) == 0 {
-		return map[string]interface{}{"deleted": int64(0)}, nil
-	}
 
 	var totalDeleted int64
-	for _, table := range tables {
+
+	// 统计表独立长保留：仅按天数清理超期明细，保持历史统计可用。
+	for table := range statisticsTables {
+		if ctx.Err() != nil {
+			break
+		}
 		timeColumn, err := logTimeColumn(ctx, db, table)
 		if err != nil {
 			return nil, err
@@ -1870,35 +2156,121 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 		if timeColumn == "" {
 			continue
 		}
+		quotedTable := quoteIdentifier(table)
+		quotedTime := quoteIdentifier(timeColumn)
+		cutoff := time.Now().UTC().AddDate(0, 0, -statisticsRetentionDays).Format(time.RFC3339)
+		for ctx.Err() == nil {
+			result, err := db.ExecContext(ctx, `
+				DELETE FROM `+quotedTable+`
+				WHERE `+quotedTime+` < ?
+				AND rowid IN (
+					SELECT rowid FROM `+quotedTable+`
+					WHERE `+quotedTime+` < ?
+					LIMIT ?)
+			`, cutoff, cutoff, cleanupBatchSize)
+			if err != nil {
+				return nil, fmt.Errorf("delete old stats from %s: %w", table, err)
+			}
+			changes, _ := result.RowsAffected()
+			totalDeleted += changes
+			if changes < cleanupBatchSize {
+				break
+			}
+		}
+	}
+
+	if len(tables) == 0 {
+		return map[string]interface{}{"deleted": totalDeleted}, nil
+	}
+
+	for _, table := range tables {
+		if ctx.Err() != nil {
+			break
+		}
+		timeColumn, err := logTimeColumn(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
+		if timeColumn == "" {
+			continue
+		}
+		quotedTable := quoteIdentifier(table)
+		quotedTime := quoteIdentifier(timeColumn)
+
 		if days > 0 {
 			cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
-			result, err := db.ExecContext(ctx, "DELETE FROM "+quoteIdentifier(table)+" WHERE "+quoteIdentifier(timeColumn)+" < ?", cutoff)
-			if err != nil {
-				return nil, fmt.Errorf("delete old rows from %s: %w", table, err)
+			// 分批删除旧数据：每次只删 cleanupBatchSize 行，避免长事务锁库。
+			for ctx.Err() == nil {
+				result, err := db.ExecContext(ctx, `
+					DELETE FROM `+quotedTable+`
+					WHERE `+quotedTime+` < ?
+					AND rowid IN (
+						SELECT rowid FROM `+quotedTable+`
+						WHERE `+quotedTime+` < ?
+						LIMIT ?)
+				`, cutoff, cutoff, cleanupBatchSize)
+				if err != nil {
+					return nil, fmt.Errorf("delete old rows from %s: %w", table, err)
+				}
+				changes, _ := result.RowsAffected()
+				totalDeleted += changes
+				if changes < cleanupBatchSize {
+					break
+				}
 			}
-			changes, _ := result.RowsAffected()
-			totalDeleted += changes
 		}
 		if count > 0 {
-			result, err := db.ExecContext(ctx, `
-				DELETE FROM `+quoteIdentifier(table)+`
-				WHERE rowid NOT IN (
-					SELECT rowid FROM `+quoteIdentifier(table)+`
-					ORDER BY `+quoteIdentifier(timeColumn)+` DESC
-					LIMIT ?
-				)
-			`, count)
-			if err != nil {
-				return nil, fmt.Errorf("trim rows from %s: %w", table, err)
+			effective := int64(count)
+			if value, ok, err := logTableCountFloor(ctx, db, table); err != nil {
+				return nil, err
+			} else if ok && value > effective {
+				effective = value
 			}
-			changes, _ := result.RowsAffected()
-			totalDeleted += changes
+			// 分批删除最旧行直到表行数 ≤ effective：
+			// 每次只删 cleanupBatchSize 行（利用时间索引走 rowid IN），避免全表 NOT IN 扫描。
+			for ctx.Err() == nil {
+				rowCount, err := countTableRows(ctx, db, table)
+				if err != nil {
+					return nil, err
+				}
+				if rowCount <= effective {
+					break
+				}
+				batch := int64(cleanupBatchSize)
+				if rowCount-effective < batch {
+					batch = rowCount - effective
+				}
+				result, err := db.ExecContext(ctx, `
+					DELETE FROM `+quotedTable+`
+					WHERE rowid IN (
+						SELECT rowid FROM `+quotedTable+`
+						ORDER BY `+quotedTime+` ASC
+						LIMIT ?)
+				`, batch)
+				if err != nil {
+					return nil, fmt.Errorf("trim rows from %s: %w", table, err)
+				}
+				changes, _ := result.RowsAffected()
+				totalDeleted += changes
+				if changes == 0 {
+					break
+				}
+			}
 		}
 	}
 
 	cleanupRounds := 0
-	if dbSizeMB > 0 {
-		for cleanupRounds < 10 {
+	if dbSizeMB > 0 && ctx.Err() == nil {
+		// 空间回收：优先用有界的 incremental_vacuum 分批回收（不阻塞读写）。
+		// 数据库未启用 auto_vacuum 时 incremental_vacuum 是 no-op（安全无副作用）。
+		// 全量 VACUUM（含迁移到 INCREMENTAL）仅在手动执行时允许（allowVacuum），
+		// 自动清理绝不触发全量 VACUUM——它在生产大库上会独占锁导致系统卡死。
+		if allowVacuum {
+			if err := migrateAutoVacuumIncremental(ctx, db); err != nil {
+				applog.Warn(ctx, "settings", "auto_vacuum migration skipped", "error", err.Error())
+			}
+		}
+		for cleanupRounds < 3 {
 			currentSize, err := fileSize(dbPath)
 			if err != nil {
 				return nil, err
@@ -1907,45 +2279,16 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 				break
 			}
 			cleanupRounds++
-			var roundDeleted int64
-			for _, table := range tables {
-				timeColumn, err := logTimeColumn(ctx, db, table)
-				if err != nil {
-					return nil, err
-				}
-				if timeColumn == "" {
-					continue
-				}
-				tableCount, err := countTableRows(ctx, db, table)
-				if err != nil {
-					return nil, err
-				}
-				if tableCount <= 10 {
-					continue
-				}
-				deleteCount := tableCount / 5
-				if deleteCount < 1 {
-					deleteCount = 1
-				}
-				result, err := db.ExecContext(ctx, `
-					DELETE FROM `+quoteIdentifier(table)+`
-					WHERE rowid IN (
-						SELECT rowid FROM `+quoteIdentifier(table)+`
-						ORDER BY `+quoteIdentifier(timeColumn)+` ASC
-						LIMIT ?
-					)
-				`, deleteCount)
-				if err != nil {
-					return nil, fmt.Errorf("delete oldest rows from %s: %w", table, err)
-				}
-				changes, _ := result.RowsAffected()
-				roundDeleted += changes
-				totalDeleted += changes
-			}
-			if roundDeleted == 0 {
+			if ctx.Err() != nil {
 				break
 			}
-			_, _ = db.ExecContext(ctx, `VACUUM`)
+			// 有界回收：每次最多回收 4096 页（约 16MB @4KB 页），
+			// 避免一次性回收整个 freelist 长时间持有写锁。
+			_, _ = db.ExecContext(ctx, `PRAGMA incremental_vacuum(4096)`)
+			freePages, _ := freelistPageCount(ctx, db)
+			if freePages == 0 {
+				break
+			}
 		}
 	}
 
@@ -1955,12 +2298,123 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 	}, nil
 }
 
+type logTablePlan struct {
+	Table   string `json:"table"`
+	Current int64  `json:"current"`
+	Kept    int64  `json:"kept"`
+	Deleted int64  `json:"deleted"`
+	Floor   int64  `json:"floor,omitempty"`
+}
+
+// logTableGroupColumns maps a cleanable table to the column identifying the
+// tracked entity, so count-based trimming always keeps at least the newest
+// record per entity (entity floor).
+var logTableGroupColumns = map[string]string{
+	"uptime_heartbeats":           "monitor_id",
+	"server_metrics_history":      "server_id",
+	"server_monitor_logs":         "server_id",
+	"openai_health_history":       "endpoint_id",
+	"openai_gateway_analytics":    "endpoint_id",
+	"github_repository_snapshots": "repository_id",
+	"github_traffic_samples":      "repository_id",
+	"github_contributors":         "repository_id",
+	"github_action_runs":          "repository_id",
+	"github_events":               "repository_id",
+	"github_webhook_deliveries":   "repository_id",
+	"github_operation_audit":      "repository_id",
+	"cron_logs":                   "task_id",
+	"subscription_access_logs":    "subscription_id",
+	"uptime_daily_stats":          "monitor_id",
+}
+
+// logTableMinRows is a fixed per-table floor for aggregate tables keyed by a
+// growing time bucket where a distinct-entity count would not be bounded.
+var logTableMinRows = map[string]int64{
+	"system_api_stats": 1,
+}
+
+func logTableCountFloor(ctx context.Context, db *sql.DB, table string) (int64, bool, error) {
+	if column, ok := logTableGroupColumns[table]; ok {
+		var floor int64
+		err := db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT `+quoteIdentifier(column)+`) FROM `+quoteIdentifier(table)).Scan(&floor)
+		if err != nil {
+			return 0, false, fmt.Errorf("count distinct %s in %s: %w", column, table, err)
+		}
+		if floor < 1 {
+			floor = 1
+		}
+		return floor, true, nil
+	}
+	if minRows, ok := logTableMinRows[table]; ok {
+		return minRows, true, nil
+	}
+	return 0, false, nil
+}
+
+// planLogTableLimits dry-runs the days/count limits and reports per-table
+// deletion counts without modifying any data. The size-based cleanup is not
+// included here because it depends on runtime vacuum behavior; callers should
+// surface dbSizeMB separately (see sizeOverLimit).
+func planLogTableLimits(ctx context.Context, db *sql.DB, days, count int) ([]logTablePlan, error) {
+	tables, err := listLogTables(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := ""
+	if days > 0 {
+		cutoff = time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+	}
+	plans := make([]logTablePlan, 0, len(tables))
+	for _, table := range tables {
+		timeColumn, err := logTimeColumn(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
+		if timeColumn == "" {
+			continue
+		}
+		total, err := countTableRows(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
+		if total == 0 {
+			continue
+		}
+		var daysDeleted int64
+		if cutoff != "" {
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdentifier(table)+` WHERE `+quoteIdentifier(timeColumn)+` < ?`, cutoff).Scan(&daysDeleted); err != nil {
+				return nil, fmt.Errorf("count old rows in %s: %w", table, err)
+			}
+		}
+		remaining := total - daysDeleted
+		kept := remaining
+		var floor int64
+		if count > 0 {
+			effective := int64(count)
+			if value, ok, err := logTableCountFloor(ctx, db, table); err != nil {
+				return nil, err
+			} else if ok && value > effective {
+				effective = value
+			}
+			floor = effective
+			if remaining > effective {
+				kept = effective
+			}
+		}
+		deleted := daysDeleted + (remaining - kept)
+		if deleted > 0 {
+			plans = append(plans, logTablePlan{Table: table, Current: total, Kept: kept, Deleted: deleted, Floor: floor})
+		}
+	}
+	return plans, nil
+}
+
 func logTimeColumn(ctx context.Context, db *sql.DB, table string) (string, error) {
 	columns, err := tableColumns(ctx, db, table)
 	if err != nil {
 		return "", err
 	}
-	for _, column := range []string{"created_at", "checked_at", "timestamp", "recorded_at", "start_time"} {
+	for _, column := range []string{"created_at", "checked_at", "timestamp", "recorded_at", "start_time", "collected_at", "date"} {
 		if columns[column] {
 			return column, nil
 		}
@@ -2195,7 +2649,7 @@ func (s *Service) backupCurrentDatabase(ctx context.Context, backupPath string) 
 		return err
 	}
 	defer db.Close()
-	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
 		return err
 	}

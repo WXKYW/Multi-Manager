@@ -1,15 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Input } from '@cloudflare/kumo/components/input';
+import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
+import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { ClipboardText, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import useStore, {
   DEFAULT_MODULE_ORDER,
+  FONT_OPTIONS,
   MODULE_CONFIG,
   MODULE_GROUPS,
   applyCustomCss,
@@ -19,7 +22,7 @@ import useStore, {
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { APP_VERSION } from '../modules/appVersion.js';
 import { applySiteBrandFaviconHref, getDefaultSiteBrandPreviewUrl } from '../modules/siteBrand.js';
-import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, cx, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
 import { browserSupportsWebAuthn, createPasskeyCredential } from '../modules/webauthn.js';
@@ -67,12 +70,6 @@ const THEME_OPTIONS = [
 ];
 
 const GITHUB_NEW_OAUTH_APP_URL = 'https://github.com/settings/applications/new';
-
-const PAGE_WIDTH_OPTIONS = [
-  { value: 'standard', label: '标准' },
-  { value: 'wide', label: '宽屏' },
-  { value: 'full', label: '全宽' },
-];
 
 const TIMEZONE_OPTIONS = [
   { value: 'system', label: '跟随服务器' },
@@ -235,15 +232,15 @@ function MaintenanceActionCard({
 }
 
 function SettingsPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const {
     themeMode,
     theme,
     setThemeMode,
-    pageWidthMode,
-    setPageWidthMode,
     setDashboardFooterVisible,
     setDashboardFooterRecordNumber,
     setVibrationEnabled,
+    setUIFont,
     applyUserSettings,
     loadUserSettings,
     logout,
@@ -296,10 +293,13 @@ function SettingsPage() {
     count: 0,
     dbSizeMB: 0,
     logFileSizeMB: 10,
+    autoCleanup: false,
+    autoCleanupHours: 24,
   });
   const [logFileInfo, setLogFileInfo] = useState(null);
   const [operationLogs, setOperationLogs] = useState([]);
   const [logsBusy, setLogsBusy] = useState(false);
+  const [logPreview, setLogPreview] = useState(null);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [twoFALoaded, setTwoFALoaded] = useState(false);
   const [loginSessions, setLoginSessions] = useState([]);
@@ -354,16 +354,16 @@ function SettingsPage() {
     patchSettings({ themeMode: nextMode });
   }, [patchSettings, setThemeMode]);
 
-  const handlePageWidthModeChange = useCallback((value) => {
-    const nextMode = String(value);
-    setPageWidthMode(nextMode);
-    patchSettings({ pageWidthMode: nextMode });
-  }, [patchSettings, setPageWidthMode]);
-
   const handleVibrationEnabledChange = useCallback((checked) => {
     setVibrationEnabled(checked);
     patchSettings({ vibrationEnabled: Boolean(checked) });
   }, [patchSettings, setVibrationEnabled]);
+
+  const handleUIFontChange = useCallback((value) => {
+    const nextFont = String(value);
+    setUIFont(nextFont);
+    patchSettings({ uiFont: nextFont });
+  }, [patchSettings, setUIFont]);
 
   const handleDashboardFooterVisibleChange = useCallback((checked) => {
     setDashboardFooterVisible(checked);
@@ -420,7 +420,7 @@ function SettingsPage() {
 
       const logSettingsResult = await logSettingsResponse.json();
       if (logSettingsResult.success) {
-        setLogSettings(logSettingsResult.data);
+        setLogSettings({ ...logSettingsResult.data, autoCleanup: !!logSettingsResult.data?.autoCleanup });
         setLogFileInfo(logSettingsResult.fileInfo || null);
       }
 
@@ -892,7 +892,7 @@ function SettingsPage() {
   };
 
   const removePasskey = async (passkey) => {
-    if (!(await dialog.confirm(`确定删除“${passkey.label || '通行密钥'}”吗？`))) return;
+    if (!confirmPress(`passkey:${passkey.id}`, `删除通行密钥「${passkey.label || '通行密钥'}」`)) return;
 
     setPasskeyBusy(true);
     try {
@@ -949,6 +949,80 @@ function SettingsPage() {
       setLogsBusy(false);
       setDatabaseBusy(false);
     }
+  };
+
+  // 数据库压缩在后台执行（VACUUM 可能耗时数分钟），提交后轮询任务状态，
+  // 避免压缩期间面板无响应。
+  const runDatabaseVacuum = async () => {
+    setDatabaseBusy(true);
+    try {
+      const response = await fetch('/api/settings/vacuum-database', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '启动数据库压缩失败');
+      if (result.data?.running) {
+        toast.info('数据库压缩已开始，将在后台执行…');
+      } else {
+        toast.success(result.message || '数据库已压缩');
+      }
+      // 轮询直到压缩完成（最多 10 分钟）
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const statusResponse = await fetch('/api/settings/vacuum-database', {
+          headers: getAuthHeaders(),
+        });
+        const status = await statusResponse.json();
+        if (!statusResponse.ok) break;
+        const snapshot = status.data || {};
+        if (!snapshot.running) {
+          if (snapshot.error) {
+            toast.error(`数据库压缩失败: ${snapshot.error}`);
+          } else if (snapshot.savedMB && snapshot.savedMB !== '0 B') {
+            toast.success(`数据库已压缩（节省 ${snapshot.savedMB}）`);
+          } else {
+            toast.success('数据库已压缩');
+          }
+          break;
+        }
+      }
+      await fetchDbState();
+    } catch (error) {
+      toast.error(error.message || '数据库压缩失败');
+    } finally {
+      setDatabaseBusy(false);
+    }
+  };
+
+  const runEnforceLogLimits = async () => {
+    setLogsBusy(true);
+    try {
+      const previewResponse = await fetch('/api/settings/enforce-log-limits', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ preview: true }),
+      });
+      const previewResult = await previewResponse.json();
+      if (!previewResponse.ok || previewResult.success === false) {
+        throw new Error(previewResult.error || '获取清理预览失败');
+      }
+      if (previewResult.totalDeleted === 0 && !previewResult.sizeOverLimit) {
+        toast.info('当前无需清理');
+        return;
+      }
+      setLogPreview(previewResult);
+    } catch (error) {
+      toast.error(error.message || '获取清理预览失败');
+    } finally {
+      setLogsBusy(false);
+    }
+  };
+
+  const confirmEnforceLogLimits = async () => {
+    setLogPreview(null);
+    await postSettingsAction('/api/settings/enforce-log-limits', '日志限制已执行', fetchLogState);
   };
 
   const exportDatabase = () => {
@@ -1086,7 +1160,7 @@ function SettingsPage() {
 
   return (
     <div className="flex min-h-full w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -1094,30 +1168,34 @@ function SettingsPage() {
           tabs={SETTINGS_TABS}
         />
 
-        <div className="flex flex-row flex-wrap items-center gap-2 lg:justify-end">
-          <Button size="sm"
-            onClick={() => refreshCurrent(true)}
-            loading={settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy)}
-            icon={<RefreshCw className="h-4 w-4" />}
-          >
-            刷新
-          </Button>
-          {['general', 'modules', 'appearance'].includes(activeTab) && (
-            <Button size="sm"
-              variant="primary"
-              onClick={() => persistSettings()}
-              loading={settingsSaving}
-              icon={<Save className="h-4 w-4" />}
-            >
-              保存当前页设置
-            </Button>
-          )}
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className="h-4 w-4" />,
+              onClick: () => refreshCurrent(true),
+              loading: settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy),
+            },
+            ...(['general', 'modules', 'appearance'].includes(activeTab)
+              ? [
+                  {
+                    key: 'save',
+                    label: '保存当前页设置',
+                    icon: <Save className="h-4 w-4" />,
+                    onClick: () => persistSettings(),
+                    loading: settingsSaving,
+                    variant: 'primary',
+                  },
+                ]
+              : []),
+          ]}
+        />
       </div>
 
       <div className={contentViewportClassName}>
       {activeTab === 'general' && (
-        <div className="grid min-h-0 items-start gap-4 px-px pt-px pr-px md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+        <div className="grid min-h-0 items-start gap-4 md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
           <div className="grid min-h-0 gap-4">
             <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
             <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
@@ -1127,7 +1205,6 @@ function SettingsPage() {
 
           <SectionCard
             title="部署访问地址"
-            description="公开页与回调地址"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             className="min-h-0 self-start"
             bodyPadding="none"
@@ -1156,41 +1233,26 @@ function SettingsPage() {
 
 
       {activeTab === 'modules' && (
-        <div className="min-h-0 overflow-auto px-px pt-px md:h-full">
+        <div className="min-h-0 overflow-auto md:h-full">
         <SectionCard
           className="flex min-h-0 md:h-full"
           headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
           title="功能模块"
-          description="管理侧栏入口"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           actionsClassName="max-sm:ml-auto max-sm:w-auto max-sm:gap-1.5"
           actions={
               <>
-                <Input
-                  size="sm"
-                  aria-label="搜索模块"
+                <ResponsiveSearchInput
                   value={moduleSearch}
                   onChange={(event) => setModuleSearch(event.target.value)}
                   placeholder="搜索模块"
-                  className="hidden w-52 sm:block"
-                  prefix={<Search className="h-4 w-4" />}
+                  ariaLabel="搜索模块"
+                  className="sm:w-52"
                 />
               </>
           }
           bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-auto"
         >
-          <div className="sm:hidden">
-            <Input
-              size="sm"
-              aria-label="搜索模块"
-              value={moduleSearch}
-              onChange={(event) => setModuleSearch(event.target.value)}
-              placeholder="搜索模块"
-              className="w-full"
-              prefix={<Search className="h-4 w-4" />}
-            />
-          </div>
-
           <div className="flex flex-col gap-3 sm:gap-4">
             {moduleGroups.map((group) => {
               const groupRows = filteredModuleRows.filter((row) => row.groupId === group.id);
@@ -1239,7 +1301,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'security' && (
-        <div className="min-w-0 overflow-auto px-px pt-px [column-gap:1rem] xl:columns-2">
+        <div className="min-w-0 overflow-auto [column-gap:1rem] xl:columns-2">
           <SectionCard
             className={SECURITY_MASONRY_CARD_CLASS}
             title="管理员密码"
@@ -1437,7 +1499,7 @@ function SettingsPage() {
                       </div>
                       <Button
                         size="sm"
-                        variant="secondary-destructive"
+                        variant={isArmed(`passkey:${passkey.id}`) ? 'destructive' : 'secondary-destructive'}
                         onClick={() => removePasskey(passkey)}
                         loading={passkeyBusy}
                         disabled={isDemoMode}
@@ -1536,20 +1598,20 @@ function SettingsPage() {
               <div className="grid gap-3 xl:grid-cols-2">
                 <label className="grid gap-1.5 text-xs text-kumo-subtle">
                   <span className="font-semibold text-kumo-strong">允许登录的 GitHub 用户名</span>
-                  <textarea
+                  <Textarea
                     value={githubAuth.allowedLoginsText}
                     onChange={(event) => setGitHubAuth((prev) => ({ ...prev, allowedLoginsText: event.target.value }))}
                     placeholder={'一行一个或逗号分隔\n如：iwvw'}
-                    className="min-h-24 rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm text-kumo-strong outline-none transition-colors focus:border-kumo-brand"
+                    className="min-h-24"
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs text-kumo-subtle">
                   <span className="font-semibold text-kumo-strong">允许登录的邮箱</span>
-                  <textarea
+                  <Textarea
                     value={githubAuth.allowedEmailsText}
                     onChange={(event) => setGitHubAuth((prev) => ({ ...prev, allowedEmailsText: event.target.value }))}
                     placeholder={'可选；支持私人邮箱校验\n如：admin@example.com'}
-                    className="min-h-24 rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm text-kumo-strong outline-none transition-colors focus:border-kumo-brand"
+                    className="min-h-24"
                   />
                 </label>
               </div>
@@ -1635,7 +1697,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'database' && (
-        <div className="grid items-start gap-3 px-px pt-px pr-px xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
+        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
           <SectionCard
             className="flex h-full min-h-0 flex-1"
             title="数据库统计"
@@ -1677,7 +1739,7 @@ function SettingsPage() {
                 </div>
               </div>
             )}
-            <div className="min-h-0 flex-1 overflow-auto pr-px">
+            <div className="min-h-0 flex-1 overflow-auto">
               <Table layout="fixed">
                 <colgroup>
                   <col className="w-[28%]" />
@@ -1716,7 +1778,7 @@ function SettingsPage() {
             </div>
           </SectionCard>
 
-          <div className="grid content-start gap-3 px-px pt-px">
+          <div className="grid content-start gap-3">
             <SectionCard
               title="数据库导入导出"
               description="导出数据库，或预检后替换。"
@@ -1827,7 +1889,7 @@ function SettingsPage() {
                   <Button
                     size="sm"
                     className="w-full justify-center"
-                    onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)}
+                    onClick={() => runDatabaseVacuum()}
                     loading={databaseBusy}
                   >
                     立即压缩
@@ -1910,27 +1972,35 @@ function SettingsPage() {
       )}
 
       {activeTab === 'logs' && (
-        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden px-px pt-px pr-px">
+        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
           <SectionCard
             className="shrink-0"
             title="审计与保留"
-            description="数据库审计与日志保留"
             icon={<FileText className="h-4 w-4 text-kumo-brand" />}
-            actions={
-                <>
-                  <Button size="sm" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存保留策略</Button>
-                  <Button size="sm" onClick={() => postSettingsAction('/api/settings/enforce-log-limits', '日志限制已执行', fetchLogState)} loading={logsBusy}>立即执行限制</Button>
-                </>
-            }
             bodyPadding="none"
+            actions={
+              <Switch
+                label="自动执行保留限制"
+                checked={logSettings.autoCleanup}
+                onCheckedChange={(checked) => setLogSettings((prev) => ({ ...prev, autoCleanup: checked }))}
+              />
+            }
           >
-            <div className="grid gap-4 p-5 md:grid-cols-4">
-              <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
-              <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
-              <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
-              <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
-            </div>
-          </SectionCard>
+            <div className="p-5">
+              <div className="grid grid-cols-5 gap-3">
+                <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
+                <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
+                <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
+                <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
+                <Input size="sm" label="执行间隔（小时）" type="number" min="1" value={logSettings.autoCleanupHours} onChange={(e) => setLogSettings((prev) => ({ ...prev, autoCleanupHours: Math.max(1, toInt(e.target.value, 24)) }))} disabled={!logSettings.autoCleanup} />
+              </div>
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button size="sm" variant="secondary" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存策略</Button>
+                  <Button size="sm" onClick={runEnforceLogLimits} loading={logsBusy} icon={<Trash className="h-4 w-4" />}>执行保留限制</Button>
+                </div>
+              </div>
+            </SectionCard>
 
           <div className="flex min-h-0 flex-1">
             <SectionCard
@@ -1978,18 +2048,17 @@ function SettingsPage() {
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid min-h-0 items-start gap-3 overflow-auto px-px pt-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+        <div className="grid min-h-0 items-start gap-3 overflow-auto xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
           <SectionCard
             title="界面外观"
-            description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
             icon={<Sun className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
             <FieldRow title="主题模式" description="切换后立即生效">
               <Select size="sm" label="主题模式" value={themeMode} onValueChange={handleThemeModeChange} items={THEME_OPTIONS} />
             </FieldRow>
-            <FieldRow title="页面宽度" description="与顶部宽度切换同步">
-              <Select size="sm" label="页面宽度" value={pageWidthMode} onValueChange={handlePageWidthModeChange} items={PAGE_WIDTH_OPTIONS} />
+            <FieldRow title="界面字体" description="选择个性化字体，保存后全站生效">
+              <Select size="sm" label="界面字体" value={settings.uiFont || 'default'} onValueChange={handleUIFontChange} items={FONT_OPTIONS} />
             </FieldRow>
             <FieldRow title="显示首页页脚" description="控制仪表盘底部页脚">
               <Switch aria-label="显示首页页脚" checked={settings.dashboardFooterVisible} onCheckedChange={handleDashboardFooterVisibleChange} />
@@ -2011,7 +2080,6 @@ function SettingsPage() {
 
           <SectionCard
             title="自定义 CSS"
-            description="保存后写入用户设置"
             icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
             actions={
                 <>
@@ -2040,7 +2108,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'about' && (
-        <div className="grid items-start gap-4 overflow-auto px-px pt-px pr-px lg:grid-cols-1">
+        <div className="grid items-start gap-4 overflow-auto lg:grid-cols-1">
           <SectionCard
             title={<span className="app-brand-wordmark">API Monitor</span>}
             description={APP_VERSION}
@@ -2092,6 +2160,62 @@ function SettingsPage() {
           </LayerCard> */}
         </div>
       )}
+
+      <Dialog.Root open={!!logPreview} onOpenChange={(open) => { if (!open) setLogPreview(null); }} role="alertdialog">
+        <Dialog className="p-6" size="xl">
+          <div className="flex items-center gap-3">
+            <Trash className="h-5 w-5 text-kumo-danger" />
+            <Dialog.Title>执行保留限制</Dialog.Title>
+          </div>
+          <Dialog.Description className="mt-3 text-kumo-subtle">
+            将按当前保留策略清理以下{logPreview?.tables?.length || 0}张日志/自动生成表，预计删除 {logPreview?.totalDeleted ?? 0} 条记录。此操作不可恢复。
+          </Dialog.Description>
+          {logPreview?.tables?.length > 0 && (
+            <div className="mt-4 max-h-64 overflow-auto rounded-lg border border-kumo-line">
+              <Table layout="fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-[96px]" />
+                  <col className="w-[96px]" />
+                  <col className="w-[96px]" />
+                </colgroup>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>表</Table.Head>
+                    <Table.Head>当前行数</Table.Head>
+                    <Table.Head>保留</Table.Head>
+                    <Table.Head>删除</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {logPreview.tables.map((row) => (
+                    <Table.Row key={row.table}>
+                      <Table.Cell className="font-mono text-xs">{row.table}</Table.Cell>
+                      <Table.Cell>{row.current}</Table.Cell>
+                      <Table.Cell>{row.kept}</Table.Cell>
+                      <Table.Cell className="text-kumo-danger">{row.deleted}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+          )}
+          {logPreview?.sizeOverLimit && (
+            <div className="mt-3 rounded-lg border border-kumo-warning/40 bg-kumo-warning/10 p-3 text-xs text-kumo-warning">
+              数据库当前大小超过 {logPreview.dbSizeMB} MB 上限（当前 {logPreview.currentSizeMB}），还将循环删除各表最旧数据直至达标。
+            </div>
+          )}
+          {logPreview?.tables?.some((row) => row.floor > 0) && (
+            <div className="mt-3 rounded-lg border border-kumo-line bg-kumo-recessed p-3 text-xs text-kumo-subtle">
+              已按「每个实体的最新记录」保底：单表条数低于实体数时，也不会删除各实体最新数据。
+            </div>
+          )}
+          <div className="mt-6 flex justify-end gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setLogPreview(null)}>取消</Button>
+            <Button size="sm" variant="destructive" onClick={confirmEnforceLogLimits}>确认清理</Button>
+          </div>
+        </Dialog>
+      </Dialog.Root>
       </div>
     </div>
   );

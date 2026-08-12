@@ -32,8 +32,15 @@ mod windows_impl {
     use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
     use win_native_media::capture::{self, CaptureConfig};
     use win_native_media::encoder::mf_h264::MfH264Encoder;
+    use win_native_media::encoder::EncodedSample;
     use win_native_media::{CaptureTarget, VideoConfig};
-    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+    use windows_sys::Win32::Foundation::{GlobalFree, POINT, RECT};
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+        IsClipboardFormatAvailable, OpenClipboard, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
     use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     use windows_sys::Win32::UI::Input::Pointer::{
@@ -49,13 +56,20 @@ mod windows_impl {
     use crate::OutboundQueues;
 
     const TARGET_FPS: u32 = 60;
-    const KEYFRAME_INTERVAL: u32 = 60;
+    const KEYFRAME_INTERVAL_SECONDS: u32 = 2;
     const ENCODED_QUEUE_DEPTH: usize = 1;
     const RTP_CLOCK_RATE: u128 = 90_000;
     const RTP_PACKET_MTU: usize = 1_200;
     const RTP_HEADER_SIZE: usize = 12;
+    // `CF_UNICODETEXT` is not exported by windows-sys; 13 is the stable format id.
+    const CF_UNICODETEXT: u32 = 13;
     const PEER_DISCONNECT_GRACE: Duration = Duration::from_secs(5);
     const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+    /// WebRTC PLI keyframe requests for the NVENC path. The `DesktopEncoder`
+    /// trait's `force_keyframe(&self)` cannot take `&mut self`, so the capture
+    /// loop flips this atomic and the next `encode` call consumes it.
+    static NVENC_FORCE_IDR: AtomicBool = AtomicBool::new(false);
 
     #[derive(Debug, Deserialize)]
     pub struct StartPayload {
@@ -357,6 +371,8 @@ mod windows_impl {
                     let frame_track = video_track.clone();
                     let frame_force_keyframe = force_keyframe.clone();
                     let frame_worker = worker.clone();
+                    let watcher_channel = channel.clone();
+                    let watcher_stop = stop.clone();
                     channel.on_open(Box::new(move || {
                         let stop = frame_stop.clone();
                         let started = frame_started.clone();
@@ -366,6 +382,7 @@ mod windows_impl {
                         let track = frame_track.clone();
                         let force_keyframe = frame_force_keyframe.clone();
                         let worker = frame_worker.clone();
+                        spawn_clipboard_watcher(watcher_channel.clone(), watcher_stop.clone());
                         Box::pin(async move {
                             emit_signal(&outbound, &session_id, None, Some("connected")).await;
                             if !started.swap(true, Ordering::SeqCst) {
@@ -487,6 +504,9 @@ mod windows_impl {
                     .map(|(_, session)| session)
                     .collect::<Vec<_>>()
             };
+            // Clear any pending PLI keyframe request left over from a previous
+            // session so a fresh session does not emit a spurious IDR.
+            NVENC_FORCE_IDR.store(false, Ordering::Release);
             for session in sessions {
                 shutdown_session(session).await;
             }
@@ -625,6 +645,258 @@ mod windows_impl {
         }
     }
 
+    /// Unified H.264 encoder surface used by the capture loop. The Media
+    /// Foundation encoder and the NVENC encoder both implement this so the loop
+    /// does not care which hardware path is active.
+    trait DesktopEncoder {
+        /// Encode one captured texture. The encoder owns the resolution scaling
+        /// (input size vs its configured output size) internally.
+        fn encode(
+            &mut self,
+            texture: &ID3D11Texture2D,
+            input_width: u32,
+            input_height: u32,
+            timestamp: Duration,
+            out: &mut Vec<EncodedSample>,
+        ) -> Result<(), String>;
+
+        fn force_keyframe(&self);
+
+        /// Switch the target bitrate without tearing the encoder session down.
+        /// The default implementation refuses so the capture loop can fall back
+        /// to a full re-init (cheap for the software MFT; NVENC overrides this
+        /// with a dynamic reconfigure to keep the stream uninterrupted).
+        fn set_bitrate(&mut self, _bitrate: u32) -> Result<(), String> {
+            Err("bitrate change requires encoder re-init".to_string())
+        }
+    }
+
+    /// Media Foundation H.264 encoder adapted to the [`DesktopEncoder`] trait.
+    /// Wraps the vendored `MfH264Encoder` and maps its error type to `String`.
+    struct MftH264EncoderAdapter(MfH264Encoder);
+
+    impl DesktopEncoder for MftH264EncoderAdapter {
+        fn encode(
+            &mut self,
+            texture: &ID3D11Texture2D,
+            _input_width: u32,
+            _input_height: u32,
+            timestamp: Duration,
+            out: &mut Vec<EncodedSample>,
+        ) -> Result<(), String> {
+            self.0
+                .encode(texture, timestamp, out)
+                .map_err(|err| format!("Media Foundation H.264 encode failed: {err}"))
+        }
+
+        fn force_keyframe(&self) {
+            self.0.force_keyframe();
+        }
+    }
+
+    /// NVIDIA NVENC encoder over `nvEncodeAPI64.dll`, loaded at runtime via
+    /// `libloading`. NVENC does not resize ARGB/RGB input itself, so captured
+    /// BGRA frames are scaled to the encode size by the D3D11 video processor
+    /// (`Bgra2Nv12`) and fed as NV12. This keeps the encoded resolution equal
+    /// to the configured target regardless of the native desktop size.
+    struct NvencH264Encoder {
+        encoder: nvenc::encoder::Encoder,
+        converter: win_native_media::convert::Bgra2Nv12,
+        input_buffer: nvenc::input_buffer::InputBuffer,
+        bitstream: nvenc::bitstream::BitStream,
+        /// Reused NV12 CPU buffer; avoids a heap allocation per frame.
+        nv12_buffer: Vec<u8>,
+        keyframe_interval: u32,
+        frame_count: u64,
+    }
+
+    impl NvencH264Encoder {
+        /// Create a low-latency H.264 session bound to `device`. Captured
+        /// frames (`input_width` x `input_height`) are downscaled by the video
+        /// processor to `cfg.width` x `cfg.height` before encoding.
+        fn new(
+            device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
+            cfg: VideoConfig,
+            input_width: u32,
+            input_height: u32,
+        ) -> Result<Self, String> {
+            use nvenc::session::{InitParams, Session};
+            use nvenc::sys::enums::{
+                NVencBufferFormat, NVencMemoryHeap, NVencTuningInfo,
+            };
+            use nvenc::sys::guids::{NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P3_GUID};
+
+            let session: Session<nvenc::session::NeedsConfig> = Session::open_dx(device)
+                .map_err(|err| format!("open NVENC session: {err:?}"))?;
+            let codecs = session
+                .get_encode_codecs()
+                .map_err(|err| format!("query NVENC codecs: {err:?}"))?;
+            if !codecs.contains(&NV_ENC_CODEC_H264_GUID) {
+                return Err("NVENC reports no H.264 encoder".into());
+            }
+            let (session, mut config) = session
+                .get_encode_preset_config_ex(
+                    NV_ENC_CODEC_H264_GUID,
+                    NV_ENC_PRESET_P3_GUID,
+                    NVencTuningInfo::LowLatency,
+                )
+                .map_err(|err| format!("NVENC preset config: {err:?}"))?;
+
+            // Low-latency VBR targeting the requested bitrate.
+            config.preset_cfg.rc_params.rate_control_mode =
+                nvenc::sys::enums::NVencParamsRcMode::VBR;
+            config.preset_cfg.rc_params.average_bit_rate = cfg.bitrate;
+            config.preset_cfg.gop_len = cfg.keyframe_interval;
+            config.preset_cfg.frame_interval_p = 1;
+
+            let init_params = InitParams {
+                encode_guid: NV_ENC_CODEC_H264_GUID,
+                preset_guid: NV_ENC_PRESET_P3_GUID,
+                aspect_ratio: [cfg.width, cfg.height],
+                encode_config: &mut config.preset_cfg,
+                tuning_info: NVencTuningInfo::LowLatency,
+                // NVENC encodes NV12 natively; the video processor scales the
+                // captured BGRA to the target size and converts to NV12.
+                buffer_format: NVencBufferFormat::NV12,
+                frame_rate: [cfg.fps, 1],
+                resolution: [cfg.width, cfg.height],
+                enable_ptd: true,
+                max_encoder_resolution: [0, 0],
+            };
+            let encoder = session
+                .init_encoder(init_params)
+                .map_err(|err| format!("init NVENC session: {err:?}"))?;
+            let converter = win_native_media::convert::Bgra2Nv12::new_with_scale(
+                device,
+                input_width,
+                input_height,
+                cfg.width,
+                cfg.height,
+            )
+            .map_err(|err| format!("create BGRA->NV12 converter: {err:?}"))?;
+            let input_buffer = encoder
+                .create_input_buffer(
+                    cfg.width,
+                    cfg.height,
+                    NVencMemoryHeap::SystemCached,
+                    NVencBufferFormat::NV12,
+                )
+                .map_err(|err| format!("create NVENC input buffer: {err:?}"))?;
+            let bitstream = encoder
+                .create_bitstream_buffer()
+                .map_err(|err| format!("create NVENC bitstream: {err:?}"))?;
+            Ok(Self {
+                encoder,
+                converter,
+                input_buffer,
+                bitstream,
+                nv12_buffer: Vec::new(),
+                keyframe_interval: cfg.keyframe_interval,
+                frame_count: 0,
+            })
+        }
+    }
+
+    impl DesktopEncoder for NvencH264Encoder {
+        fn encode(
+            &mut self,
+            texture: &ID3D11Texture2D,
+            _input_width: u32,
+            _input_height: u32,
+            timestamp: Duration,
+            out: &mut Vec<EncodedSample>,
+        ) -> Result<(), String> {
+            use nvenc::sys::enums::{NVencPicStruct, NVencPicType};
+
+            // Scale BGRA -> NV12 at the encode size and read back to the reused
+            // CPU buffer, then copy it into the NVENC input buffer.
+            self.converter
+                .convert_to_cpu_into(texture, &mut self.nv12_buffer)
+                .map_err(|err| format!("NVENC BGRA->NV12 convert: {err:?}"))?;
+
+            let lock = self
+                .input_buffer
+                .lock()
+                .map_err(|err| format!("NVENC lock input buffer: {err:?}"))?;
+            let dst = unsafe { lock.data_ptr() };
+            let pitch = lock.pitch() as usize;
+            let (w, h) = (lock.width() as usize, lock.height() as usize);
+            let y_size = w * h;
+            // `convert_to_cpu_into` packs rows tightly (no pitch padding); the
+            // NVENC input buffer may have a larger pitch. Copy row by row.
+            unsafe {
+                for row in 0..h {
+                    std::ptr::copy_nonoverlapping(
+                        self.nv12_buffer.as_ptr().add(row * w),
+                        dst.add(row * pitch),
+                        w,
+                    );
+                }
+                let uv_src = self.nv12_buffer.as_ptr().add(y_size);
+                for row in 0..(h / 2) {
+                    std::ptr::copy_nonoverlapping(
+                        uv_src.add(row * w),
+                        dst.add(y_size + row * pitch),
+                        w,
+                    );
+                }
+            }
+            drop(lock);
+
+            self.frame_count += 1;
+            let pli_idr = NVENC_FORCE_IDR.swap(false, Ordering::AcqRel);
+            let periodic_idr = self.frame_count % u64::from(self.keyframe_interval.max(1)) == 1;
+            let is_keyframe = pli_idr || periodic_idr;
+            let pic_type = if is_keyframe {
+                NVencPicType::IDR
+            } else {
+                NVencPicType::P
+            };
+            self.encoder
+                .encode_picture(
+                    &self.input_buffer,
+                    &self.bitstream,
+                    self.frame_count as usize,
+                    timestamp.as_millis() as u64,
+                    nvenc::sys::enums::NVencBufferFormat::NV12,
+                    NVencPicStruct::Frame,
+                    pic_type,
+                    None,
+                )
+                .map_err(|err| format!("NVENC encode: {err:?}"))?;
+
+            // Lock and drain the produced access unit. `try_lock(true)` waits.
+            let bl = self
+                .bitstream
+                .try_lock(true)
+                .map_err(|err| format!("NVENC lock bitstream: {err:?}"))?;
+            let data = bl.as_slice().to_vec();
+            if !data.is_empty() {
+                out.push(EncodedSample {
+                    data,
+                    timestamp,
+                    is_keyframe,
+                });
+            }
+            Ok(())
+        }
+
+        fn force_keyframe(&self) {
+            // A WebRTC PLI wants an IDR as soon as possible. The next encode
+            // call checks this flag and schedules an IDR regardless of the
+            // periodic interval. `force_keyframe(&self)` cannot take `&mut self`
+            // (the capture loop calls it through the trait), so a process-wide
+            // atomic flag is consumed by the next `encode`.
+            NVENC_FORCE_IDR.store(true, Ordering::Release);
+        }
+
+        fn set_bitrate(&mut self, bitrate: u32) -> Result<(), String> {
+            self.encoder
+                .reconfigure_bitrate(bitrate)
+                .map_err(|err| format!("NVENC reconfigure bitrate: {err:?}"))
+        }
+    }
+
     fn capture_and_encode(
         stop: Arc<AtomicBool>,
         geometry: Arc<Mutex<DesktopGeometry>>,
@@ -635,7 +907,11 @@ mod windows_impl {
         let (session, frames) = capture::start(
             CaptureConfig {
                 target: CaptureTarget::Monitor(0),
-                capture_cursor: true,
+                // WGC burned the real system cursor into the video frames while
+                // the frontend also renders a virtual cursor, producing duplicate
+                // (sometimes three) cursors. Keep cursor capture off and let the
+                // frontend's pointer-position echo be the single cursor layer.
+                capture_cursor: false,
             },
             1,
         )
@@ -651,7 +927,7 @@ mod windows_impl {
             }
         }
 
-        let mut encoder: Option<MfH264Encoder> = None;
+        let mut encoder: Option<Box<dyn DesktopEncoder>> = None;
         let mut encoded_size = (0, 0);
         let mut encoded_profile = StreamProfile::default();
         let mut last_encoded_timestamp = Duration::ZERO;
@@ -682,16 +958,70 @@ mod windows_impl {
             }
             last_encoded_timestamp = frame.timestamp;
 
-            if encoder.is_none()
-                || encoded_size != (frame.width, frame.height)
-                || encoded_profile != desired_profile
-            {
-                let config = video_config(frame.width, frame.height, desired_profile);
-                encoder = Some(
-                    MfH264Encoder::new(session.device(), config)
-                        .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?,
-                );
-                encoded_size = (frame.width, frame.height);
+            // Encode at a capped resolution while `geometry` keeps the native
+            // desktop size for pointer coordinate math. Downscaling the stream
+            // keeps encode time and network bytes proportional to the visible
+            // content rather than the full desktop.
+            let (encode_width, encode_height) = scaled_encode_size(frame.width, frame.height);
+
+            // A builder shared by the size-change path and the software-MFT
+            // bitrate-change path below.
+            let build_encoder = |config: VideoConfig| -> Result<Box<dyn DesktopEncoder>, String> {
+                // Prefer NVENC (GPU, zero CPU encode cost, video-processor
+                // scaling), then fall back to the software Media Foundation MFT.
+                // NVENC loads nvEncodeAPI64.dll at runtime, so machines without
+                // an NVIDIA GPU simply fall through to MFT.
+                //
+                // Deliberately NOT trying the MFT hardware path: repeated
+                // hardware MFT sessions leak driver threads/handles (~17 threads
+                // and ~50 MiB per session, crashing WGC after a few), which is
+                // why the hardware MFT was originally disabled. Software MFT is
+                // leak-free and still fine at the downscaled 1080p encode size.
+                match NvencH264Encoder::new(session.device(), config, frame.width, frame.height) {
+                    Ok(nvenc) => Ok(Box::new(nvenc)),
+                    Err(_) => {
+                        let mut mft = MfH264Encoder::new_with_input_size(
+                            session.device(),
+                            config,
+                            frame.width,
+                            frame.height,
+                        )
+                        .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?;
+                        // Idle desktops produce identical frames; skip
+                        // encoding them (heartbeat keyframe every so often)
+                        // to cut CPU and heap churn on the software path.
+                        mft.set_static_skip(true);
+                        Ok(Box::new(MftH264EncoderAdapter(mft)))
+                    }
+                }
+            };
+
+            if encoder.is_none() || encoded_size != (encode_width, encode_height) {
+                // Rebuild only when the *resolution* changes. Profile switches
+                // (fps/bitrate adaptation) must never tear the encoder down:
+                // a session re-init stalls the stream for hundreds of
+                // milliseconds, which is the exact jitter the low-latency path
+                // exists to avoid.
+                let config = video_config(encode_width, encode_height, desired_profile);
+                encoder = Some(build_encoder(config)?);
+                encoded_size = (encode_width, encode_height);
+                encoded_profile = desired_profile;
+            } else if encoded_profile != desired_profile {
+                // fps is handled purely by the capture-side frame sampling
+                // (`should_encode_next_frame`); only the bitrate needs the
+                // encoder. NVENC applies it dynamically; the software MFT
+                // has no reconfigure, so fall back to a cheap re-init.
+                let applied = desired_profile.bitrate == encoded_profile.bitrate
+                    || encoder
+                        .as_mut()
+                        .expect("encoder initialized")
+                        .set_bitrate(desired_profile.bitrate)
+                        .is_ok();
+                if !applied {
+                    let config = video_config(encode_width, encode_height, desired_profile);
+                    encoded_size = (encode_width, encode_height);
+                    encoder = Some(build_encoder(config)?);
+                }
                 encoded_profile = desired_profile;
             }
 
@@ -702,11 +1032,16 @@ mod windows_impl {
                     .expect("encoder initialized")
                     .force_keyframe();
             }
-            let encode_result = encoder.as_mut().expect("encoder initialized").encode(
-                &frame.texture,
-                frame.timestamp,
-                &mut samples,
-            );
+            let encode_result = encoder
+                .as_mut()
+                .expect("encoder initialized")
+                .encode(
+                    &frame.texture,
+                    frame.width,
+                    frame.height,
+                    frame.timestamp,
+                    &mut samples,
+                );
             if let Err(encode_error) = encode_result {
                 return Err(format!(
                     "Media Foundation H.264 encode failed: {encode_error}"
@@ -728,6 +1063,25 @@ mod windows_impl {
         Ok(())
     }
 
+    /// Cap the encoder resolution so the software H.264 encoder never runs on
+    /// the full desktop size. Keeps aspect ratio, clamps to the long edge at
+    /// 1080p, and rounds to even dimensions (NV12 requires even sizes). The
+    /// stream geometry for pointer math stays at the native desktop size.
+    fn scaled_encode_size(width: u32, height: u32) -> (u32, u32) {
+        const MAX_LONG_EDGE: u32 = 1920;
+        let long_edge = width.max(height);
+        let scale = if long_edge > MAX_LONG_EDGE {
+            MAX_LONG_EDGE as f64 / long_edge as f64
+        } else {
+            1.0
+        };
+        let mut w = (width as f64 * scale).round() as u32;
+        let mut h = (height as f64 * scale).round() as u32;
+        w &= !1;
+        h &= !1;
+        (w.max(2), h.max(2))
+    }
+
     fn video_config(width: u32, height: u32, profile: StreamProfile) -> VideoConfig {
         let pixels = width as u64 * height as u64;
         let native_bitrate = if pixels > 3_686_400 {
@@ -742,7 +1096,10 @@ mod windows_impl {
             height,
             fps: profile.fps.clamp(30, TARGET_FPS),
             bitrate: profile.bitrate.clamp(3_000_000, native_bitrate),
-            keyframe_interval: profile.fps.clamp(30, KEYFRAME_INTERVAL),
+            // One IDR every couple of seconds keeps periodic keyframe bursts
+            // off the wire (PLI requests still force an immediate IDR), which
+            // stabilizes the frame cadence on constrained uplinks.
+            keyframe_interval: profile.fps.clamp(30, TARGET_FPS) * KEYFRAME_INTERVAL_SECONDS,
         }
     }
 
@@ -826,6 +1183,15 @@ mod windows_impl {
                 *current = StreamProfile { fps, bitrate };
             }
             return true;
+        }
+        if value.get("type").and_then(Value::as_str) == Some("clipboard-set") {
+            let pushed = value
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty() && text.len() <= 1_048_576)
+                .map(write_clipboard_text)
+                .unwrap_or(false);
+            return pushed;
         }
         handle_input(value, enigo, geometry, touch_contact)
     }
@@ -1088,6 +1454,118 @@ mod windows_impl {
         }
     }
 
+    /// Read the current Windows clipboard as UTF-16 text. Returns `None` when
+    /// the clipboard is held by another process or holds no text.
+    fn read_clipboard_text() -> Option<String> {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return None;
+            }
+            let result = (|| {
+                if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+                    return None;
+                }
+                let handle = GetClipboardData(CF_UNICODETEXT);
+                if handle.is_null() {
+                    return None;
+                }
+                let ptr = GlobalLock(handle);
+                if ptr.is_null() {
+                    return None;
+                }
+                let size = GlobalSize(handle);
+                let text = if size >= 2 {
+                    let units = size / 2;
+                    let slice = std::slice::from_raw_parts(ptr as *const u16, units);
+                    let len = slice.iter().position(|&unit| unit == 0).unwrap_or(units);
+                    Some(String::from_utf16_lossy(&slice[..len]))
+                } else {
+                    None
+                };
+                GlobalUnlock(handle);
+                text
+            })();
+            CloseClipboard();
+            result
+        }
+    }
+
+    /// Replace the Windows clipboard with the given text. Returns `false`
+    /// when another process holds the clipboard.
+    fn write_clipboard_text(text: &str) -> bool {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return false;
+            }
+            let result = (|| {
+                if EmptyClipboard() == 0 {
+                    return false;
+                }
+                let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+                let handle = GlobalAlloc(GMEM_MOVEABLE, utf16.len() * 2);
+                if handle.is_null() {
+                    return false;
+                }
+                let ptr = GlobalLock(handle);
+                if ptr.is_null() {
+                    GlobalFree(handle);
+                    return false;
+                }
+                std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr as *mut u16, utf16.len());
+                GlobalUnlock(handle);
+                // `SetClipboardData` takes ownership of the handle on success.
+                if SetClipboardData(CF_UNICODETEXT, handle).is_null() {
+                    GlobalFree(handle);
+                    return false;
+                }
+                true
+            })();
+            CloseClipboard();
+            result
+        }
+    }
+
+    /// Watch the clipboard sequence counter and push text changes to the peer
+    /// over the control channel. Runs until `stop` is set; the loop suppresses
+    /// echoes of text this side just wrote (`last_sent` dedup).
+    fn spawn_clipboard_watcher(channel: Arc<RTCDataChannel>, stop: Arc<AtomicBool>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut last_sequence = unsafe { GetClipboardSequenceNumber() };
+            let mut last_sent: Option<String> = None;
+            loop {
+                interval.tick().await;
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let sequence = unsafe { GetClipboardSequenceNumber() };
+                if sequence == last_sequence {
+                    continue;
+                }
+                last_sequence = sequence;
+                let read = tokio::task::spawn_blocking(read_clipboard_text)
+                    .await
+                    .unwrap_or(None);
+                let Some(text) = read else { continue };
+                if text.is_empty() || last_sent.as_deref() == Some(text.as_str()) {
+                    continue;
+                }
+                last_sent = Some(text.clone());
+                // A closed data channel makes the send fail; treat that as the
+                // session ending and stop watching (the peer teardown also
+                // sets `stop`).
+                if channel
+                    .send_text(json!({"type": "clipboard", "text": text}).to_string())
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
+
     fn release_active_touch(
         active_contact: &Arc<Mutex<Option<ActiveTouchContact>>>,
         enigo: &Arc<Mutex<Option<Enigo>>>,
@@ -1192,7 +1670,8 @@ mod windows_impl {
             );
             assert_eq!(config.fps, 30);
             assert_eq!(config.bitrate, 28_000_000);
-            assert_eq!(config.keyframe_interval, 30);
+            // One IDR every two seconds at the clamped 30 fps floor: 60 frames.
+            assert_eq!(config.keyframe_interval, 60);
         }
 
         #[test]
@@ -1204,6 +1683,29 @@ mod windows_impl {
                     bitrate: 6_000_000
                 }
             );
+        }
+
+        #[test]
+        fn scaled_encode_size_caps_large_desktops_and_keeps_even_dimensions() {
+            // 4K is capped to a 1920-long-edge, even, aspect-preserving size.
+            let (w, h) = scaled_encode_size(3_840, 2_160);
+            assert_eq!((w, h), (1_920, 1_080));
+            assert_eq!(w % 2, 0);
+            assert_eq!(h % 2, 0);
+
+            // A non-16:9 4K desktop keeps its aspect ratio under the cap.
+            let (w, h) = scaled_encode_size(3_440, 1_440);
+            assert_eq!((w, h), (1_920, 804));
+
+            // Below the cap the native size is preserved (still even).
+            let (w, h) = scaled_encode_size(1_920, 1_080);
+            assert_eq!((w, h), (1_920, 1_080));
+
+            // Odd desktop sizes are rounded down to even dimensions.
+            let (w, h) = scaled_encode_size(1_365, 767);
+            assert_eq!(w % 2, 0);
+            assert_eq!(h % 2, 0);
+            assert!(w <= 1_365 && h <= 767);
         }
 
         #[test]

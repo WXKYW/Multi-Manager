@@ -5,7 +5,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { toast } from '../modules/toast.js';
-import { Download, FileText, RefreshCw, Search } from '../components/Icons.jsx';
+import { Download, FileText, Search } from '../components/Icons.jsx';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 
 const LEVELS = [
@@ -178,30 +178,27 @@ export default function SystemLogsPage() {
   }, [autoScroll, renderedLines]);
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-hidden px-px pt-px sm:gap-4">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-hidden sm:gap-4">
       <SectionCard
         className="shrink-0"
         title="系统日志"
         icon={<FileText className="h-4 w-4 text-kumo-brand" />}
-        actions={(
-          <>
-            <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
+        actions={<Button size="sm" variant="secondary" onClick={download} icon={<Download className="h-3.5 w-3.5" />}>下载</Button>}
+      >
+        <div className="flex flex-wrap items-end gap-2.5">
+          <Select size="sm" label="级别" className="w-28" value={level} onValueChange={setLevel} items={LEVELS} />
+          <Input size="sm" label="关键字 / 正则" className="min-w-60 flex-1" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && load()} placeholder="输入关键字或正则后回车" />
+          <Button size="sm" variant="secondary" onClick={load} loading={loading} icon={<Search className="h-3.5 w-3.5" />}>检索</Button>
+          <div className="ml-auto flex shrink-0 items-center gap-3 pb-0.5">
+            <label className="flex h-8 items-center gap-2 text-xs text-kumo-subtle">
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
               自动刷新
             </label>
-            <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
+            <label className="flex h-8 items-center gap-2 text-xs text-kumo-subtle">
               <Switch checked={autoScroll} onCheckedChange={setAutoScroll} />
               跟随底部
             </label>
-            <Button size="sm" variant="secondary" onClick={download} icon={<Download className="h-3.5 w-3.5" />}>下载</Button>
-            <Button size="sm" variant="primary" onClick={load} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>刷新</Button>
-          </>
-        )}
-      >
-        <div className="grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:items-end">
-          <Select size="sm" label="级别" className="w-full" value={level} onValueChange={setLevel} items={LEVELS} />
-          <Input size="sm" label="关键字 / 正则" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && load()} placeholder="输入关键字或正则后回车" />
-          <Button size="sm" variant="secondary" onClick={load} icon={<Search className="h-3.5 w-3.5" />}>检索</Button>
+          </div>
         </div>
       </SectionCard>
 
@@ -217,7 +214,7 @@ export default function SystemLogsPage() {
           <div className="app-log-muted flex flex-1 min-h-0 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
             <FileText className="h-8 w-8" />
             <div className="app-log-text text-sm font-semibold">暂无日志</div>
-            <div className="text-xs">调整筛选条件或刷新后再查看。</div>
+            <div className="text-xs">调整筛选或刷新后重试。</div>
           </div>
         ) : (
           <div ref={logViewportRef} className="app-log-viewport min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-xs leading-5">

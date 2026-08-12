@@ -9,12 +9,12 @@ const DEFAULT_TEXT = {
     confirmText: '确定',
   },
   confirm: {
-    title: '确认操作',
+    title: '确认',
     confirmText: '确定',
     cancelText: '取消',
   },
   prompt: {
-    title: '请输入',
+    title: '输入',
     confirmText: '确定',
     cancelText: '取消',
   },

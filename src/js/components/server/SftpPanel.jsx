@@ -154,7 +154,7 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
     setCurrentPath(initialPath || '.');
     setPathInput(initialPath || '.');
     if (serverId) loadDirectory(initialPath || '.');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [serverId]);
 
   const openFile = async (file) => {

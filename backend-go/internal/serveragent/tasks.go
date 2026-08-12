@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -497,12 +498,20 @@ func (t *Task) closeSubscribers() {
 	t.subscribers = nil
 }
 
-// createTask 创建任务
+// createTask 创建任务并下发到 Agent 执行。
+// 兼容两类请求体：
+//   - 旧式字段：server_id / type / command
+//   - 结构化字段：serverId / params.command（AI 与自动化调用常用）
 func (s *Service) createTask(w http.ResponseWriter, r *http.Request, taskRegistry *TaskRegistry) {
 	var req struct {
 		ServerID string `json:"server_id"`
 		Type     string `json:"type"`
 		Command  string `json:"command"`
+		ServerId string `json:"serverId"`
+		Params   struct {
+			Command   string `json:"command"`
+			TimeoutMs int64  `json:"timeoutMs"`
+		} `json:"params"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -510,16 +519,60 @@ func (s *Service) createTask(w http.ResponseWriter, r *http.Request, taskRegistr
 		return
 	}
 
-	task := taskRegistry.Create(req.ServerID, req.Type, req.Command)
+	serverID := strings.TrimSpace(req.ServerID)
+	if serverID == "" {
+		serverID = strings.TrimSpace(req.ServerId)
+	}
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		command = strings.TrimSpace(req.Params.Command)
+	}
+	if serverID == "" {
+		response.Error(w, http.StatusBadRequest, "server_id required")
+		return
+	}
+	if command == "" {
+		response.Error(w, http.StatusBadRequest, "command required")
+		return
+	}
 
-	// TODO: 发送任务到 Agent
-	// conn, exists := s.registry.Get(req.ServerID)
-	// if exists {
-	//     conn.SendEvent("task", map[string]interface{}{
-	//         "task_id": task.ID,
-	//         "command": req.Command,
-	//     })
-	// }
+	// 危险命令拦截
+	danger := DetectDangerousCommand(command)
+	if danger.Dangerous {
+		response.JSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success":       false,
+			"error":         "dangerous command rejected: " + strings.Join(danger.Reasons, ", "),
+			"dangerous":     true,
+			"dangerReasons": danger.Reasons,
+		})
+		return
+	}
+
+	timeout := 60 * time.Second
+	if req.Params.TimeoutMs > 0 {
+		timeout = time.Duration(req.Params.TimeoutMs) * time.Millisecond
+	}
+	if timeout > 30*time.Minute {
+		timeout = 30 * time.Minute
+	}
+
+	conn, online := s.registry.Get(serverID)
+	if !online {
+		response.Error(w, http.StatusBadGateway, "agent offline: "+serverID)
+		return
+	}
+
+	task := taskRegistry.Create(serverID, "shell", command)
+	if err := conn.SendEvent("dashboard:task", map[string]interface{}{
+		"id":      task.ID,
+		"type":    1, // RUN_COMMAND
+		"data":    command,
+		"timeout": int(timeout.Seconds()),
+	}); err != nil {
+		taskRegistry.Fail(task.ID, err.Error())
+		response.Error(w, http.StatusBadGateway, "failed to send task to agent: "+err.Error())
+		return
+	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -592,4 +645,41 @@ func (s *Service) writeNamedSSE(w http.ResponseWriter, eventName string, payload
 		fmt.Fprintf(w, "event: %s\n", eventName)
 	}
 	fmt.Fprintf(w, "data: %s\n\n", data)
+}
+
+const (
+	// defaultExecTimeout 命令执行默认等待超时
+	defaultExecTimeout = 30 * time.Second
+	// maxExecTimeout 命令执行等待超时上限
+	maxExecTimeout = 300 * time.Second
+)
+
+// waitAgentTaskResult 等待任务到达终态并返回执行结果。
+// 返回 status 为 "success"/"failed"；timedOut 为 true 表示等待超时（任务已被标记失败）。
+// 事件通道提前关闭时回退到任务快照，保证已完成任务也能拿到终态结果。
+func waitAgentTaskResult(registry *TaskRegistry, task *Task, eventCh <-chan TaskEvent, timeout time.Duration) (output, status string, timedOut bool) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case event, ok := <-eventCh:
+			if !ok {
+				snap := task.Snapshot()
+				if snap.Status == TaskCompleted {
+					return fmt.Sprintf("%v", snap.Data), "success", false
+				}
+				return snap.Error, "failed", false
+			}
+			if event.Status == TaskCompleted {
+				return fmt.Sprintf("%v", event.Data), "success", false
+			}
+			if event.Status == TaskFailed {
+				return event.Error, "failed", false
+			}
+		case <-timer.C:
+			registry.Fail(task.ID, "task timeout")
+			return "", "failed", true
+		}
+	}
 }

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Empty, LayerCard, Popover, Tabs } from '@cloudflare/kumo';
-import { Button } from '@cloudflare/kumo/components/button';
+import { Badge, Button, Empty, LayerCard, Popover, Tabs, Toolbar } from '@cloudflare/kumo';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
 import DrawioFrame from '../components/drawio/DrawioFrame.jsx';
@@ -14,21 +13,29 @@ import { toast } from '../modules/toast.js';
 import {
   ChevronDown,
   ChevronUp,
+  Compass,
   Copy,
   Download,
+  Grid,
   Image,
   Plus,
   Save,
+  Settings,
   Upload,
 } from '../components/Icons.jsx';
 import { AlertTriangle } from '../components/IconsCore.jsx';
-import { iconButtonIconClass } from '../components/ui/AppPrimitives.jsx';
+import {
+  PageStack,
+  ResponsiveSearchInput,
+  iconButtonIconClass,
+  stickyTabsBaseClass,
+} from '../components/ui/AppPrimitives.jsx';
 
 const API = '/api/drawio';
 const TABS = [
-  { value: 'editor', label: '主界面' },
-  { value: 'library', label: '图库' },
-  { value: 'settings', label: '设置' },
+  { value: 'editor', label: <span className="inline-flex items-center gap-1.5"><Compass className="h-3.5 w-3.5" />主界面</span> },
+  { value: 'library', label: <span className="inline-flex items-center gap-1.5"><Grid className="h-3.5 w-3.5" />图库</span> },
+  { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />设置</span> },
 ];
 
 async function apiFetch(path, options = {}) {
@@ -84,7 +91,7 @@ export default function DrawioPage() {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState('idle');
   const [conflictOpen, setConflictOpen] = useState(false);
-  const [xmlOpen, setXmlOpen] = useState(true);
+  const [xmlOpen, setXmlOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [libraryCopyJob, setLibraryCopyJob] = useState(null);
   const [thumbnailRenderTask, setThumbnailRenderTask] = useState(null);
@@ -437,7 +444,7 @@ export default function DrawioPage() {
   }, [draft?.external_assets_json]);
 
   const editorView = (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <LayerCard className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]">
         {selectedId && draft ? (
           <DrawioFrame
@@ -469,9 +476,10 @@ export default function DrawioPage() {
           />
         )}
         <div className="hidden min-h-0 flex-col border-l border-kumo-line lg:flex">
-          <button
+          <Button
             type="button"
-            className="flex h-[30.5px] shrink-0 items-center justify-between gap-2 border-b border-kumo-line px-3 text-left transition hover:bg-kumo-recessed/20"
+            variant="ghost"
+            className="flex h-[30.5px] shrink-0 items-center justify-between gap-2 rounded-none border-b border-kumo-line px-3 text-left transition hover:bg-kumo-recessed/20"
             onClick={() => setXmlOpen(value => !value)}
             aria-label={xmlOpen ? '收起 XML 编辑区' : '展开 XML 编辑区'}
           >
@@ -489,7 +497,7 @@ export default function DrawioPage() {
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" />
               )}
             </span>
-          </button>
+          </Button>
           {xmlOpen && (
             <div className="h-48 min-h-0 shrink-0 overflow-hidden border-b border-kumo-line bg-kumo-base">
               <CodeEditor
@@ -691,24 +699,24 @@ export default function DrawioPage() {
         新建
       </Button>
       <div className="flex items-center gap-1">
-        <Button
-          size="sm"
-          variant="secondary"
-          shape="square"
-          icon={<Download className={iconButtonIconClass} />}
-          aria-label="导入图表"
-          title="导入图表"
-          onClick={() => fileRef.current?.click()}
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          shape="square"
-          icon={<Upload className={iconButtonIconClass} />}
-          aria-label="导出图表"
-          title="导出图表"
-          onClick={() => exportDocument(settings?.default_export_format || 'drawio')}
-        />
+        <Toolbar size="sm" aria-label="导入导出图表" className="shrink-0">
+          <Toolbar.Button
+            aria-label="导入图表"
+            title="导入图表"
+            onClick={() => fileRef.current?.click()}
+            icon={<Download className="h-3.5 w-3.5" />}
+          >
+            <span className="hidden sm:inline">导入</span>
+          </Toolbar.Button>
+          <Toolbar.Button
+            aria-label="导出图表"
+            title="导出图表"
+            onClick={() => exportDocument(settings?.default_export_format || 'drawio')}
+            icon={<Upload className="h-3.5 w-3.5" />}
+          >
+            <span className="hidden sm:inline">导出</span>
+          </Toolbar.Button>
+        </Toolbar>
       </div>
       <Popover>
         <Popover.Trigger
@@ -781,12 +789,11 @@ export default function DrawioPage() {
 
   const libraryToolbar = (
     <>
-      <Input
-        size="sm"
+      <ResponsiveSearchInput
         value={search}
         onChange={event => setSearch(event.target.value)}
         placeholder="搜索图表"
-        aria-label="搜索图表"
+        ariaLabel="搜索图表"
         className="w-56 max-w-full"
       />
       <Button
@@ -800,7 +807,7 @@ export default function DrawioPage() {
       />
       <Button
         size="sm"
-        variant="primary"
+variant="primary"
         icon={<Plus className={iconButtonIconClass} />}
         onClick={createDocument}
       >
@@ -809,8 +816,11 @@ export default function DrawioPage() {
     </>
   );
 
+  const renderToolbar = () =>
+    activeTab === 'editor' ? editorToolbar : activeTab === 'library' ? libraryToolbar : null;
+
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
+    <PageStack viewport className="h-full min-h-0 min-w-0 flex-col">
       <Input
         ref={fileRef}
         type="file"
@@ -822,21 +832,23 @@ export default function DrawioPage() {
           event.target.value = '';
         }}
       />
-      <div className="flex w-full shrink-0 flex-wrap items-center gap-2">
+      <div
+        id="drawioTabRow"
+        className="flex min-h-(--app-header-height) shrink-0 items-center justify-between gap-2 border-b border-kumo-line bg-[var(--app-main-surface)] px-[var(--app-tab-gutter-x)] -mx-[var(--app-canvas-gutter-x)] -mt-[var(--app-canvas-gutter-top)] [&>*]:min-w-0"
+      >
         <Tabs
-          className="shrink-0"
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={setActiveTab}
           tabs={TABS}
         />
         {activeTab !== 'settings' && (
-          <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 max-md:basis-full">
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
             {activeTab === 'editor' ? editorToolbar : libraryToolbar}
           </div>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {activeTab === 'editor' && editorView}
         {activeTab === 'library' && libraryView}
         {activeTab === 'settings' && settingsView}
@@ -878,7 +890,7 @@ export default function DrawioPage() {
             <Dialog.Title>草稿冲突</Dialog.Title>
           </div>
           <Dialog.Description className="mt-3 text-kumo-subtle">
-            另一会话已经保存了更新版本。你可以复制本地 XML，或加载数据库中的最新草稿。
+            另一会话已保存更新版本。可复制本地 XML，或加载数据库中的最新草稿。
           </Dialog.Description>
           <div className="mt-6 flex justify-end gap-2">
             <Button
@@ -901,6 +913,6 @@ export default function DrawioPage() {
           </div>
         </Dialog>
       </Dialog.Root>
-    </div>
+    </PageStack>
   );
 }

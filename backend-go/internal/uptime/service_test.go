@@ -326,6 +326,41 @@ func TestProbesAndStateNotifications(t *testing.T) {
 	}
 }
 
+func TestPublicPageIconID(t *testing.T) {
+	service, _ := testService(t, true)
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO uptime_status_pages (slug, domain, title, description, public, cache_seconds, config_json)
+		VALUES ('fav-slug', 'fav.example.com', 'Fav Test', '', 1, 300, '{"publicIconId":"site-custom"}')`); err != nil {
+		t.Fatalf("insert status page: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO uptime_status_pages (slug, title, public, cache_seconds, config_json)
+		VALUES ('plain-slug', 'Plain', 1, 300, '{}')`); err != nil {
+		t.Fatalf("insert plain status page: %v", err)
+	}
+
+	iconID, found, err := service.PublicPageIconID(ctx, "fav-slug", false)
+	if err != nil || !found || iconID != "site-custom" {
+		t.Fatalf("custom slug lookup = (%q, %v, %v), want (site-custom, true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "fav.example.com", true)
+	if err != nil || !found || iconID != "site-custom" {
+		t.Fatalf("custom domain lookup = (%q, %v, %v), want (site-custom, true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "plain-slug", false)
+	if err != nil || !found || iconID != "" {
+		t.Fatalf("plain slug lookup = (%q, %v, %v), want ('', true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "missing-slug", false)
+	if err != nil || found {
+		t.Fatalf("missing slug lookup = (%q, %v, %v), want ('', false, nil)", iconID, found, err)
+	}
+}
+
 func mustDecode(t *testing.T, res *httptest.ResponseRecorder, target interface{}) {
 	t.Helper()
 	if err := json.Unmarshal(res.Body.Bytes(), target); err != nil {

@@ -11,11 +11,12 @@ import { ClipboardText, Meter, Tabs } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { fileboxDirectURL, fileboxShareURL } from '../modules/fileboxLinks.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { formatDateTime, formatFileSize } from '../modules/utils.js';
-import { Clock, ExternalLink, FileText, FolderOpen, History, Lock, RefreshCw, Send, Settings, Trash, Upload, X } from '../components/Icons.jsx';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { Clock, ExternalLink, FileText, FolderOpen, History, Lock, RefreshCw, Send, Settings, Trash, Upload, Users, X } from '../components/Icons.jsx';
+import { SectionCard, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 
 const MarkdownEditor = lazy(() => import('../components/ui/MarkdownEditor.jsx'));
 
@@ -62,7 +63,7 @@ const PAGE_TABS = [
     value: 'void',
     label: (
       <span className="inline-flex items-center gap-1.5">
-        <Send className="h-3.5 w-3.5" />
+        <Users className="h-3.5 w-3.5" />
         虚空房间
       </span>
     ),
@@ -129,6 +130,7 @@ function EntryName({ entry }) {
 }
 
 function FileboxPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('share');
   const [shareType, setShareType] = useState('file');
   const [shareText, setShareText] = useState('');
@@ -319,7 +321,7 @@ function FileboxPage() {
   };
 
   const deleteEntry = async (code) => {
-    if (!(await dialog.confirm(`确定删除分享 ${code}？`))) return;
+    if (!confirmPress(`share:${code}`, `删除分享「${code}」`)) return;
     try {
       await axios.delete(`/api/filebox/${code}`, { headers: authHeaders() });
       toast.success('分享已删除');
@@ -333,7 +335,7 @@ function FileboxPage() {
   };
 
   const runCleanup = async () => {
-    if (!(await dialog.confirm('清理所有过期分享？'))) return;
+    if (!confirmPress('clear-expired-shares', '清理所有过期分享')) return;
     setHistoryLoading(true);
     try {
       const res = await axios.post('/api/filebox/jobs/cleanup', {}, { headers: authHeaders() });
@@ -457,16 +459,14 @@ function FileboxPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs {...MODULE_TABS_PROPS} value={activeTab} onValueChange={setActiveTab} tabs={PAGE_TABS} />
-        <div className="text-xs text-kumo-subtle">文件与文本临时分享</div>
       </div>
 
       {activeTab === 'share' && (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,1fr)]">
           <SectionCard
             title="创建分享"
-            description="生成下载链接"
             icon={<Send className="h-4 w-4 text-kumo-brand" />}
             action={
               <Tabs
@@ -601,14 +601,13 @@ function FileboxPage() {
         <div className="grid gap-4">
           <SectionCard
             title="分享记录"
-            description="本地记录与有效分享"
             icon={<History className="h-4 w-4 text-kumo-brand" />}
             actions={
               <>
                 <Button size="sm" variant="secondary" onClick={loadServerHistory} loading={historyLoading} icon={<RefreshCw className="h-4 w-4" />}>
                   刷新
                 </Button>
-                <Button size="sm" variant="secondary" onClick={runCleanup} icon={<Clock className="h-4 w-4" />}>
+                <Button size="sm" variant={isArmed('clear-expired-shares') ? 'destructive' : 'secondary-destructive'} onClick={runCleanup} icon={<Clock className="h-4 w-4" />}>
                   清理过期
                 </Button>
               </>
@@ -665,7 +664,7 @@ function FileboxPage() {
                           <Button size="sm" variant="secondary" onClick={() => copyLink(entry.code)}>
                             复制
                           </Button>
-                          <Button size="sm" variant="secondary-destructive" onClick={() => deleteEntry(entry.code)}>
+                          <Button size="sm" variant={isArmed(`share:${entry.code}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteEntry(entry.code)}>
                             <Trash className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -721,7 +720,6 @@ function FileboxPage() {
       {activeTab === 'settings' && (
         <SectionCard
           title="文件柜策略"
-          description="影响新建分享"
           icon={<Settings className="h-4 w-4 text-kumo-brand" />}
           action={
             <Button size="sm" variant="secondary" onClick={loadSettings} loading={settingsLoading} icon={<RefreshCw className="h-4 w-4" />}>
@@ -779,7 +777,6 @@ function FileboxPage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
           <SectionCard
             title="房间管理"
-            description="创建和进入房间"
             icon={<Send className="h-4 w-4 text-kumo-brand" />}
             action={
               <Button size="sm" variant="secondary" onClick={loadVoidRooms} loading={voidRoomsLoading} icon={<RefreshCw className="h-4 w-4" />}>

@@ -33,8 +33,17 @@ func (s *Server) callAPIFromAI(ctx context.Context, call systemmetrics.AICallReq
 	if strings.HasPrefix(targetPath, "/api/ai/") {
 		return systemmetrics.AICallResponse{}, fmt.Errorf("AI 接入路由不允许递归调用")
 	}
-	if strings.HasPrefix(targetPath, "/api/system/ai-access/key") {
+	if strings.HasPrefix(targetPath, "/api/system/ai-access/key") || strings.HasPrefix(targetPath, "/api/ai-access/key") {
 		return systemmetrics.AICallResponse{}, fmt.Errorf("密钥管理接口不允许通过 Agent 调用")
+	}
+	if isWriteAIMethod(method) {
+		writeAllowed, err := s.system.AIAgentWriteAllowed(ctx)
+		if err != nil {
+			return systemmetrics.AICallResponse{}, err
+		}
+		if !writeAllowed {
+			return systemmetrics.AICallResponse{}, fmt.Errorf("Agent 写入操作未启用；请在「AI 接入」设置中开启允许写入")
+		}
 	}
 	if len(call.Body) > 1024*1024 {
 		return systemmetrics.AICallResponse{}, fmt.Errorf("Agent 调用请求体超过 1MB 限制")
@@ -100,6 +109,15 @@ func (s *Server) callAPIFromAI(ctx context.Context, call systemmetrics.AICallReq
 func allowedAIMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+func isWriteAIMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 		return true
 	default:
 		return false

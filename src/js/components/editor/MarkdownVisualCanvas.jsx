@@ -63,7 +63,7 @@ export default function MarkdownVisualCanvas({
         instance.destroy();
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   return (
     <div

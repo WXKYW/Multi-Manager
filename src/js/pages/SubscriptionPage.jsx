@@ -9,15 +9,16 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Badge, ClipboardText, Code, DropdownMenu, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
-import { AppTable, DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, DataTableFrame, PageStack, SectionCard, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { getOSIconClass, getServerPlatformLabel } from '../modules/osPlatform.js';
 import useStore from '../store.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import CountryFlag from '../components/CountryFlag.jsx';
-import { Copy, Download, Edit, Plus, RefreshCw, Save, Star, Trash, X } from '../components/Icons.jsx';
+import { Box, Copy, Download, Edit, FileText, Globe, Plug, Plus, RefreshCw, Save, Server, Star, Trash, X } from '../components/Icons.jsx';
 
 const API = '/api/subscription';
 const INTERNAL_API = '/api/server/agent/proxy/nodes';
@@ -28,7 +29,6 @@ const SERVER_INVENTORY_API = '/api/server/s';
 const DEFAULT_EXTERNAL_POOL_ID = 'sub_default_nodes';
 const LOAD_TIMEOUT_MS = 8000;
 const INITIAL_SKELETON_MS = 900;
-const DESTRUCTIVE_CONFIRM_MS = 8000;
 
 const SUBSCRIPTION_LOG_COLUMNS = [
   { id: 'createdAt', role: 'datetime' },
@@ -40,15 +40,18 @@ const SUBSCRIPTION_LOG_COLUMNS = [
   { id: 'traffic', role: 'meta', grow: 1, minWidth: 176, align: 'right' },
 ];
 
-const PREFERRED_ADDRESS_COLUMNS = [
-  { id: 'name', role: 'primary' },
-  { id: 'address', role: 'identifier' },
-  { id: 'actions', role: 'actions-sm' },
-];
+const TUNNEL_STATUS_META = {
+  running: { variant: 'success', label: '已连接' },
+  disconnected: { variant: 'warning', label: '已断开' },
+  failed: { variant: 'error', label: '部署失败' },
+  cleanup_failed: { variant: 'error', label: '清理失败' },
+  removing: { variant: 'neutral', label: '卸载中' },
+};
+const tunnelStatusMeta = (applyStatus) => TUNNEL_STATUS_META[applyStatus] || { variant: 'warning', label: '部署中' };
 
 const SUBSCRIPTION_COLUMNS = [
   { id: 'enabled', role: 'control' },
-  { id: 'subscription', role: 'primary', minWidth: 176 },
+  { id: 'subscription', role: 'primary', minWidth: 176, maxWidth: 220, grow: 0 },
   { id: 'status', role: 'status' },
   { id: 'traffic', role: 'content', minWidth: 220, verticalAlign: 'middle' },
   { id: 'access', role: 'meta', grow: 1, minWidth: 176 },
@@ -68,7 +71,7 @@ const PLAN_COLUMNS = [
 
 const NODE_COLUMNS = [
   { id: 'enabled', role: 'control' },
-  { id: 'name', role: 'primary', minWidth: 220 },
+  { id: 'name', role: 'primary', minWidth: 176, maxWidth: 200, grow: 0 },
   { id: 'type', role: 'type' },
   { id: 'connection', role: 'content', minWidth: 240 },
   { id: 'host', role: 'meta', grow: 1, minWidth: 176 },
@@ -78,13 +81,13 @@ const NODE_COLUMNS = [
 const RUNTIME_HOST_COLUMNS = [
   { id: 'check', role: 'check' },
   { id: 'status', role: 'status' },
-  { id: 'name', role: 'primary', minWidth: 240 },
-  { id: 'location', role: 'meta', grow: 1, minWidth: 240, align: 'center' },
-  { id: 'online', role: 'count', align: 'center' },
-  { id: 'agentVersion', role: 'meta', grow: 1, minWidth: 240, align: 'center' },
-  { id: 'proxy', role: 'content', grow: 0, width: 300, align: 'center', verticalAlign: 'middle' },
-  { id: 'nodeType', role: 'type', grow: 1, minWidth: 240 },
-  { id: 'actions', role: 'actions-xl', width: 360 },
+  { id: 'name', role: 'primary', minWidth: 120, width: 120, grow: 0 },
+  { id: 'location', role: 'meta', grow: 1, minWidth: 104, align: 'center' },
+  { id: 'online', role: 'count', grow: 1, minWidth: 104 },
+  { id: 'agentVersion', role: 'meta', grow: 1, minWidth: 104, align: 'center' },
+  { id: 'proxy', role: 'content', grow: 0, width: 180, align: 'center', verticalAlign: 'middle' },
+  { id: 'nodeType', role: 'type', grow: 1, minWidth: 120 },
+  { id: 'actions', role: 'actions-xl', width: 320 },
 ];
 
 const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', access_mode: 'direct', preferred_address_id: '', public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true, stable: false };
@@ -684,25 +687,25 @@ function NodeHostQuality({ node, serverNameById }) {
 const nodeTypeBadgeVariant = (type) => {
   switch (String(type || '').toLowerCase()) {
     case 'vless':
-		return 'success';
+		return 'purple';
     case 'vmess':
-		return 'neutral';
+		return 'blue';
     case 'trojan':
-		return 'error';
+		return 'red';
     case 'ss':
     case 'shadowsocks':
-		return 'success';
+		return 'green';
     case 'hysteria2':
     case 'hy2':
     case 'hysteria':
-		return 'warning';
+		return 'teal';
     case 'tuic':
-		return 'success';
+		return 'orange';
     case 'socks':
     case 'socks5':
       return 'neutral';
     case 'http':
-		return 'neutral';
+		return 'secondary';
     default:
 		return 'neutral';
   }
@@ -849,6 +852,7 @@ function MasonryGrid({ children, className = '' }) {
 }
 
 function SubscriptionPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const publicApiUrl = useStore((state) => state.publicApiUrl);
   const [activeTab, setActiveTab] = useState('instances');
   const [loading, setLoading] = useState(false);
@@ -878,7 +882,6 @@ function SubscriptionPage() {
   const [internalNodeActions, setInternalNodeActions] = useState({});
   const [externalNodeActions, setExternalNodeActions] = useState({});
   const [uninstallingServerId, setUninstallingServerId] = useState('');
-  const [destructiveConfirm, setDestructiveConfirm] = useState({ key: '', expiresAt: 0 });
   const [templates, setTemplates] = useState([]);
   const [logs, setLogs] = useState([]);
   const [servers, setServers] = useState([]);
@@ -909,7 +912,6 @@ function SubscriptionPage() {
   const [templateSubscriptionId, setTemplateSubscriptionId] = useState('');
   const [templateBindingId, setTemplateBindingId] = useState('');
   const loadGenerationRef = useRef(0);
-	const destructiveConfirmTimerRef = useRef(null);
 	const terminalTaskIDsRef = useRef(new Set());
 
   const publicBase = useMemo(
@@ -972,9 +974,6 @@ function SubscriptionPage() {
 
   useEffect(() => {
     loadAll();
-    return () => {
-      if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
-    };
   }, []);
 
 	const runtimeLifecycleServers = useMemo(() => servers.filter((server) => server.status === 'online' && server.agent_capabilities?.proxy_runtime_lifecycle_v2 === true), [servers]);
@@ -1094,7 +1093,7 @@ function SubscriptionPage() {
 	};
 
 	const uninstallProxyRuntime = async (server) => {
-		if (!confirmDestructivePress(`runtime-uninstall:${server.id}`, `卸载 ${server.name} 的 sing-box`)) return;
+		if (!confirmPress(`runtime-uninstall:${server.id}`, `卸载 ${server.name} 的 sing-box`)) return;
 		try {
 			const response = await fetch(`${RUNTIME_API}/${server.id}/uninstall`, { method: 'POST', headers: getAuthHeaders() });
 			const payload = await response.json();
@@ -1134,7 +1133,7 @@ function SubscriptionPage() {
 	};
 
 	const deletePreferredAddress = async (item) => {
-		if (!confirmDestructivePress(`preferred-address:${item.id}`, `删除优选地址 ${item.name}`)) return;
+		if (!confirmPress(`preferred-address:${item.id}`, `删除优选地址 ${item.name}`)) return;
 		try {
 			const response = await fetch(`${PREFERRED_API}/${item.id}`, { method: 'DELETE', headers: getAuthHeaders() });
 			const payload = await response.json();
@@ -1144,11 +1143,21 @@ function SubscriptionPage() {
 		} catch (error) { toast.error(error.message || '删除优选地址失败'); }
 	};
 
+	const setPreferredDefault = async (item) => {
+		try {
+			const response = await fetch(`${PREFERRED_API}/${item.id}`, { method: 'PUT', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: item.name, address: item.address, port: item.port, enabled: item.enabled !== false, is_default: true, sort_order: item.sort_order || 0 }) });
+			const payload = await response.json();
+			if (!response.ok || payload.success === false) throw new Error(payload.error || payload.message || '设为默认失败');
+			await loadAll();
+			toast.success(`已将 ${item.name} 设为默认`);
+		} catch (error) { toast.error(error.message || '设为默认失败'); }
+	};
+
   const uninstallTunnel = async (server) => {
     const entry = managedTunnels.find((item) => item.server_id === server.id);
     if (!entry) return toast.warning('该主机没有 Managed Tunnel');
 		const affectedNodes = Number(entry.node_count ?? internalNodes.filter((node) => node.server_id === server.id && node.access_mode === 'cloudflare_tunnel').length);
-    if (!confirmDestructivePress(`managed-tunnel-delete:${server.id}`, `卸载 ${server.name} 的 Tunnel、DNS、cloudflared 以及 ${affectedNodes} 个关联节点`)) return;
+    if (!confirmPress(`managed-tunnel-delete:${server.id}`, `卸载 ${server.name} 的 Tunnel、DNS、cloudflared 以及 ${affectedNodes} 个关联节点`)) return;
     try {
       const response = await fetch(`${TUNNEL_API}/${server.id}?cascade=1`, { method: 'DELETE', headers: getAuthHeaders() });
       const payload = await response.json();
@@ -1157,29 +1166,6 @@ function SubscriptionPage() {
       if (taskID) setTunnelTasks((current) => ({ ...current, [taskID]: { progress: 0, data: { message: '卸载任务已提交' } } }));
       toast.info('Tunnel 卸载任务已提交', { isManual: true });
     } catch (error) { toast.error(error.message || 'Tunnel 卸载失败'); }
-  };
-
-  const isDestructiveConfirmActive = (key) => (
-    destructiveConfirm.key === key && destructiveConfirm.expiresAt > Date.now()
-  );
-
-  const confirmDestructivePress = (key, label) => {
-    if (isDestructiveConfirmActive(key)) {
-      if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
-      destructiveConfirmTimerRef.current = null;
-      setDestructiveConfirm({ key: '', expiresAt: 0 });
-      return true;
-    }
-
-    if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
-    const expiresAt = Date.now() + DESTRUCTIVE_CONFIRM_MS;
-    setDestructiveConfirm({ key, expiresAt });
-    destructiveConfirmTimerRef.current = window.setTimeout(() => {
-      setDestructiveConfirm((current) => current.key === key ? { key: '', expiresAt: 0 } : current);
-      destructiveConfirmTimerRef.current = null;
-    }, DESTRUCTIVE_CONFIRM_MS);
-    toast.warning(`${label}，再点一次确认`);
-    return false;
   };
 
 	const waitForTaskTerminal = async (taskID, timeoutMs = 240000) => {
@@ -1281,7 +1267,7 @@ function SubscriptionPage() {
   };
 
   const deleteInternalNode = async (node) => {
-    if (!confirmDestructivePress(`internal-node-delete:${node.id}`, `卸载节点 ${node.name}`)) return;
+    if (!confirmPress(`internal-node-delete:${node.id}`, `卸载节点 ${node.name}`)) return;
     await withInternalNodeAction(node.id, 'delete', async () => {
       try {
 		const requestDelete = async (force = false) => {
@@ -1339,7 +1325,7 @@ function SubscriptionPage() {
   };
 
   const uninstallInternalNodes = async (server, managed) => {
-    if (!confirmDestructivePress(`instance-proxy-uninstall:${server.id}`, `卸载 ${server.name} 的 ${managed.length} 个节点`)) return;
+    if (!confirmPress(`instance-proxy-uninstall:${server.id}`, `卸载 ${server.name} 的 ${managed.length} 个节点`)) return;
     setUninstallingServerId(server.id);
     setSaving(true);
     try {
@@ -1572,7 +1558,7 @@ function SubscriptionPage() {
   };
 
   const deletePlan = async (plan) => {
-    if (!(await dialog.deleteResource({ resourceType: '套餐', resourceName: plan.name }))) return;
+    if (!confirmPress(`plan-delete:${plan.id}`, `删除套餐「${plan.name}」`)) return;
     const res = await fetch(`${API}/plans/${plan.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json();
     if (!res.ok || data.success === false) return toast.error(data.error || '删除失败');
@@ -1631,7 +1617,7 @@ function SubscriptionPage() {
   };
 
   const deleteSubscription = async (sub) => {
-    if (!(await dialog.deleteResource({ resourceType: '订阅链接', resourceName: sub.name }))) return;
+    if (!confirmPress(`subscription-delete:${sub.id}`, `删除订阅链接「${sub.name}」`)) return;
     const res = await fetch(`${API}/subscriptions/${sub.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -1785,7 +1771,7 @@ function SubscriptionPage() {
   };
 
   const deleteNode = async (node) => {
-    if (!confirmDestructivePress(`external-node-delete:${node.id}`, `删除节点 ${node.name}`)) return;
+    if (!confirmPress(`external-node-delete:${node.id}`, `删除节点 ${node.name}`)) return;
     const actionKey = `${node.id}:delete`;
     if (externalNodeActions[actionKey]) return;
     setExternalNodeActions((current) => ({ ...current, [actionKey]: true }));
@@ -1865,7 +1851,7 @@ function SubscriptionPage() {
       toast.warning('内置模板不能删除');
       return;
     }
-    if (!(await dialog.deleteResource({ resourceType: '模板', resourceName: tpl.name }))) return;
+    if (!confirmPress(`template-delete:${tpl.id}`, `删除模板「${tpl.name}」`)) return;
     const res = await fetch(`${API}/templates/${tpl.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json();
     if (!res.ok || data.success === false) {
@@ -1938,9 +1924,7 @@ function SubscriptionPage() {
     return (
       <SectionCard
         title={`订阅管理 (${currentSubscriptions.length})`}
-        className="h-full min-h-0"
         bodyPadding="none"
-        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         actions={(
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             <span className="hidden rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-info sm:inline-flex">{visibleNodes.length} 个节点</span>
@@ -1949,7 +1933,7 @@ function SubscriptionPage() {
           </div>
         )}
       >
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
+        <DataTableFrame variant="embedded">
           <AppTable tableId="subscriptions" columns={SUBSCRIPTION_COLUMNS}>
             <Table.Header sticky variant="compact">
               <Table.Row>
@@ -2004,20 +1988,20 @@ function SubscriptionPage() {
                             render={<Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" icon={<Copy className="h-3.5 w-3.5" />} />}
                           />
                           <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="min-w-44">
-                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(link, '默认订阅链接已复制')}>
+                            <DropdownMenu.Item onClick={() => copyText(link, '默认订阅链接已复制')}>
                               Mihomo / Clash（YAML）
                             </DropdownMenu.Item>
-                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(subscriptionURL(publicBase, sub, 'raw'), 'Raw 订阅链接已复制')}>
+                            <DropdownMenu.Item onClick={() => copyText(subscriptionURL(publicBase, sub, 'raw'), 'Raw 订阅链接已复制')}>
                               通用节点链接（Raw）
                             </DropdownMenu.Item>
-                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(subscriptionURL(publicBase, sub, 'base64'), 'Base64 订阅链接已复制')}>
+                            <DropdownMenu.Item onClick={() => copyText(subscriptionURL(publicBase, sub, 'base64'), 'Base64 订阅链接已复制')}>
                               v2rayN / NekoBox（Base64）
                             </DropdownMenu.Item>
                           </DropdownMenu.Content>
                         </DropdownMenu>
                         <Button size="sm" shape="square" variant="secondary" aria-label="编辑订阅链接" title="编辑订阅链接" onClick={() => openEditSubscription(sub)} icon={<Edit className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary" aria-label="重置连接凭据" title="重置连接凭据" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
-                        <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
+                        <Button size="sm" shape="square" variant={isArmed(`subscription-delete:${sub.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
                       </div>
                     </Table.Cell>
                   </Table.Row>
@@ -2028,14 +2012,14 @@ function SubscriptionPage() {
               )}
             </Table.Body>
           </AppTable>
-        </div>
+        </DataTableFrame>
       </SectionCard>
     );
   };
 
   const renderPlans = () => (
-    <SectionCard title={`套餐管理 (${plans.length})`} className="h-full min-h-0" bodyPadding="none" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
-      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
+    <SectionCard title={`套餐管理 (${plans.length})`} bodyPadding="none" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
+      <DataTableFrame variant="embedded">
         <AppTable tableId="subscription-plans" columns={PLAN_COLUMNS}>
           <Table.Header sticky variant="compact"><Table.Row><Table.Head className="text-center">启用</Table.Head><Table.Head>套餐</Table.Head><Table.Head className="text-center">状态</Table.Head><Table.Head>单订阅额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
           <Table.Body>
@@ -2050,12 +2034,12 @@ function SubscriptionPage() {
               <Table.Cell className="text-center">{plan.cycle_type === 'monthly' ? `每月 ${plan.cycle_day} 日` : plan.cycle_type === 'custom' ? '自定义' : '不重置'}</Table.Cell>
 				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div></Table.Cell>
               <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
-              <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
-			</Table.Row>})}
+              <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant={isArmed(`plan-delete:${plan.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
+			</Table.Row>;})}
             {plans.length === 0 && <Table.Row><Table.Cell colSpan={8} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>
-      </div>
+      </DataTableFrame>
     </SectionCard>
   );
 
@@ -2086,18 +2070,18 @@ function SubscriptionPage() {
                 : (node.assigned_port || '-');
               const connectionTags = isTunnelNode
                 ? ['ws', 'tls', 'tunnel', node.runtime].filter(Boolean)
-                : [node.transport, node.protocol === 'vless-reality' ? 'reality' : 'tls', node.runtime].filter(Boolean);
+                : [node.transport, node.protocol === 'vless-reality' ? 'reality' : (node.protocol === 'hysteria2' ? 'tls' : null), node.runtime].filter(Boolean);
               const reconciling = !!internalNodeActions[`${node.id}:reconcile`];
               const deleting = !!internalNodeActions[`${node.id}:delete`];
               const deleteConfirmKey = `internal-node-delete:${node.id}`;
-              const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
+              const confirmingDelete = isArmed(deleteConfirmKey);
               return <Table.Row key={node.id} onDoubleClick={() => openEditInternalNode(node)} className="cursor-pointer">
                 <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
                 <Table.Cell><div className="flex min-w-0 items-center gap-1.5 truncate text-sm font-bold text-kumo-strong">{node.stable && <Star className="h-3.5 w-3.5 shrink-0 text-kumo-warning" />}{node.name}{node.stable && <Badge variant="success">稳定</Badge>}</div>{!node.publishable && (() => { const [stateLabel, stateVariant] = managedNodeState(node); return <div className="mt-1"><Badge variant={stateVariant}>{stateLabel}</Badge></div>; })()}</Table.Cell>
-                <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : 'HYSTERIA2'}</Badge></Table.Cell>
+                <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : node.protocol === 'hysteria2' ? 'HYSTERIA2' : node.protocol === 'socks' ? 'SOCKS5' : node.protocol === 'http' ? 'HTTP' : String(node.protocol || 'UNKNOWN').toUpperCase()}</Badge></Table.Cell>
                 <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{displayHost}:{displayPort}</div><div className="mt-1 flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto scrollbar-none">{connectionTags.map((tag) => <span key={tag} className={`${tag === node.runtime ? 'hidden sm:inline-flex' : 'inline-flex'} shrink-0 rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
                 <Table.Cell>{server?.status === 'online' ? <NodeHostQuality node={{ ...node, traffic_server_id: node.server_id }} serverNameById={serverNameById} /> : <div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>主机离线</span></div>}</Table.Cell>
-                <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
+                <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling} loading={deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={<Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
               </Table.Row>;
             })}
             {internalNodes.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-6 text-center text-kumo-subtle">暂无本机节点</Table.Cell></Table.Row>}
@@ -2151,7 +2135,7 @@ function SubscriptionPage() {
               const networkTags = nodeNetworkTags(node);
               const deleting = !!externalNodeActions[`${node.id}:delete`];
               const deleteConfirmKey = `external-node-delete:${node.id}`;
-              const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
+              const confirmingDelete = isArmed(deleteConfirmKey);
               return (
                 <Table.Row key={node.id} onDoubleClick={() => openEditNode(node)} className="cursor-pointer">
                   <Table.Cell className="text-center">
@@ -2200,12 +2184,12 @@ function SubscriptionPage() {
                         variant={confirmingDelete ? 'destructive' : 'secondary-destructive'}
                         aria-label={confirmingDelete ? `再次确认删除 ${node.name}` : `删除 ${node.name}`}
                         title={confirmingDelete ? '再次点击确认删除' : `删除 ${node.name}`}
-                        disabled={deleting}
+                        loading={deleting}
                         onClick={(event) => {
                           event.stopPropagation();
                           deleteNode(node);
                         }}
-                        icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                        icon={<Trash className="h-3.5 w-3.5" />}
                       />
                     </div>
                   </Table.Cell>
@@ -2224,12 +2208,10 @@ function SubscriptionPage() {
   const renderInstanceManagement = () => (
     <SectionCard
       title={`Linux 主机 (${servers.length})`}
-      className="min-h-0"
       bodyPadding="none"
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
       actions={<Button size="sm" variant="primary" loading={saving} disabled={selectedRuntimeHosts.size === 0} onClick={() => deployProxyRuntime([...selectedRuntimeHosts])}><Plus className="h-3.5 w-3.5" />批量部署程序 ({selectedRuntimeHosts.size})</Button>}
     >
-      <DataTableFrame variant="embedded" className="min-h-[18rem] overflow-auto">
+      <DataTableFrame variant="embedded">
         <AppTable tableId="runtime-hosts" columns={RUNTIME_HOST_COLUMNS} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
           <Table.Header sticky variant="compact">
             <Table.Row>
@@ -2260,9 +2242,9 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><div className="mx-auto flex w-[64px] items-center justify-center gap-1.5">{countryCode && <CountryFlag preferSvg countryCode={countryCode} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}<span className="truncate font-semibold uppercase text-kumo-strong" title={server.location || locationLabel}>{locationLabel}</span></div></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-semibold tabular-nums text-kumo-strong">{formatInstanceUptime(server.uptime)}</span></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
-					<Table.Cell className="text-center"><div className="flex min-w-0 flex-nowrap items-center justify-center gap-2 px-2">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
-					<Table.Cell className="text-center"><div className="flex flex-nowrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="flex w-full flex-nowrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
+					<Table.Cell className="text-center"><div className="flex min-w-0 flex-nowrap items-center justify-center gap-2 px-2">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'} title={tunnel.apply_status === 'disconnected' && tunnel.last_error ? tunnel.last_error : undefined}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status === 'disconnected' ? '已断开' : tunnel.apply_status}</Badge>}</div></Table.Cell>
+					<Table.Cell className="text-center"><div className="flex flex-nowrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : node.protocol === 'socks' ? 'SOCKS5' : node.protocol === 'http' ? 'HTTP' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex w-full flex-nowrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isArmed(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isArmed(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isArmed(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isArmed(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}
@@ -2275,16 +2257,62 @@ function SubscriptionPage() {
 
   const renderTunnelControls = () => (
     <LayerCard className="mb-3 overflow-hidden rounded-lg border border-kumo-line bg-kumo-base p-0 shadow-none ring-0">
-      <LayerCard.Primary className="flex min-h-12 flex-col gap-2 px-3 py-2 sm:!flex-row sm:items-center">
-        <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:shrink-0">
-          <div className="text-sm font-semibold text-kumo-strong">Tunnel 与优选地址</div>
-          <Button className="shrink-0 sm:hidden" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理</Button>
+      <LayerCard.Secondary className="flex min-h-12 items-center justify-between gap-3 px-3 sm:px-4">
+        <div className="text-sm font-semibold text-kumo-strong">Tunnel 与优选地址</div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button className="sm:hidden" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理</Button>
+          <Button className="hidden sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />优选地址</Button>
         </div>
-        {(managedTunnels.length > 0 || preferredAddresses.length > 0) && <div className="flex w-full min-w-0 flex-nowrap items-center gap-3 overflow-x-auto py-0.5 overscroll-x-contain whitespace-nowrap touch-pan-x scrollbar-thin sm:flex-1">
-          {managedTunnels.map((item) => <span key={item.server_id} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-kumo-strong"><span className={`h-2 w-2 rounded-full ${item.apply_status === 'running' ? 'bg-kumo-success' : item.apply_status === 'failed' ? 'bg-kumo-danger' : 'bg-kumo-warning'}`} />{item.server_name} · <span className="font-mono text-kumo-subtle">{item.hostname}</span></span>)}
-          {preferredAddresses.map((item) => <span key={item.id} className="shrink-0 font-mono text-xs text-kumo-subtle">{item.name} · {item.address}:{item.port}</span>)}
-        </div>}
-        <Button className="ml-auto hidden shrink-0 sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />优选地址</Button>
+      </LayerCard.Secondary>
+      <LayerCard.Primary className="px-3 py-2.5 sm:px-4">
+        {managedTunnels.length > 0 || preferredAddresses.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {managedTunnels.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span className="text-xs font-semibold text-kumo-subtle">Tunnel</span>
+                {managedTunnels.map((item) => {
+                  const meta = tunnelStatusMeta(item.apply_status);
+                  return (
+                    <span
+                      key={item.server_id}
+                      className="cursor-pointer"
+                      title={item.last_error ? `${item.last_error}；${item.hostname}（点击复制）` : `${item.hostname}（点击复制）`}
+                      onClick={() => copyText(item.hostname, `已复制 ${item.server_name} 的 Tunnel 地址`)}
+                    >
+                      <Badge variant="secondary" className="gap-1.5 !text-xs">
+                        <Badge variant={meta.variant} appearance="dot">{meta.label}</Badge>
+                        <span className="font-semibold">{item.server_name}</span>
+                        <Copy className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                      </Badge>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {preferredAddresses.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span className="text-xs font-semibold text-kumo-subtle">优选地址</span>
+                {preferredAddresses.map((item) => (
+                  <span
+                    key={item.id}
+                    className={`cursor-pointer ${item.enabled === false ? 'opacity-50' : ''}`}
+                    title={item.last_error ? `${item.last_error}；${item.address}:${item.port}（点击复制）` : `${item.address}:${item.port}（点击复制）`}
+                    onClick={() => copyText(`${item.address}:${item.port}`, `已复制 ${item.name} 的地址`)}
+                  >
+                    <Badge variant="secondary" className="gap-1.5 !text-xs">
+                      <span className={`font-semibold ${item.enabled === false ? 'text-kumo-subtle' : ''}`}>{item.name}</span>
+                      <Copy className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                      {item.last_status === 'healthy' && <Badge variant="success" appearance="dot">{item.last_latency_ms > 0 ? `${item.last_latency_ms}ms` : '正常'}</Badge>}
+                      {item.last_status === 'failed' && <Badge variant="error" appearance="dot">不可达</Badge>}
+                    </Badge>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-kumo-subtle">暂无 Tunnel 与优选地址</span>
+        )}
       </LayerCard.Primary>
     </LayerCard>
   );
@@ -2397,7 +2425,7 @@ function SubscriptionPage() {
                 <Button size="sm" variant="secondary" onClick={() => setDefaultTemplate(tpl)} disabled={tpl.valid === false}>默认</Button>
                 <Button size="sm" shape="square" variant="secondary" onClick={() => openCloneTemplate(tpl)} aria-label="复制模板" title="复制模板" icon={<Copy className="h-3.5 w-3.5" />} />
                 <Button size="sm" shape="square" variant="secondary" onClick={() => openEditTemplate(tpl)} aria-label="编辑模板" title="编辑模板" icon={<Edit className="h-3.5 w-3.5" />} />
-                <Button size="sm" variant="secondary-destructive" onClick={() => deleteTemplate(tpl)} disabled={tpl.builtin}><Trash className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant={isArmed(`template-delete:${tpl.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTemplate(tpl)} disabled={tpl.builtin}><Trash className="h-3.5 w-3.5" /></Button>
               </div>
             </LayerCard.Secondary>
             <LayerCard.Primary>
@@ -2467,22 +2495,20 @@ function SubscriptionPage() {
 
   return (
     <PageStack>
-      <PageToolbar>
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
-          className="w-fit max-w-full min-w-0"
-          listClassName="max-w-full overflow-x-auto whitespace-nowrap scrollbar-thin"
           tabs={[
-            { value: 'instances', label: '实例管理' },
-            { value: 'nodes', label: '节点管理' },
-            { value: 'plans', label: '套餐管理' },
-            { value: 'subscriptions', label: '订阅管理' },
-            { value: 'templates', label: '模板管理' },
+            { value: 'instances', label: <span className="inline-flex items-center gap-1.5"><Server className="h-3.5 w-3.5" />实例管理</span> },
+            { value: 'nodes', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />节点管理</span> },
+            { value: 'plans', label: <span className="inline-flex items-center gap-1.5"><Box className="h-3.5 w-3.5" />套餐管理</span> },
+            { value: 'subscriptions', label: <span className="inline-flex items-center gap-1.5"><Plug className="h-3.5 w-3.5" />订阅管理</span> },
+            { value: 'templates', label: <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" />模板管理</span> },
           ]}
         />
-      </PageToolbar>
+      </div>
 
       <div className="min-w-0">
         {loading && servers.length === 0 && nodes.length === 0 && plans.length === 0 && subscriptions.length === 0 ? renderNodesSkeleton() : (
@@ -2535,11 +2561,12 @@ function SubscriptionPage() {
                 </div>
               </div>
             </div>}
-            {!editingInternalNodeId && <Select size="sm" label="节点协议" value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value) }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }]} />}
+            {!editingInternalNodeId && <Select size="sm" label="节点协议" value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value), access_mode: String(value) === 'socks' || String(value) === 'http' ? 'direct' : prev.access_mode }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }, { value: 'socks', label: 'SOCKS5' }, { value: 'http', label: 'HTTP' }]} />}
             <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空按实例名生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
             {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
             {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 信息自动生成。</div>}
-            {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
+            {!editingInternalNodeId && (internalNodeForm.protocol === 'socks' || internalNodeForm.protocol === 'http') && <div className="flex min-h-8 items-center rounded-md border border-kumo-info/25 bg-kumo-info/10 px-3 text-xs text-kumo-subtle">明文字段：SOCKS/HTTP 仅直连，无 TLS 加密。</div>}
+            {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} disabled={internalNodeForm.protocol === 'socks' || internalNodeForm.protocol === 'http'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
             {internalNodeForm.access_mode === 'cloudflare_tunnel' && <Select size="sm" label="优选地址" value={internalNodeForm.preferred_address_id || ''} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, preferred_address_id: String(value) }))} items={[{ value: '', label: '继承默认地址' }, ...preferredAddresses.map((item) => ({ value: item.id, label: `${item.name} · ${item.address}` }))]} />}
             <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2"><Switch size="sm" label="稳定节点" controlFirst={false} checked={!!internalNodeForm.stable} onCheckedChange={(checked) => setInternalNodeForm((prev) => ({ ...prev, stable: checked }))} /></div>
           </div>
@@ -2557,10 +2584,63 @@ function SubscriptionPage() {
 
 		<Dialog.Root open={preferredModalOpen} onOpenChange={setPreferredModalOpen}>
 			<Dialog size="lg" className="!w-[min(56rem,calc(100vw-1rem))] !max-w-[min(56rem,calc(100vw-1rem))] overflow-hidden p-0">
-				<div className="border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Dialog.Title>优选地址</Dialog.Title></div>
-				<div className="grid min-w-0 items-end gap-3 p-3 sm:grid-cols-2 sm:p-5 lg:grid-cols-[minmax(10rem,1fr)_minmax(14rem,1.4fr)_9rem_7rem]"><Input size="sm" label="名称" value={preferredForm.name} onChange={(event) => setPreferredForm((prev) => ({ ...prev, name: event.target.value }))} /><Input size="sm" label="域名或 IP" placeholder="saas.sin.fan" value={preferredForm.address} onChange={(event) => setPreferredForm((prev) => ({ ...prev, address: event.target.value }))} /><Input size="sm" label="端口" type="number" value={preferredForm.port} onChange={(event) => setPreferredForm((prev) => ({ ...prev, port: Number(event.target.value) || 443 }))} /><div className="min-w-0"><Label className="block h-5">全局默认</Label><div className="mt-2 flex h-[26px] items-center"><Switch size="sm" aria-label="设为全局默认" checked={!!preferredForm.is_default} onCheckedChange={(checked) => setPreferredForm((prev) => ({ ...prev, is_default: checked }))} /></div></div></div>
-				<div className="max-h-48 overflow-x-auto overflow-y-auto border-t border-kumo-line overscroll-x-contain touch-pan-x scrollbar-thin"><AppTable tableId="preferred-addresses" columns={PREFERRED_ADDRESS_COLUMNS}><Table.Header><Table.Row><Table.Head>名称</Table.Head><Table.Head>地址</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header><Table.Body>{preferredAddresses.map((item) => <Table.Row key={item.id}><Table.Cell>{item.name}</Table.Cell><Table.Cell className="font-mono text-xs">{item.address}:{item.port}</Table.Cell><Table.Cell className="text-center"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} /></Table.Cell></Table.Row>)}</Table.Body></AppTable></div>
-				<div className="flex justify-end gap-2 border-t border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(false)}>关闭</Button><Button size="sm" variant="primary" onClick={savePreferredAddress}><Save className="h-3.5 w-3.5" />保存地址</Button></div>
+				<div className="flex min-h-12 items-center justify-between gap-3 border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-3.5">
+					<Dialog.Title>优选地址</Dialog.Title>
+					<div className="flex shrink-0 items-center gap-2">
+						<Badge variant="neutral">{preferredAddresses.length} 个地址</Badge>
+						<Dialog.Close
+							aria-label="关闭"
+							render={(props) => (
+								<Button
+									{...props}
+									type="button"
+									variant="secondary"
+									shape="square"
+									size="sm"
+									icon={<X className="h-3.5 w-3.5" />}
+									aria-label="关闭"
+								/>
+							)}
+						/>
+					</div>
+				</div>
+				<div className="grid min-h-0 min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+					<div className="flex min-w-0 flex-col gap-3 border-b border-kumo-line p-3 sm:p-4 lg:border-b-0 lg:border-r">
+						<div className="text-xs font-semibold text-kumo-strong">添加新地址</div>
+						<Input size="sm" label="名称" value={preferredForm.name} onChange={(event) => setPreferredForm((prev) => ({ ...prev, name: event.target.value }))} />
+						<Input size="sm" label="域名或 IP" placeholder="saas.sin.fan" value={preferredForm.address} onChange={(event) => setPreferredForm((prev) => ({ ...prev, address: event.target.value }))} />
+						<Input size="sm" label="端口" type="number" value={preferredForm.port} onChange={(event) => setPreferredForm((prev) => ({ ...prev, port: Number(event.target.value) || 443 }))} />
+						<div className="flex min-w-0 items-center justify-between gap-3">
+							<Label className="min-w-0 truncate text-xs text-kumo-subtle">保存后设为全局默认</Label>
+							<Switch size="sm" aria-label="保存后设为全局默认" checked={!!preferredForm.is_default} onCheckedChange={(checked) => setPreferredForm((prev) => ({ ...prev, is_default: checked }))} />
+						</div>
+						<Button size="sm" variant="primary" className="self-end" onClick={savePreferredAddress}><Save className="h-3.5 w-3.5" />添加地址</Button>
+					</div>
+					<div className="flex min-h-0 min-w-0 flex-col">
+						<div className="px-3 pt-3 sm:px-4"><div className="text-xs font-semibold text-kumo-strong">地址列表</div></div>
+						<div className="max-h-64 min-h-0 overflow-y-auto p-2 scrollbar-thin">
+							{preferredAddresses.length === 0 ? (
+								<div className="p-6 text-center text-xs text-kumo-subtle">暂无优选地址，请先添加</div>
+							) : [...preferredAddresses].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.created_at || '').localeCompare(String(b.created_at || ''))).map((item) => (
+<div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 ${item.is_default ? 'bg-kumo-recessed/60' : 'hover:bg-kumo-recessed/40'}`}>
+									<div className="min-w-0 flex-1">
+										<div className="flex min-w-0 items-center gap-1.5">
+											<span className={`truncate text-xs font-semibold ${item.enabled === false ? 'text-kumo-subtle' : 'text-kumo-strong'}`}>{item.name}</span>
+										</div>
+										<div className="truncate font-mono text-[11px] text-kumo-subtle">{item.address}:{item.port}</div>
+									</div>
+									<div className="flex shrink-0 items-center gap-1">
+										{!item.is_default && <Button size="sm" variant="secondary" onClick={() => setPreferredDefault(item)} icon={<Star className="h-3.5 w-3.5" />}>默认</Button>}
+										<Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} />
+									</div>
+								</div>
+							))}
+						</div>
+					</div>
+				</div>
+				<div className="flex justify-end gap-2 border-t border-kumo-line px-3 py-3 sm:px-5 sm:py-4">
+					<Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(false)}>关闭</Button>
+				</div>
 			</Dialog>
 		</Dialog.Root>
 

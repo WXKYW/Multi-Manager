@@ -1703,6 +1703,32 @@ func TestManagedNodesUseSubscriptionSpecificCredentials(t *testing.T) {
 	}
 }
 
+func TestBindSubscriptionCredentialSocksAndHTTPUseUserPassword(t *testing.T) {
+	sub := Subscription{
+		VLESSUUID:         "00000000-0000-4000-8000-000000000099",
+		Hysteria2Password: "hy2-password",
+	}
+	cases := []struct {
+		protocol string
+		raw      string
+		wantUser string
+		wantPass string
+	}{
+		{"socks", "socks://bootstrap:bootstrap@edge.example.com:45654#NODE", "00000000-0000-4000-8000-000000000099", "hy2-password"},
+		{"http", "http://bootstrap:bootstrap@edge.example.com:45654#NODE", "00000000-0000-4000-8000-000000000099", "hy2-password"},
+	}
+	for _, tc := range cases {
+		got := bindSubscriptionCredential(tc.raw, tc.protocol, sub)
+		if !strings.Contains(got, tc.wantUser+":"+tc.wantPass+"@edge.example.com") {
+			t.Fatalf("%s bound URI missing credential: %s", tc.protocol, got)
+		}
+	}
+	rawVless := bindSubscriptionCredential("vless://bootstrap@edge.example.com:45654#NODE", "vless-reality", sub)
+	if !strings.Contains(rawVless, sub.VLESSUUID+"@edge.example.com") {
+		t.Fatalf("vless bound URI missing uuid: %s", rawVless)
+	}
+}
+
 func TestSubscriptionUsageReportsAreIdempotentAndCycleScoped(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))

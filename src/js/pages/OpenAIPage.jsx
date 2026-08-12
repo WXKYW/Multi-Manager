@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { CalendarDotsIcon } from '@phosphor-icons/react';
+import { ArrowDown, ArrowUp, CalendarDotsIcon } from '@phosphor-icons/react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -10,27 +10,57 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Autocomplete } from '@cloudflare/kumo/components/autocomplete';
 import {
+  ChartLegend,
   ClipboardText,
+  ChartPalette,
+  Collapsible,
+  Badge,
   DatePicker,
   Label,
   LayerCard,
   Loader,
-  Meter,
   Pagination,
   Popover,
   Table,
   Tabs,
+  Toolbar,
 } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { formatDateTime } from '../modules/utils.js';
 import { renderMarkdown } from '../modules/markdown.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
+import useStore from '../store.js';
+import * as echarts from 'echarts/core';
+import { BarChart } from 'echarts/charts';
+import {
+  AriaComponent,
+  AxisPointerComponent,
+  GridComponent,
+  TooltipComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+echarts.use([
+  BarChart,
+  AxisPointerComponent,
+  GridComponent,
+  TooltipComponent,
+  AriaComponent,
+  CanvasRenderer,
+]);
+const ENDPOINT_PROTOCOL_OPTIONS = [
+  { value: 'auto', label: '自动（HTTP/2 优先）' },
+  { value: 'http1', label: 'HTTP/1.1' },
+  { value: 'h2', label: 'HTTP/2' },
+];
+// 大代理池（文件批量导入可达数千条）在表单/管理弹窗中只预览前 N 条，避免渲染卡顿。
+const PROXY_PREVIEW_LIMIT = 120;
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
-  MAX_BATCH_MODEL_HEALTH_TARGETS,
+  DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
   countModelHealthResults,
   endpointModelIds,
-  limitModelHealthTargets,
   modelHealthKey,
   modelHealthTargets,
   normalizeModelHealthRecord,
@@ -38,10 +68,11 @@ import {
 } from '../modules/openaiModelHealth.js';
 import {
   PageStack,
-  PageToolbar,
   AppCard,
-  InlineStatusPill,
+  StatusBadge,
   EmptyState,
+  stickyTabsBaseClass,
+  TabBarOverflowActions,
   iconButtonIconClass,
   actionIconClass,
   cx,
@@ -68,16 +99,102 @@ import {
   Check,
   Paperclip,
   Brain,
-  Sliders,
   Settings as SettingsIcon,
   Copy,
+  Cpu,
   AlertTriangle,
   Key,
   Reboot,
+  Play,
+  Clock,
+  TrendingUp,
+  LogList,
+  Globe,
+  Sliders,
+  ChevronDown,
 } from '../components/Icons.jsx';
 
-function createHealthCheckProgress(total = 0, running = false) {
-  return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
+// 从 Kumo CSS 变量读取主题色，供 ECharts 等需要真实颜色值的场景使用。
+const kumoHex = name => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+// 大数字压缩为「万 / 亿」单位；小数位默认 2 位。
+const formatCompact = (value, decimals = 2) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  const abs = Math.abs(num);
+  if (abs >= 1e8) return `${(num / 1e8).toFixed(decimals)}亿`;
+  if (abs >= 1e4) return `${(num / 1e4).toFixed(decimals)}万`;
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(decimals);
+};
+
+// 词元统一以百万（M）为单位，保留 2 位小数。
+const formatTokensM = value => `${(Number(value) / 1e6).toFixed(2)}M`;
+
+function createHealthCheckProgress(total = 0, running = false) {  return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
+}
+
+// parseProxyEntry 解析代理 URL 为可读摘要与完整值：
+// 返回 { label, full, host, ip }。label 为友好名称（优先 # 后的节点名），
+// ip 为纯主机地址（不含端口与用户信息），host 为 host:port 或 user:pass@host:port。
+function parseProxyEntry(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return { label: '', full: value, host: '', ip: '' };
+  let label = value;
+  let host = '';
+  let ip = '';
+  try {
+    let rest = value;
+    let hash = '';
+    const hashIndex = rest.indexOf('#');
+    if (hashIndex !== -1) {
+      hash = rest.slice(hashIndex);
+      rest = rest.slice(0, hashIndex);
+    }
+    // 去掉 scheme://，兼容 socks/http/https 等自定义协议（new URL 对 socks 不解析 host）。
+    const schemeEnd = rest.indexOf('://');
+    if (schemeEnd !== -1) rest = rest.slice(schemeEnd + 3);
+    // 去掉 userinfo，得到 host:port。
+    const atIndex = rest.lastIndexOf('@');
+    const authority = atIndex !== -1 ? rest.slice(atIndex + 1) : rest;
+    host = authority;
+    // 去掉端口得到纯 IP/主机名。
+    ip = authority.replace(/:\d+$/, '');
+    // # 后的 fragment 通常是节点名。
+    const fallback = hash ? decodeURIComponent(hash.slice(1)) : '';
+    label = fallback || authority || value;
+  } catch {
+    // 解析失败时展示原文。
+  }
+  return { label, full: value, host, ip };
+}
+
+// 自绘 ECharts 柱状时间桶：每个桶(小时/天/周)一根柱，类目轴标签 = 桶名，避免时间轴重复标签。
+
+function activeModelIdsForEndpoint(endpoint) {
+  const disabled = Array.isArray(endpoint?.disabledModels) ? endpoint.disabledModels : [];
+  return Array.from(
+    new Set(
+      (Array.isArray(endpoint?.models) ? endpoint.models : [])
+        .map(model => (typeof model === 'string' ? model.trim() : (model?.id || '').trim()))
+        .filter(id => id && !disabled.includes(id))
+    )
+  );
+}
+
+// 按请求结果给 pill 上色：成功且有输出=绿，无输出=黄，失败=红。
+function resultTone(statusCode, completionTokens) {
+  const status = Number(statusCode) || 0;
+  if (status >= 400) return 'danger';
+  if (!(Number(completionTokens) > 0)) return 'warning';
+  return 'success';
 }
 
 const GATEWAY_EXPIRY_HOURS = Array.from({ length: 24 }, (_, hour) => {
@@ -104,33 +221,10 @@ function parseLocalDateTime(value) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function GatewaySection({
-  title,
-  description,
-  icon,
-  actions,
-  className = '',
-  bodyClassName = '',
-  children,
-}) {
-  return (
-    <section className={cx('flex flex-col gap-3', className)}>
-      <header className="flex min-h-10 flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <h2 className="flex items-center gap-2 font-semibold text-kumo-strong">
-            {icon}
-            <span>{title}</span>
-          </h2>
-          {description && <p className="text-kumo-subtle">{description}</p>}
-        </div>
-        {actions && <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>}
-      </header>
-      <div className={bodyClassName}>{children}</div>
-    </section>
-  );
-}
-
 function OpenAIPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
+  const { theme } = useStore();
+  const isDarkMode = theme === 'dark';
   const gatewayOrigin = useMemo(() => {
     if (typeof window === 'undefined') return 'http://localhost:3000';
     const url = new URL(window.location.origin);
@@ -139,14 +233,22 @@ function OpenAIPage() {
   }, []);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState('endpoints'); // 'endpoints' | 'keys' | 'analytics'
+  const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'endpoints' | 'keys' | 'logs'
 
   // Gateway Analytics States
   const [analyticsDays, setAnalyticsDays] = useState(7);
+  const [analyticsGranularity, setAnalyticsGranularity] = useState(() => {
+    const stored = localStorage.getItem('openai_analytics_granularity');
+    return ['hour', 'day', 'week'].includes(stored) ? stored : 'day';
+  });
   const [analyticsSummary, setAnalyticsSummary] = useState({
     totalRequests: 0,
     avgLatency: 0,
     totalTokens: 0,
+    totalCachedTokens: 0,
+    cachedRatio: 0,
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
     errorRate: 0,
   });
   const [analyticsCharts, setAnalyticsCharts] = useState({
@@ -154,27 +256,37 @@ function OpenAIPage() {
   });
   const [analyticsLogs, setAnalyticsLogs] = useState([]);
   const [analyticsPage, setAnalyticsPage] = useState(1);
-  const [analyticsPageSize, setAnalyticsPageSize] = useState(20);
+  const [analyticsPageSize, setAnalyticsPageSize] = useState(() => {
+    const stored = Number(localStorage.getItem('openai_analytics_page_size'));
+    return [10, 20, 50, 100].includes(stored) ? stored : 20;
+  });
   const [analyticsTotal, setAnalyticsTotal] = useState(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const getAuthHeaders = useCallback(() => {
     return {
       'Content-Type': 'application/json',
     };
   }, []);
 
-  const fetchAnalytics = useCallback(async () => {
-    setAnalyticsLoading(true);
+  const fetchAnalytics = useCallback(async ({ dashboardOnly = false } = {}) => {
+    // dashboardOnly（实时/轮询刷新看板）静默更新，避免已展示的卡片闪烁。
+    if (!dashboardOnly) setAnalyticsLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [sumRes, chartsRes, logsRes] = await Promise.all([
-        fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
-        fetch(`/api/openai/analytics/charts?days=${analyticsDays}`, { headers }),
-        fetch(
-          `/api/openai/analytics/logs?days=${analyticsDays}&page=${analyticsPage}&pageSize=${analyticsPageSize}`,
-          { headers }
-        ),
-      ]);
+      const [sumRes, chartsRes, logsRes] = dashboardOnly
+        ? await Promise.all([
+            fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
+            fetch(`/api/openai/analytics/charts?days=${analyticsDays}&granularity=${analyticsGranularity}`, { headers }),
+          ])
+        : await Promise.all([
+            fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
+            fetch(`/api/openai/analytics/charts?days=${analyticsDays}&granularity=${analyticsGranularity}`, { headers }),
+            fetch(
+              `/api/openai/analytics/logs?days=${analyticsDays}&page=${analyticsPage}&pageSize=${analyticsPageSize}`,
+              { headers }
+            ),
+          ]);
 
       if (sumRes.ok) {
         const data = await sumRes.json();
@@ -184,7 +296,7 @@ function OpenAIPage() {
         const data = await chartsRes.json();
         setAnalyticsCharts(data);
       }
-      if (logsRes.ok) {
+      if (logsRes?.ok) {
         const data = await logsRes.json();
         setAnalyticsLogs(data.records || []);
         setAnalyticsTotal(data.total || 0);
@@ -193,15 +305,77 @@ function OpenAIPage() {
       console.error('Failed to fetch analytics:', err);
       toast.error('获取分析数据失败');
     } finally {
-      setAnalyticsLoading(false);
+      if (!dashboardOnly) setAnalyticsLoading(false);
     }
-  }, [analyticsDays, analyticsPage, analyticsPageSize, getAuthHeaders]);
+  }, [analyticsDays, analyticsGranularity, analyticsPage, analyticsPageSize, getAuthHeaders]);
 
   useEffect(() => {
-    if (activeTab === 'analytics') {
+    if (activeTab === 'analytics' || activeTab === 'logs') {
       fetchAnalytics();
     }
   }, [activeTab, fetchAnalytics]);
+
+  // 网关日志与数据看板自动刷新（15 秒一次），页面隐藏或离开相关 Tab 时暂停。
+  useEffect(() => {
+    if (!logsAutoRefresh || (activeTab !== 'analytics' && activeTab !== 'logs')) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      if (activeTab === 'analytics') {
+        fetchAnalytics({ dashboardOnly: true });
+      } else {
+        fetchAnalytics();
+      }
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [logsAutoRefresh, activeTab, fetchAnalytics]);
+
+  // 网关实时推送（SSE）：后端出现请求立即插入日志列表顶部；数据看板则节流刷新汇总与图表。
+  useEffect(() => {
+    if (activeTab !== 'analytics' && activeTab !== 'logs') return undefined;
+    let source = null;
+    let dashboardRefreshTimer = null;
+    try {
+      source = new EventSource('/api/openai/analytics/stream');
+      source.addEventListener('log', event => {
+        try {
+          const log = JSON.parse(event.data);
+          if (activeTab === 'logs') {
+            setAnalyticsLogs(prev => {
+              if (!prev || prev.length === 0) return [log, ...prev];
+              const existing = new Set(prev.map(item => `${item.timestamp}:${item.model}:${item.clientIp ?? ''}:${item.latencyMs ?? ''}`));
+              const key = `${log.timestamp}:${log.model ?? ''}:${log.clientIp ?? ''}:${log.latencyMs ?? ''}`;
+              if (existing.has(key)) return prev;
+              return [log, ...prev].slice(0, analyticsPageSize);
+            });
+          } else {
+            if (dashboardRefreshTimer) return;
+            dashboardRefreshTimer = window.setTimeout(() => {
+              dashboardRefreshTimer = null;
+              fetchAnalytics({ dashboardOnly: true });
+            }, 800);
+          }
+        } catch {
+          // 忽略无法解析的事件
+        }
+      });
+    } catch {
+      source = null;
+    }
+    return () => {
+      if (source) source.close();
+      if (dashboardRefreshTimer) window.clearTimeout(dashboardRefreshTimer);
+    };
+  }, [activeTab, analyticsPageSize, fetchAnalytics]);
+
+  // 记住日志分页数量，下次进入自动沿用。
+  useEffect(() => {
+    localStorage.setItem('openai_analytics_page_size', String(analyticsPageSize));
+  }, [analyticsPageSize]);
+
+  // 记住数据看板的时间粒度（小时/天/周）。
+  useEffect(() => {
+    localStorage.setItem('openai_analytics_granularity', analyticsGranularity);
+  }, [analyticsGranularity]);
 
   const chatStorage = useMemo(() => {
     const personasKey = 'openai_chat_personas_v2';
@@ -265,6 +439,8 @@ function OpenAIPage() {
   const [endpointsRefreshing, setEndpointsRefreshing] = useState(false);
   const [endpointToggleLoading, setEndpointToggleLoading] = useState({});
   const [selectedEndpointId, setSelectedEndpointId] = useState('');
+  const [draggedEndpointId, setDraggedEndpointId] = useState(null);
+  const [endpointReorderSaving, setEndpointReorderSaving] = useState(false);
   const [endpointFormOpen, setEndpointFormOpen] = useState(false);
   const [editingEndpoint, setEditingEndpoint] = useState(null);
   const [endpointForm, setEndpointForm] = useState({
@@ -272,6 +448,12 @@ function OpenAIPage() {
     baseUrl: '',
     apiKey: '',
     notes: '',
+    headers: [],
+    proxyPool: [],
+    autoSwitch: false,
+    proxyEnabled: false,
+    forceProxy: false,
+    protocol: 'auto',
   });
   const [endpointFormError, setEndpointFormError] = useState('');
   const [endpointSaving, setEndpointSaving] = useState(false);
@@ -280,7 +462,16 @@ function OpenAIPage() {
   const [gatewayKeyToggleLoading, setGatewayKeyToggleLoading] = useState({});
   const [gatewayKeyDialogOpen, setGatewayKeyDialogOpen] = useState(false);
   const [editingGatewayKey, setEditingGatewayKey] = useState(null);
-  const [gatewayKeyForm, setGatewayKeyForm] = useState({ name: '', expiresAt: '' });
+  const [gatewayKeyForm, setGatewayKeyForm] = useState({
+    name: '',
+    expiresAt: '',
+    allowedModels: [],
+    allowedEndpoints: [],
+    maxTokensQuota: '',
+  });
+  const [gatewayKeyModelInput, setGatewayKeyModelInput] = useState('');
+  const [gatewayKeyEndpointInput, setGatewayKeyEndpointInput] = useState('');
+  const [gatewayKeyAdvancedOpen, setGatewayKeyAdvancedOpen] = useState(false);
   const [gatewayKeyFormError, setGatewayKeyFormError] = useState('');
   const [gatewayKeySaving, setGatewayKeySaving] = useState(false);
   const [newGatewayKey, setNewGatewayKey] = useState(null);
@@ -313,6 +504,62 @@ function OpenAIPage() {
     loadEndpoints();
   }, [loadEndpoints]);
 
+  const endpointImportInputRef = useRef(null);
+  const [endpointImporting, setEndpointImporting] = useState(false);
+  const [endpointExporting, setEndpointExporting] = useState(false);
+
+  const exportEndpoints = async () => {
+    setEndpointExporting(true);
+    try {
+      const response = await fetch('/api/openai/export', { headers: getAuthHeaders() });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导出端点失败');
+      const list = Array.isArray(payload.endpoints) ? payload.endpoints : [];
+      if (list.length === 0) { toast.warning('暂无端点可导出'); return; }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `openai-endpoints-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${list.length} 个端点（包含 API Key，请注意保管）`);
+    } catch (error) {
+      toast.error(error.message || '导出端点失败');
+    } finally {
+      setEndpointExporting(false);
+    }
+  };
+
+  const importEndpointsFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setEndpointImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const list = Array.isArray(data) ? data : (data.endpoints || []);
+      if (list.length === 0) throw new Error('文件中没有端点数据');
+      if (!(await dialog.confirm(`确认导入 ${list.length} 个端点？已存在相同 baseUrl 的端点会自动跳过。`))) return;
+      const response = await fetch('/api/openai/import', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoints: list, overwrite: false }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导入端点失败');
+      await loadEndpoints(true);
+      toast.success(`导入完成：新增 ${payload.imported ?? 0} 个，跳过 ${payload.skipped ?? 0} 个`);
+    } catch (error) {
+      toast.error(error.message || '导入端点失败');
+    } finally {
+      setEndpointImporting(false);
+    }
+  };
+
   const loadGatewayKeys = useCallback(async () => {
     setGatewayKeysLoading(true);
     try {
@@ -337,6 +584,265 @@ function OpenAIPage() {
     () => endpoints.find(endpoint => endpoint.id === selectedEndpointId) || endpoints[0] || null,
     [endpoints, selectedEndpointId]
   );
+
+  // 实际启用（未被禁用）的模型总数，跨启用端点去重。
+  const enabledModelCount = useMemo(() => {
+    const ids = new Set();
+    endpoints
+      .filter(endpoint => endpoint.enabled)
+      .forEach(endpoint => activeModelIdsForEndpoint(endpoint).forEach(id => ids.add(id)));
+    return ids.size;
+  }, [endpoints]);
+
+  // 时间序列（小时/天/周粒度）：为每根柱提供独立可对齐的类目轴。
+// 后端每个桶返回 day(bucket label) + count/tokens/avgLatency/errors，仅用于柱状展示。
+function TrendBarChart({
+  labels,
+  values,
+  color,
+  isDarkMode,
+  formatValue = value => (Number.isFinite(Number(value)) ? String(Number(value)) : String(value)),
+  formatAxis = formatValue,
+}) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !labels || labels.length === 0) return;
+    const chart = echarts.init(el);
+    chartRef.current = chart;
+    const axisColor = kumoHex('--color-kumo-contrast');
+    const gridColor = kumoHex('--color-kumo-line');
+    chart.setOption({
+      grid: { left: 8, right: 12, top: 10, bottom: 0, containLabel: true },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        // 挂到 body：LayerCard 自带 overflow-hidden，悬浮框默认渲染在图表
+        // 容器内会被卡片裁剪遮挡。
+        appendTo: 'body',
+        backgroundColor: kumoHex('--color-kumo-base'),
+        textStyle: { color: axisColor, fontSize: 11 },
+        valueFormatter: formatValue,
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisTick: { show: false },
+        axisLabel: { color: axisColor, fontSize: 10, hideOverlap: true },
+      },
+      yAxis: {
+        type: 'value',
+        splitLine: { lineStyle: { color: gridColor } },
+        axisLabel: { color: axisColor, fontSize: 10, formatter: formatAxis },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: values,
+          barMaxWidth: 26,
+          itemStyle: { color, borderRadius: [2, 2, 0, 0] },
+        },
+      ],
+    });
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, [labels, values, color, isDarkMode]);
+
+  return <div ref={containerRef} className="h-[168px] w-full" />;
+}
+
+// 全宽「模型 × 时间」折线趋势：类别轴（每桶唯一刻度），稀疏段断线成 Trend；
+// 顶部图例按调用次数降序，颜色与折线同一份映射，点击隔离/恢复。
+function ModelTrendChart({ labels, series, isDarkMode }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [hiddenSeries, setHiddenSeries] = useState({});
+
+  // 排序必须完全确定：调用次数降序、相同次数按模型名升序，避免图例顺序
+  // 随接口返回顺序（后端 map 迭代随机）漂移；颜色在排序后按固定位次分配，
+  // 保证同一模型始终同色。
+  const ordered = useMemo(() => {
+    const withMeta = (series || []).map(item => ({
+      model: item.model,
+      total: (item.data || []).reduce((sum, value) => sum + (Number(value) || 0), 0),
+      values: (item.data || []).map(value => Number(value) || 0),
+    }));
+    withMeta.sort((a, b) => b.total - a.total || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
+    return withMeta.map((item, index) => ({
+      ...item,
+      color: ChartPalette.categorical(index, isDarkMode),
+    }));
+  }, [series, isDarkMode]);
+
+  const visibleSeries = useMemo(
+    () => ordered.filter(item => !hiddenSeries[item.model]),
+    [ordered, hiddenSeries]
+  );
+
+  // 图表实例只在挂载时初始化一次；labels/系列的更新全部走 setOption，
+  // 否则 15 秒自动刷新带来的新数组引用会触发 dispose+重建，造成闪烁与交互状态丢失。
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const chart = echarts.init(el);
+    chartRef.current = chart;
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !labels || labels.length === 0) return;
+    const axisColor = kumoHex('--color-kumo-contrast');
+    const gridColor = kumoHex('--color-kumo-line');
+    chart.setOption(
+      {
+        grid: { left: 8, right: 12, top: 8, bottom: 0, containLabel: true },
+        tooltip: {
+          trigger: 'axis',
+          traceHigh: true,
+          // 挂到 body：LayerCard 自带 overflow-hidden，悬浮框默认渲染在图表
+          // 容器内会被卡片裁剪遮挡。
+          appendTo: 'body',
+          backgroundColor: kumoHex('--color-kumo-base'),
+          textStyle: { color: axisColor, fontSize: 11 },
+        },
+        xAxis: {
+          type: 'category',
+          data: labels,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: gridColor } },
+          axisTick: { show: false },
+          axisLabel: { color: axisColor, fontSize: 10, hideOverlap: true },
+        },
+        yAxis: {
+          type: 'value',
+          splitLine: { lineStyle: { color: gridColor } },
+          axisLabel: { color: axisColor, fontSize: 10 },
+        },
+        series: visibleSeries.map(item => ({
+          type: 'line',
+          name: item.model,
+          data: item.values,
+          smooth: true,
+          connectNulls: false,
+          showSymbol: true,
+          symbolSize: 4,
+          lineStyle: { width: 2, color: item.color },
+          itemStyle: { color: item.color },
+          areaStyle: { opacity: 0 },
+        })),
+      },
+      // replaceMerge：隐藏/恢复系列时按 name 精确替换，避免默认 merge 模式下
+      //「新 series 数组变短 → 按 index 合并」导致被隐藏的旧系列残留、颜色错位。
+      { replaceMerge: ['series'] }
+    );
+  }, [labels, visibleSeries, isDarkMode]);
+
+  const handleClick = name => {
+    setHiddenSeries(prev => {
+      const isIsolated = ordered.every(
+        item => (item.model === name ? !prev[item.model] : prev[item.model])
+      );
+      const next = {};
+      for (const item of ordered) {
+        next[item.model] = isIsolated ? false : item.model !== name;
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <div className="flex flex-nowrap gap-x-4 overflow-x-auto overscroll-x-contain px-1 pb-1 touch-pan-x scrollbar-thin">
+        {ordered.map(item => (
+          <ChartLegend.LargeItem
+            key={item.model}
+            name={item.model}
+            color={item.color}
+            value={item.total.toLocaleString()}
+            unit="次"
+            inactive={hiddenSeries[item.model] ?? false}
+            onClick={() => handleClick(item.model)}
+          />
+        ))}
+      </div>
+      <div ref={containerRef} className="h-[280px] w-full" />
+    </div>
+  );
+}
+
+const trendSeries = useMemo(() => {
+    const buckets = Array.isArray(analyticsCharts.daily) ? analyticsCharts.daily : [];
+    const build = (color, pick, name) => {
+      const labels = buckets.map(point => point.day || '');
+      const values = buckets.map(point => Number(pick(point)) || 0);
+      return { name, color, labels, values };
+    };
+    return {
+      requests: {
+        ...build(ChartPalette.categorical(0, isDarkMode), p => p.count, '请求数'),
+        formatValue: value => formatCompact(value, 0),
+        formatAxis: value => formatCompact(value, 0),
+      },
+      tokens: {
+        ...build(ChartPalette.categorical(1, isDarkMode), p => p.tokens, '词元 (M)'),
+        formatValue: formatTokensM,
+        formatAxis: value => `${Math.round(Number(value) / 1e6)}M`,
+      },
+      latency: {
+        ...build(ChartPalette.categorical(2, isDarkMode), p => p.avgLatency, '平均延迟 (s)'),
+        formatValue: value => `${(Number(value) / 1000).toFixed(2)} s`,
+        formatAxis: value => `${(Number(value) / 1000).toFixed(0)}`,
+      },
+      errorRate: {
+        ...build(
+          ChartPalette.categorical(3, isDarkMode),
+          p => (Number(p.count) > 0 ? ((Number(p.errors) || 0) / Number(p.count)) * 100 : 0),
+          '错误率 (%)'
+        ),
+        formatValue: value => `${Number(value).toFixed(2)}%`,
+        formatAxis: value => `${Number(value).toFixed(0)}%`,
+      },
+    };
+  }, [analyticsCharts, isDarkMode]);
+
+  // 全宽「模型调用趋势」数据：按后端 byModel / buckets 对齐。
+  const byModelTrend = useMemo(() => {
+    const daily = Array.isArray(analyticsCharts.daily) ? analyticsCharts.daily : [];
+    const labels =
+      Array.isArray(analyticsCharts.buckets) && analyticsCharts.buckets.length
+        ? analyticsCharts.buckets
+        : trendSeries.requests.labels;
+    const tsValues = daily.map(point => (Number(point.tsSec) || 0) * 1000);
+    const models = Array.isArray(analyticsCharts.byModel) ? analyticsCharts.byModel : [];
+    return { labels, tsValues, models };
+  }, [analyticsCharts, trendSeries]);
+
+  const defaultGatewayKey = useMemo(
+    () => gatewayKeys.find(key => key.isDefault) || gatewayKeys[0] || null,
+    [gatewayKeys]
+  );
+
+  useEffect(() => {
+    if (activeTab === 'endpoints' || activeTab === 'keys') {
+      loadGatewayKeys();
+    }
+  }, [activeTab, loadGatewayKeys]);
 
   useEffect(() => {
     if (endpoints.length === 0) {
@@ -440,9 +946,134 @@ function OpenAIPage() {
     }
   };
 
+  // 端点列表拖拽排序：本地先更新顺序，再持久化到后端；失败时回滚。
+  const saveEndpointOrder = async nextEndpoints => {
+    const orderedIds = nextEndpoints.map(ep => ep.id);
+    setEndpointReorderSaving(true);
+    try {
+      const response = await fetch('/api/openai/endpoints/reorder', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpointIds: orderedIds }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '保存失败');
+      toast.success('端点顺序已保存');
+    } catch (error) {
+      toast.error('排序保存失败: ' + error.message);
+      await loadEndpoints(true);
+    } finally {
+      setEndpointReorderSaving(false);
+    }
+  };
+
+  const handleEndpointDragStart = (item, event) => {
+    setDraggedEndpointId(String(item.id));
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(item.id));
+  };
+
+  const handleEndpointDragOver = event => {
+    if (!draggedEndpointId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleEndpointDrop = async (targetItem, event) => {
+    event.preventDefault();
+    const sourceId = draggedEndpointId || event.dataTransfer.getData('text/plain');
+    setDraggedEndpointId(null);
+    if (!sourceId || String(sourceId) === String(targetItem.id)) return;
+    const fromIndex = endpoints.findIndex(ep => String(ep.id) === String(sourceId));
+    const toIndex = endpoints.findIndex(ep => String(ep.id) === String(targetItem.id));
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = [...endpoints];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setEndpoints(next);
+    await saveEndpointOrder(next);
+  };
+
+  const handleEndpointDragEnd = () => {
+    setDraggedEndpointId(null);
+  };
+
+  // 模型开关的进行中标记：ref 用于同步去重，state 用于驱动按钮禁用态渲染。
+  const modelSwitchLoadingRef = useRef({});
+  const [modelSwitchLoading, setModelSwitchLoading] = useState({});
+
+  const toggleModelEnabled = async (endpoint, modelId, enabled, silent = false, skipReload = false) => {
+    const key = `${endpoint.id}:${modelId}`;
+    if (modelSwitchLoadingRef.current[key]) return;
+    modelSwitchLoadingRef.current[key] = true;
+    setModelSwitchLoading(prev => ({ ...prev, [key]: true }));
+    const prevDisabled = Array.isArray(endpoint.disabledModels) ? endpoint.disabledModels : [];
+    // 乐观更新：立即切换开关状态，无需等待后端往返。
+    setEndpoints(prev =>
+      prev.map(e =>
+        e.id === endpoint.id
+          ? {
+              ...e,
+              disabledModels: enabled
+                ? (Array.isArray(e.disabledModels) ? e.disabledModels : []).filter(id => id !== modelId)
+                : [
+                    ...(Array.isArray(e.disabledModels) ? e.disabledModels : []).filter(
+                      id => id !== modelId
+                    ),
+                    modelId,
+                  ],
+            }
+          : e
+      )
+    );
+    try {
+      const response = await fetch(`/api/openai/endpoints/${endpoint.id}/models/toggle`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ model: modelId, enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+      setEndpoints(prev =>
+        prev.map(e =>
+          e.id === endpoint.id
+            ? { ...e, disabledModels: Array.isArray(data.disabledModels) ? data.disabledModels : [] }
+            : e
+        )
+      );
+      if (!silent) toast.success(enabled ? `${modelId} 已启用` : `${modelId} 已停用`);
+      if (!skipReload) await loadAllModels(true);
+    } catch (error) {
+      setEndpoints(prev =>
+        prev.map(e => (e.id === endpoint.id ? { ...e, disabledModels: prevDisabled } : e))
+      );
+      toast.error(`更新模型状态失败: ${error.message}`);
+    } finally {
+      modelSwitchLoadingRef.current[key] = false;
+      setModelSwitchLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const modelEnabledForEndpoint = (endpoint, modelId) => {
+    const disabled = Array.isArray(endpoint?.disabledModels) ? endpoint.disabledModels : [];
+    return !disabled.includes(modelId);
+  };
+
   const openAddEndpointModal = () => {
     setEditingEndpoint(null);
-    setEndpointForm({ name: '', baseUrl: '', apiKey: '', notes: '' });
+    setEndpointForm({
+      name: '',
+      baseUrl: '',
+      apiKey: '',
+      notes: '',
+      headers: [],
+      proxyPool: [],
+      proxyBatches: [],
+      autoSwitch: false,
+      proxyEnabled: false,
+      forceProxy: false,
+      protocol: 'auto',
+    });
     setEndpointFormError('');
     setEndpointFormOpen(true);
   };
@@ -454,9 +1085,295 @@ function OpenAIPage() {
       baseUrl: endpoint.baseUrl || '',
       apiKey: endpoint.apiKey || '',
       notes: endpoint.notes || '',
+      headers: Array.isArray(endpoint.headers) ? endpoint.headers : [],
+      proxyPool: Array.isArray(endpoint.proxyPool) ? endpoint.proxyPool : [],
+      proxyBatches: Array.isArray(endpoint.proxyBatches) ? endpoint.proxyBatches : [],
+      autoSwitch: Boolean(endpoint.autoSwitch),
+      proxyEnabled: Boolean(endpoint.proxyEnabled),
+      forceProxy: Boolean(endpoint.forceProxy),
+      protocol: endpoint.protocol || 'auto',
     });
     setEndpointFormError('');
     setEndpointFormOpen(true);
+  };
+
+  const updateEndpointProxy = (index, value) => {
+    setEndpointForm(current => {
+      const proxyPool = (current.proxyPool || []).map((proxy, i) => (i === index ? value : proxy));
+      return { ...current, proxyPool };
+    });
+  };
+
+  const addEndpointProxy = () => {
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: [...(current.proxyPool || []), ''],
+    }));
+  };
+
+  const removeEndpointProxy = index => {
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: (current.proxyPool || []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const [proxyBatchOpen, setProxyBatchOpen] = useState(false);
+  const [proxyBatchText, setProxyBatchText] = useState('');
+  const [proxyImportLoading, setProxyImportLoading] = useState(false);
+  const [subscriptionUrlOpen, setSubscriptionUrlOpen] = useState(false);
+  const [subscriptionUrl, setSubscriptionUrl] = useState('');
+  // editingProxyIndex 标记当前正在编辑完整 URL 的代理条目索引；-1 表示无。
+  const [editingProxyIndex, setEditingProxyIndex] = useState(-1);
+  // proxyManagerOpen 控制「出口代理池」独立管理弹窗。
+  const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
+
+  // manualProxyEntries：池中不属于任何导入批次的代理（手动添加），
+  // 携带真实池下标，供管理弹窗内编辑与删除。
+  const manualProxyEntries = useMemo(() => {
+    const batchUrls = new Set((endpointForm.proxyBatches || []).flatMap(batch => batch.proxies || []));
+    return (endpointForm.proxyPool || [])
+      .map((proxy, index) => ({ proxy, index }))
+      .filter(({ proxy }) => !batchUrls.has(proxy));
+  }, [endpointForm.proxyPool, endpointForm.proxyBatches]);
+
+  const saveProxyBatch = () => {
+    const lines = proxyBatchText
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      toast.warning('请粘贴至少一个代理地址');
+      return;
+    }
+    const added = addProxyBatch(`批量添加 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`, lines);
+    if (added === 0) {
+      toast.info('粘贴的代理已全部属于其他批次，无需重复添加');
+      return;
+    }
+    setProxyBatchText('');
+    setProxyBatchOpen(false);
+    toast.success(`已批量添加 ${added} 个代理`);
+  };
+
+  // addProxyBatch 把一批代理（文件/订阅/批量粘贴）登记为一个「批次」：
+  //   a) 池中尚不存在 → 新增并入池；
+  //   b) 已在池中但无任何批次归属（历史导入/手动加入的同 URL）→ 一并记入本批次；
+  //   c) 已属于其他批次 → 跳过，避免两个批次拥有同一 URL 导致删除互相牵连。
+  // 这样旧数据（批次功能上线前导入的池）重新导入同一来源即可获得批次管理能力。
+  // 返回本次归入批次的条数（0 表示无新增）。
+  const addProxyBatch = (batchName, urls) => {
+    const list = (Array.isArray(urls) ? urls : []).filter(Boolean);
+    if (list.length === 0) return 0;
+    const pool = endpointForm.proxyPool || [];
+    const poolSet = new Set(pool);
+    const owned = new Set((endpointForm.proxyBatches || []).flatMap(batch => batch.proxies || []));
+    const fresh = list.filter(proxy => !poolSet.has(proxy));
+    const newlyOwned = list.filter(proxy => poolSet.has(proxy) && !owned.has(proxy));
+    const batchProxies = [...fresh, ...newlyOwned];
+    if (batchProxies.length === 0) return 0;
+    const batchId = `pb_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: [...pool, ...fresh],
+      proxyBatches: [
+        ...(current.proxyBatches || []),
+        {
+          id: batchId,
+          name: batchName,
+          createdAt: new Date().toISOString(),
+          proxies: batchProxies,
+        },
+      ],
+    }));
+    return batchProxies.length;
+  };
+
+  // 文件导入：读取本地代理列表文件（.txt，每行一个代理），交给后端解析清洗后，
+  // 以文件为单位建立一个「批次」追加到池，便于之后按文件批量删除/管理。
+  const proxyFileInputRef = useRef(null);
+  const importProxyFile = file => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const text = String(e.target?.result || '');
+      if (!text.trim()) {
+        toast.warning('文件内容为空');
+        return;
+      }
+      const rawLineCount = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).length;
+      if (proxyImportLoading) return;
+      setProxyImportLoading(true);
+      try {
+        const response = await fetch('/api/openai/proxies/import-list', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        const list = Array.isArray(data.proxies) ? data.proxies : [];
+        if (list.length === 0) {
+          toast.info('文件中没有找到可导入的代理（支持 http(s)://、socks5://、host:port）');
+          return;
+        }
+        const batchName = file.name || '代理列表';
+        const added = addProxyBatch(batchName, list);
+        if (added === 0) {
+          toast.info(`文件中的 ${list.length} 个代理已全部属于其他批次，无需重复导入`);
+          return;
+        }
+        const skipped = rawLineCount - list.length;
+        toast.success(
+          `已导入批次「${batchName}」${added} 条${skipped > 0 ? `（跳过 ${skipped} 行无效/重复）` : ''}`,
+        );
+      } catch (err) {
+        toast.error(err.message || '文件导入失败');
+      } finally {
+        setProxyImportLoading(false);
+        if (proxyFileInputRef.current) proxyFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // 批次管理：展开预览 / 删除整批 / 移出单条。
+  const [expandedBatchId, setExpandedBatchId] = useState(null);
+  const [manualProxyExpanded, setManualProxyExpanded] = useState(false);
+  // proxyRuntimeStates：代理池各出口的运行时禁用状态（冷却 / 429 冻结），
+  // 用于在管理弹窗里把被禁用的代理标红。key 为代理 URL。
+  const [proxyRuntimeStates, setProxyRuntimeStates] = useState({});
+  useEffect(() => {
+    if (!proxyManagerOpen || !editingEndpoint?.id) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/openai/endpoints/${editingEndpoint.id}/proxy-state`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !Array.isArray(data.proxies)) return;
+        if (!cancelled) {
+          const map = {};
+          data.proxies.forEach(item => {
+            map[item.proxy] = item;
+          });
+          setProxyRuntimeStates(map);
+        }
+      } catch {
+        // 状态加载失败不阻断弹窗使用。
+      }
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [proxyManagerOpen, editingEndpoint?.id]);
+  // disabledProxyUntil 返回某代理的禁用信息：{label, disableUntil} 或 null（可用）。
+  const disabledProxyUntil = proxy => {
+    const item = proxyRuntimeStates[proxy];
+    if (!item) return null;
+    if (item.rateLimitedUntil && new Date(item.rateLimitedUntil).getTime() > Date.now()) {
+      return { label: `429 冻结至 ${formatDateTime(item.rateLimitedUntil)}`, until: item.rateLimitedUntil };
+    }
+    if (item.cooldownUntil && new Date(item.cooldownUntil).getTime() > Date.now()) {
+      return { label: `连接失败冷却至 ${formatDateTime(item.cooldownUntil)}`, until: item.cooldownUntil };
+    }
+    return null;
+  };
+  const removeProxyBatch = batch => {
+    if (!confirmPress(`proxy-batch:${batch.id}`, `移除文件批次「${batch.name}」及其全部 ${batch.proxies.length} 条代理？`)) return;
+    const members = new Set(batch.proxies || []);
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: (current.proxyPool || []).filter(proxy => !members.has(proxy)),
+      proxyBatches: (current.proxyBatches || []).filter(item => item.id !== batch.id),
+    }));
+    toast.success(`已移除批次「${batch.name}」的 ${batch.proxies.length} 条代理`);
+  };
+  const removeProxyFromBatch = (batch, proxy) => {
+    setEndpointForm(current => {
+      const batches = (current.proxyBatches || [])
+        .map(item =>
+          item.id === batch.id
+            ? { ...item, proxies: (item.proxies || []).filter(p => p !== proxy) }
+            : item,
+        )
+        .filter(item => item.id !== batch.id || (item.proxies || []).length > 0);
+      return {
+        ...current,
+        proxyPool: (current.proxyPool || []).filter(item => item !== proxy),
+        proxyBatches: batches,
+      };
+    });
+  };
+
+  // resolveSubscriptionProxies 通过后端拉取并解析订阅链接中的 socks/http 节点。
+  const resolveSubscriptionProxies = async () => {
+    const url = subscriptionUrl.trim();
+    if (!url) {
+      toast.warning('请填写订阅链接');
+      return;
+    }
+    if (proxyImportLoading) return;
+    setProxyImportLoading(true);
+    try {
+      const response = await fetch('/api/openai/proxies/resolve-subscription', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      const list = Array.isArray(data.proxies) ? data.proxies : [];
+      if (list.length === 0) {
+        toast.info(data.message || '订阅内容中没有找到 socks/http 节点');
+        return;
+      }
+      let batchName = url;
+      try {
+        batchName = `订阅 ${new URL(url).hostname}`;
+      } catch {
+        // URL 解析失败时退化为完整链接。
+      }
+      const added = addProxyBatch(batchName, list.map(item => item.proxy).filter(Boolean));
+      if (added === 0) {
+        toast.info('订阅链接中的代理已全部属于其他批次，无需重复导入');
+      } else {
+        toast.success(`已从订阅链接导入 ${added} 个代理`);
+      }
+      setSubscriptionUrl('');
+      setSubscriptionUrlOpen(false);
+    } catch (error) {
+      toast.error('解析订阅链接失败: ' + error.message);
+    } finally {
+      setProxyImportLoading(false);
+    }
+  };
+
+  const updateEndpointHeader = (index, field, value) => {
+    setEndpointForm(current => {
+      const headers = (current.headers || []).map((header, i) =>
+        i === index ? { ...header, [field]: value } : header
+      );
+      return { ...current, headers };
+    });
+  };
+
+  const addEndpointHeader = () => {
+    setEndpointForm(current => ({
+      ...current,
+      headers: [...(current.headers || []), { name: '', value: '' }],
+    }));
+  };
+
+  const removeEndpointHeader = index => {
+    setEndpointForm(current => ({
+      ...current,
+      headers: (current.headers || []).filter((_, i) => i !== index),
+    }));
   };
 
   const saveEndpoint = async () => {
@@ -491,10 +1408,18 @@ function OpenAIPage() {
     }
   };
 
+  const [pendingDeleteEndpointId, setPendingDeleteEndpointId] = useState(null);
+  const DELETE_ENDPOINT_CONFIRM_MS = 3000;
+  const deleteEndpointConfirmActive = id =>
+    pendingDeleteEndpointId?.id === id && pendingDeleteEndpointId.expiresAt > Date.now();
+
   const deleteEndpoint = async endpoint => {
-    if (!(await dialog.confirm(`确定要删除端点 "${endpoint.name || endpoint.baseUrl}" 吗？`))) {
+    if (!deleteEndpointConfirmActive(endpoint.id)) {
+      setPendingDeleteEndpointId({ id: endpoint.id, expiresAt: Date.now() + DELETE_ENDPOINT_CONFIRM_MS });
+      toast.info(`删除端点 ${endpoint.name || endpoint.baseUrl}？请再次点击确认`);
       return;
     }
+    setPendingDeleteEndpointId(null);
     try {
       const response = await fetch(`/api/openai/endpoints/${endpoint.id}`, {
         method: 'DELETE',
@@ -531,10 +1456,28 @@ function OpenAIPage() {
   const [healthCheckProgress, setHealthCheckProgress] = useState(() => createHealthCheckProgress());
   const [healthCheckModal, setHealthCheckModal] = useState(false);
   const [healthCheckForm, setHealthCheckForm] = useState({
-    timeout: 30,
+    timeout: DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
     concurrency: DEFAULT_MODEL_HEALTH_CONCURRENCY,
   });
   const modelHealthAbortControllersRef = useRef(new Map());
+  // 批量检测进行中请求：切换端点时 abort，避免旧端点的检测状态带偏新端点。
+  const batchHealthAbortRef = useRef(null);
+
+  // 切换选中端点时立即终止该端点所有检测（单个 + 批量），并清理「检测中」状态。
+  useEffect(() => {
+    modelHealthAbortControllersRef.current.forEach(controller => controller.abort());
+    modelHealthAbortControllersRef.current.clear();
+    batchHealthAbortRef.current?.abort();
+    batchHealthAbortRef.current = null;
+    setModelHealthBatchLoading(false);
+    setOpenaiModelHealth(prev => {
+      const next = {};
+      for (const [key, record] of Object.entries(prev)) {
+        next[key] = record?.loading ? { ...record, loading: false } : record;
+      }
+      return next;
+    });
+  }, [selectedEndpointId]);
 
   const markModelsChecking = targets => {
     const checkedAt = Date.now();
@@ -554,7 +1497,15 @@ function OpenAIPage() {
 
   const openAddGatewayKeyModal = () => {
     setEditingGatewayKey(null);
-    setGatewayKeyForm({ name: '', expiresAt: '' });
+    setGatewayKeyForm({
+      name: '',
+      expiresAt: '',
+      allowedModels: [],
+      allowedEndpoints: [],
+      maxTokensQuota: '',
+    });
+    setGatewayKeyModelInput('');
+    setGatewayKeyEndpointInput('');
     setGatewayKeyFormError('');
     setGatewayKeyDialogOpen(true);
   };
@@ -564,7 +1515,12 @@ function OpenAIPage() {
     setGatewayKeyForm({
       name: key.name || '',
       expiresAt: key.expiresAt ? toLocalDateTimeValue(new Date(key.expiresAt)) : '',
+      allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
+      allowedEndpoints: Array.isArray(key.allowedEndpoints) ? key.allowedEndpoints : [],
+      maxTokensQuota: key.maxTokensQuota ? String(key.maxTokensQuota) : '',
     });
+    setGatewayKeyModelInput('');
+    setGatewayKeyEndpointInput('');
     setGatewayKeyFormError('');
     setGatewayKeyDialogOpen(true);
   };
@@ -572,7 +1528,53 @@ function OpenAIPage() {
   const normalizeGatewayKeyForm = () => ({
     name: gatewayKeyForm.name.trim(),
     expiresAt: gatewayKeyForm.expiresAt ? new Date(gatewayKeyForm.expiresAt).toISOString() : '',
+    allowedModels: Array.isArray(gatewayKeyForm.allowedModels)
+      ? gatewayKeyForm.allowedModels
+      : [],
+    allowedEndpoints: Array.isArray(gatewayKeyForm.allowedEndpoints)
+      ? gatewayKeyForm.allowedEndpoints
+      : [],
+    maxTokensQuota: gatewayKeyForm.maxTokensQuota
+      ? Number(gatewayKeyForm.maxTokensQuota)
+      : 0,
   });
+
+  // 白名单列表项添加/删除（模型与端点共用）。
+  const addGatewayKeyListItem = (field, value) => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return;
+    setGatewayKeyForm(current => {
+      const list = Array.isArray(current[field]) ? current[field] : [];
+      if (list.includes(trimmed)) return current;
+      return { ...current, [field]: [...list, trimmed] };
+    });
+    if (field === 'allowedModels') setGatewayKeyModelInput('');
+    if (field === 'allowedEndpoints') setGatewayKeyEndpointInput('');
+  };
+
+  const removeGatewayKeyListItem = (field, value) => {
+    setGatewayKeyForm(current => ({
+      ...current,
+      [field]: (Array.isArray(current[field]) ? current[field] : []).filter(item => item !== value),
+    }));
+  };
+
+  // 过期时间预设：相对当前时间 +N 天，保留当天剩余时刻（23:59 或当前时分）。
+  const applyGatewayKeyExpiryPreset = days => {
+    setGatewayKeyForm(current => {
+      if (!days) {
+        return { ...current, expiresAt: '' };
+      }
+      const existing = parseLocalDateTime(current.expiresAt);
+      const next = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      if (existing) {
+        next.setHours(existing.getHours(), existing.getMinutes(), 0, 0);
+      } else {
+        next.setHours(23, 59, 0, 0);
+      }
+      return { ...current, expiresAt: toLocalDateTimeValue(next) };
+    });
+  };
 
   const updateGatewayKeyExpiryDate = date => {
     if (!date) return;
@@ -650,6 +1652,21 @@ function OpenAIPage() {
     }
   };
 
+  const setDefaultGatewayKey = async key => {
+    try {
+      const response = await fetch(`/api/openai/keys/${key.id}/default`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '设置默认密钥失败');
+      toast.success(`已将 "${key.name}" 设为默认密钥`);
+      await loadGatewayKeys();
+    } catch (error) {
+      toast.error('设置默认密钥失败: ' + error.message);
+    }
+  };
+
   const rotateGatewayKey = async key => {
     if (!(await dialog.confirm(`确认轮换 "${key.name}"？旧密钥会立即失效。`))) return;
     try {
@@ -668,7 +1685,7 @@ function OpenAIPage() {
   };
 
   const deleteGatewayKey = async key => {
-    if (!(await dialog.confirm(`确定删除网关密钥 "${key.name}" 吗？`))) return;
+    if (!confirmPress(`gateway-key-${key.id}`, `删除网关密钥「${key.name}」`)) return;
     try {
       const response = await fetch(`/api/openai/keys/${key.id}`, {
         method: 'DELETE',
@@ -741,7 +1758,7 @@ function OpenAIPage() {
           signal: controller.signal,
           body: JSON.stringify({
             model: modelId,
-            timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
+            timeout: Math.max(1, Number(healthCheckForm.timeout) || DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS) * 1000,
           }),
         }
       );
@@ -773,68 +1790,42 @@ function OpenAIPage() {
     }
   };
 
-  const runModelHealthChecksWithPool = async targets => {
+  // 批量检测：前端并发逐模型发请求，每个完成立即回填状态（无需等全部完成）。
+  const runBatchHealthCheckRequest = async (targets, fallbackMessage) => {
     if (!Array.isArray(targets) || targets.length === 0) return [];
-
-    const results = new Array(targets.length);
     const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, targets.length);
+    markModelsChecking(targets);
+    const results = new Array(targets.length);
     let cursor = 0;
-
-    const commitProgress = result => {
-      const healthy = result?.status === 'healthy' ? 1 : 0;
-      const degraded = result?.status === 'degraded' ? 1 : 0;
-      const failed = healthy || degraded ? 0 : 1;
-      setHealthCheckProgress(prev => ({
-        ...prev,
-        completed: Math.min(prev.total, prev.completed + 1),
-        healthy: prev.healthy + healthy,
-        degraded: prev.degraded + degraded,
-        failed: prev.failed + failed,
-      }));
-    };
-
     const workers = Array.from({ length: concurrency }, async () => {
       while (true) {
         const index = cursor;
         cursor += 1;
         if (index >= targets.length) return;
-
         const target = targets[index];
-        const result = await testModelHealth({ id: target.modelId }, target.endpointId, true);
-        const normalizedResult =
+        // silentToast=true：每个模型的 toast 由批量结果统一汇总，避免刷屏。
+        const result = await testModelHealth(
+          { id: target.modelId },
+          target.endpointId,
+          true
+        );
+        results[index] =
           result ||
           normalizeModelHealthRecord(
-            {
-              status: 'failed',
-              error: '检测未返回结果',
-              checkedAt: Date.now(),
-            },
+            { status: 'failed', error: '检测未返回结果', checkedAt: Date.now() },
             '检测未返回结果'
           );
-
-        results[index] = normalizedResult;
-        commitProgress(normalizedResult);
       }
     });
-
     await Promise.all(workers);
     return results;
   };
-
-  const runEndpointHealthCheck = async endpoint =>
-    runModelHealthChecksWithPool(
-      endpointModelIds(endpoint).map(modelId => ({ endpointId: endpoint.id, modelId }))
-    );
-
-  const runAllEndpointHealthChecks = async targets => runModelHealthChecksWithPool(targets);
 
   const startBatchHealthCheck = async () => {
     const endpointTargets = endpoints.filter(
       endpoint => endpoint.enabled && endpointModelIds(endpoint).length > 0
     );
     const allTargets = modelHealthTargets(endpointTargets);
-    const targets = limitModelHealthTargets(allTargets);
-    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, targets.length);
     if (allTargets.length === 0) {
       toast.warning('没有找到任何启用的端点或模型');
       return;
@@ -842,29 +1833,28 @@ function OpenAIPage() {
 
     setHealthCheckModal(false);
     setModelHealthBatchLoading(true);
-    setHealthCheckProgress(createHealthCheckProgress(targets.length, true));
-    toast.info(
-      allTargets.length > targets.length
-        ? `正在按 ${concurrency} 并发实时检测前 ${targets.length} 个模型（全部检测上限 ${MAX_BATCH_MODEL_HEALTH_TARGETS}）...`
-        : `正在按 ${concurrency} 并发实时检测 ${targets.length} 个模型...`
+    setHealthCheckProgress(createHealthCheckProgress(allTargets.length, true));
+    const concurrency = resolveModelHealthConcurrency(
+      healthCheckForm.concurrency,
+      allTargets.length
     );
+    toast.info(`正在按 ${concurrency} 并发批量检测 ${allTargets.length} 个模型...`);
 
     try {
-      const results = await runAllEndpointHealthChecks(targets);
+      const results = await runBatchHealthCheckRequest(allTargets, '批量检测失败');
       const counts = countModelHealthResults(results);
       setHealthCheckProgress({
         running: false,
-        total: targets.length,
+        total: allTargets.length,
         completed: results.length,
         ...counts,
       });
 
-      const message =
-        allTargets.length > targets.length
-          ? `检测完成：已检测前 ${targets.length} 个模型，可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`
-          : `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      const message = `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
       if (counts.failed > 0) toast.warning(message);
       else toast.success(message);
+    } catch {
+      // 错误已在单模型检测内提示，此处仅终止流程。
     } finally {
       setModelHealthBatchLoading(false);
     }
@@ -873,7 +1863,6 @@ function OpenAIPage() {
   const openHealthCheckForEndpoint = async endpointId => {
     const ep = endpoints.find(e => e.id === endpointId);
     const modelIds = endpointModelIds(ep);
-    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, modelIds.length);
     if (!ep || modelIds.length === 0) {
       toast.warning('该端点无可用模型');
       return;
@@ -881,12 +1870,14 @@ function OpenAIPage() {
 
     setModelHealthBatchLoading(true);
     setHealthCheckProgress(createHealthCheckProgress(modelIds.length, true));
+    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, modelIds.length);
     toast.info(
-      `正在按 ${concurrency} 并发实时检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`
+      `正在按 ${concurrency} 并发批量检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`
     );
 
     try {
-      const results = await runEndpointHealthCheck(ep);
+      const targets = modelIds.map(modelId => ({ endpointId, modelId }));
+      const results = await runBatchHealthCheckRequest(targets, '端点检测失败');
       const counts = countModelHealthResults(results);
       setHealthCheckProgress({
         running: false,
@@ -897,6 +1888,8 @@ function OpenAIPage() {
       const message = `${ep.name || '端点'}：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
       if (counts.failed > 0) toast.warning(message);
       else toast.success(message);
+    } catch {
+      // 错误已在单模型检测内提示，此处仅终止流程。
     } finally {
       setModelHealthBatchLoading(false);
     }
@@ -907,14 +1900,6 @@ function OpenAIPage() {
   const [pinnedModels, setPinnedModels] = useState(() => {
     try {
       const saved = localStorage.getItem('openai_pinned_models');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [hiddenModels, setHiddenModels] = useState(() => {
-    try {
-      const saved = localStorage.getItem('openai_hidden_models');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -967,7 +1952,6 @@ function OpenAIPage() {
   const [dropdownModelSearch, setDropdownModelSearch] = useState('');
   const [openaiModelSearch, setOpenaiModelSearch] = useState('');
   const [openaiSelectedEndpointId, setOpenaiSelectedEndpointId] = useState('');
-  const [openaiShowHiddenModels, setOpenaiShowHiddenModels] = useState(false);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1038,18 +2022,182 @@ function OpenAIPage() {
     });
   };
 
-  const toggleHideModel = modelId => {
-    if (!modelId) return;
-    setHiddenModels(prev => {
-      let next;
-      if (prev.includes(modelId)) {
-        next = prev.filter(id => id !== modelId);
-      } else {
-        next = [...prev, modelId];
-      }
-      localStorage.setItem('openai_hidden_models', JSON.stringify(next));
-      return next;
+  const failedModelIdsForEndpoint = endpoint => {
+    if (!endpoint) return [];
+    return endpointModelIds(endpoint).filter(
+      modelId => openaiModelHealth[modelHealthKey(endpoint.id, modelId)]?.status === 'error'
+    );
+  };
+
+  const [modelBatchActionLoading, setModelBatchActionLoading] = useState(false);
+
+  // 模型映射（对外名称）行内编辑状态。
+  const [mappingEditKey, setMappingEditKey] = useState(null);
+  const [mappingDraft, setMappingDraft] = useState('');
+
+  // 批量切换端点模型的启用状态（原子接口，避免并发逐个 toggle 丢失）。
+  const batchToggleEndpointModels = async (endpoint, modelIds, enabled, successMessage) => {
+    if (modelBatchActionLoading) return;
+    const ids = Array.from(new Set((modelIds || []).filter(Boolean)));
+    if (ids.length === 0) return;
+    setModelBatchActionLoading(true);
+    try {
+      const response = await fetch(
+        `/api/openai/endpoints/${endpoint.id}/models/toggle-batch`,
+        {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: ids, enabled }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+      setEndpoints(prev =>
+        prev.map(e =>
+          e.id === endpoint.id
+            ? { ...e, disabledModels: Array.isArray(data.disabledModels) ? data.disabledModels : [] }
+            : e
+        )
+      );
+      await loadAllModels(true);
+      toast.success(successMessage || `已${enabled ? '启用' : '关闭'} ${ids.length} 个模型`);
+      return true;
+    } catch (error) {
+      toast.error(`批量更新失败: ${error.message}`);
+      return false;
+    } finally {
+      setModelBatchActionLoading(false);
+    }
+  };
+
+  // 关闭端点上所有「非有效」模型（未检测/检测失败/较慢之外的），仅停用不隐藏。
+  // 检测为有效的模型（healthy/degraded）不在此列，由每行手动开关控制。
+  const batchCloseNonHealthyModels = async endpoint => {
+    if (modelBatchActionLoading) return;
+    const targets = endpointModelIds(endpoint).filter(modelId => {
+      if (!modelEnabledForEndpoint(endpoint, modelId)) return false;
+      const health = openaiModelHealth[modelHealthKey(endpoint.id, modelId)];
+      return health?.status !== 'healthy' && health?.status !== 'degraded';
     });
+    if (targets.length === 0) {
+      toast.info('当前没有可批量关闭的模型（非有效模型均为空）');
+      return;
+    }
+    await batchToggleEndpointModels(endpoint, targets, false, `已关闭 ${targets.length} 个非有效模型`);
+  };
+
+  // 兼容旧调用：全局一键关闭失败的模型（保留，供顶栏使用）。
+  const batchCloseFailedModels = async endpoint => {
+    if (modelBatchActionLoading) return;
+    const failed = failedModelIdsForEndpoint(endpoint).filter(modelId =>
+      modelEnabledForEndpoint(endpoint, modelId)
+    );
+    if (failed.length === 0) {
+      toast.info('当前端点没有检测失败的模型');
+      return;
+    }
+    await batchToggleEndpointModels(endpoint, failed, false, `已关闭 ${failed.length} 个检测失败的模型`);
+  };
+
+  // 全局一键：跨全部启用端点，关闭所有检测失败的模型（仅停用，不隐藏）。
+  const batchCloseAllFailedModels = async () => {
+    if (modelBatchActionLoading) return;
+    const byEndpoint = {};
+    endpoints.forEach(endpoint => {
+      if (!endpoint.enabled) return;
+      failedModelIdsForEndpoint(endpoint).forEach(modelId => {
+        if (modelEnabledForEndpoint(endpoint, modelId)) {
+          byEndpoint[endpoint.id] = byEndpoint[endpoint.id] || { endpoint, models: [] };
+          byEndpoint[endpoint.id].models.push(modelId);
+        }
+      });
+    });
+    const entries = Object.values(byEndpoint);
+    const total = entries.reduce((sum, entry) => sum + entry.models.length, 0);
+    if (total === 0) {
+      toast.info('当前没有检测失败的模型');
+      return;
+    }
+    if (!(await dialog.confirm(`确认关闭全部 ${total} 个检测失败的模型吗？（仅停用对应模型）`))) {
+      return;
+    }
+    setModelBatchActionLoading(true);
+    try {
+      for (const entry of entries) {
+        const response = await fetch(
+          `/api/openai/endpoints/${entry.endpoint.id}/models/toggle-batch`,
+          {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ models: entry.models, enabled: false }),
+          }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+        setEndpoints(prev =>
+          prev.map(e =>
+            e.id === entry.endpoint.id
+              ? { ...e, disabledModels: Array.isArray(data.disabledModels) ? data.disabledModels : [] }
+              : e
+          )
+        );
+      }
+      await loadAllModels(true);
+      toast.success(`已关闭 ${total} 个检测失败的模型`);
+    } catch (error) {
+      toast.error(`批量更新失败: ${error.message}`);
+    } finally {
+      setModelBatchActionLoading(false);
+    }
+  };
+
+  // 清空全部网关日志数据。
+  const clearGatewayLogs = async () => {
+    if (!(await dialog.confirm('确认清除全部网关日志记录？此操作不可恢复。'))) return;
+    try {
+      const response = await fetch('/api/openai/analytics/clear', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '清除失败');
+      toast.success(`已清除 ${data.deleted ?? 0} 条网关日志`);
+      await fetchAnalytics();
+    } catch (error) {
+      toast.error('清除日志失败: ' + error.message);
+    }
+  };
+
+  // 保存模型映射：PUT /api/openai/endpoints/:id/model-mappings。
+  const saveEndpointMapping = async (endpoint, modelId, alias) => {
+    setMappingEditKey(null);
+    const clean = (alias || '').trim();
+    try {
+      const res = await fetch(`/api/openai/endpoints/${endpoint.id}/model-mappings`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          mappings: { ...(endpoint.modelMappings || {}), [modelId]: clean },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || '保存失败');
+      toast.success(clean ? `已映射 ${modelId} → ${clean}` : `已清除 ${modelId} 的映射`);
+      setEndpoints(prev =>
+        prev.map(e => (e.id === endpoint.id ? { ...e, modelMappings: data.modelMappings } : e))
+      );
+      await loadAllModels(true);
+    } catch (error) {
+      toast.error('保存映射失败: ' + error.message);
+    }
+  };
+
+  // 批量启用被停用的模型（与「关闭检测失败的模型」拆分为两个明确动作）。
+  const batchEnableDisabledModels = async endpoint => {
+    if (modelBatchActionLoading) return;
+    const disabled = Array.isArray(endpoint.disabledModels) ? endpoint.disabledModels : [];
+    if (disabled.length === 0) return;
+    await batchToggleEndpointModels(endpoint, disabled, true, `已启用 ${disabled.length} 个被停用的模型`);
   };
 
   const handleSetDefaultModel = () => {
@@ -1204,7 +2352,7 @@ function OpenAIPage() {
   };
 
   const deletePersona = async personaId => {
-    if (!(await dialog.confirm('确定要删除这个 AI 人设吗？'))) {
+    if (!confirmPress(`persona-${personaId}`, '删除这个 AI 人设')) {
       return;
     }
     try {
@@ -1435,7 +2583,7 @@ function OpenAIPage() {
 
   const deleteSession = async (sessionId, e) => {
     if (e) e.stopPropagation();
-    if (!(await dialog.confirm('确定要删除这个对话吗？此操作不可撤销。'))) return;
+    if (!confirmPress(`session-${sessionId}`, '删除这个对话')) return;
     try {
       const response = await fetch(`/api/openai/sessions/${sessionId}`, {
         method: 'DELETE',
@@ -1455,7 +2603,7 @@ function OpenAIPage() {
 
   const deleteSelectedSessions = async () => {
     if (selectedSessionIds.length === 0) return;
-    if (!(await dialog.confirm(`确定要删除选中的 ${selectedSessionIds.length} 个对话吗？`))) return;
+    if (!confirmPress('batch-sessions', `删除选中的 ${selectedSessionIds.length} 个对话`)) return;
     try {
       for (const id of selectedSessionIds) {
         await fetch(`/api/openai/sessions/${id}`, {
@@ -1477,7 +2625,7 @@ function OpenAIPage() {
 
   const clearAllSessions = async () => {
     if (sessions.length === 0) return;
-    if (!(await dialog.confirm('确定要清空所有会话历史吗？此操作不可撤销。'))) return;
+    if (!confirmPress('clear-sessions', '清空所有会话历史')) return;
     try {
       const response = await fetch('/api/openai/sessions', {
         method: 'DELETE',
@@ -1714,7 +2862,7 @@ function OpenAIPage() {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
-        persistSessions(prev => [session, ...prev]);
+        chatStorage.saveSessions([session, ...chatStorage.readSessions()]);
         activeSessionId = session.id;
         setCurrentSessionId(activeSessionId);
         chatStorage.saveSessionMessages(activeSessionId, []);
@@ -1807,7 +2955,7 @@ function OpenAIPage() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let assistantMsg = {
+      const assistantMsg = {
         role: 'assistant',
         content: '',
         reasoning: '',
@@ -1974,7 +3122,7 @@ function OpenAIPage() {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let assistantMsg = {
+      const assistantMsg = {
         role: 'assistant',
         content: '',
         reasoning: '',
@@ -2100,8 +3248,7 @@ function OpenAIPage() {
       const matchesEndpoint =
         !openaiSelectedEndpointId ||
         m.owned_by === endpoints.find(e => e.id === openaiSelectedEndpointId)?.name;
-      const matchesHidden = openaiShowHiddenModels ? true : !hiddenModels.includes(m.id);
-      return matchesSearch && matchesEndpoint && matchesHidden;
+      return matchesSearch && matchesEndpoint;
     });
     return list;
   }, [
@@ -2109,8 +3256,6 @@ function OpenAIPage() {
     openaiModelSearch,
     openaiSelectedEndpointId,
     endpoints,
-    hiddenModels,
-    openaiShowHiddenModels,
   ]);
 
   const chatDropdownFilteredModels = useMemo(() => {
@@ -2135,10 +3280,9 @@ function OpenAIPage() {
       // Filter by active endpoint
       const matchesEndpoint =
         !chatEndpoint || m.owned_by === endpoints.find(e => e.id === chatEndpoint)?.name;
-      const isHidden = hiddenModels.includes(m.id);
-      return matchesSearch && matchesEndpoint && !isHidden;
+      return matchesSearch && matchesEndpoint;
     });
-  }, [allModels, endpoints, chatEndpoint, dropdownModelSearch, hiddenModels]);
+  }, [allModels, endpoints, chatEndpoint, dropdownModelSearch]);
 
   const selectChatModel = modelId => {
     setChatModel(modelId);
@@ -2166,14 +3310,23 @@ function OpenAIPage() {
   };
 
   return (
-    <PageStack viewport className="min-h-full max-w-full md:h-full md:min-h-0 md:flex-1">
+    <PageStack viewport>
       {/* Tab Navigation */}
-      <PageToolbar className="shrink-0 select-none">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={setActiveTab}
           tabs={[
+            {
+              value: 'analytics',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5" />
+                  数据看板
+                </span>
+              ),
+            },
             {
               value: 'endpoints',
               label: (
@@ -2193,96 +3346,206 @@ function OpenAIPage() {
               ),
             },
             {
-              value: 'analytics',
+              value: 'logs',
               label: (
                 <span className="inline-flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" />
-                  网关分析
+                  <History className="w-3.5 h-3.5" />
+                  网关日志
                 </span>
               ),
             },
           ]}
         />
-      </PageToolbar>
+        <div className="flex min-w-0 items-center justify-end gap-2">
+            {activeTab === 'analytics' && (
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'granularity',
+                    type: 'select',
+                    label: '时间粒度',
+                    icon: <CalendarDotsIcon className="h-3.5 w-3.5" />,
+                    value: analyticsGranularity,
+                    onValueChange: val => setAnalyticsGranularity(val || 'day'),
+                    options: [
+                      { value: 'hour', label: '按小时' },
+                      { value: 'day', label: '按天' },
+                      { value: 'week', label: '按周' },
+                    ],
+                    selectClassName: 'w-28',
+                  },
+                  {
+                    key: 'range',
+                    type: 'select',
+                    label: '分析范围',
+                    icon: <CalendarDotsIcon className="h-3.5 w-3.5" />,
+                    value: String(analyticsDays),
+                    onValueChange: val => {
+                      setAnalyticsDays(Number(val));
+                      setAnalyticsPage(1);
+                    },
+                    options: [
+                      { value: '1', label: '最近 24 小时' },
+                      { value: '7', label: '最近 7 天' },
+                      { value: '30', label: '最近 30 天' },
+                    ],
+                    selectClassName: 'w-36',
+                  },
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className="w-3.5 h-3.5" />,
+                    onClick: fetchAnalytics,
+                    disabled: analyticsLoading,
+                    loading: analyticsLoading,
+                  },
+                ]}
+              />
+            )}
+            {activeTab === 'keys' && (
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className={iconButtonIconClass} />,
+                    onClick: loadGatewayKeys,
+                    disabled: gatewayKeysLoading,
+                    loading: gatewayKeysLoading,
+                  },
+                  {
+                    key: 'add',
+                    label: '新建密钥',
+                    icon: <Plus className={iconButtonIconClass} />,
+                    onClick: openAddGatewayKeyModal,
+                    variant: 'primary',
+                  },
+                ]}
+              />
+            )}
+            {activeTab === 'logs' && (
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'range',
+                    type: 'select',
+                    label: '时间范围',
+                    icon: <CalendarDotsIcon className="h-3.5 w-3.5" />,
+                    value: String(analyticsDays),
+                    onValueChange: val => {
+                      setAnalyticsDays(Number(val));
+                      setAnalyticsPage(1);
+                    },
+                    options: [
+                      { value: '1', label: '最近 24 小时' },
+                      { value: '7', label: '最近 7 天' },
+                      { value: '30', label: '最近 30 天' },
+                    ],
+                    selectClassName: 'w-36',
+                  },
+                  {
+                    key: 'clear',
+                    label: '清除数据',
+                    icon: <Trash className="h-3.5 w-3.5" />,
+                    onClick: clearGatewayLogs,
+                    danger: true,
+                  },
+                ]}
+              />
+            )}
+            {activeTab === 'endpoints' && (
+              <div className="flex shrink-0 items-center gap-2">
+                <Toolbar size="sm" aria-label="端点导入导出" className="shrink-0">
+                  <Toolbar.Button
+                    onClick={exportEndpoints}
+                    disabled={endpoints.length === 0 || endpointExporting}
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button
+                    onClick={() => endpointImportInputRef.current?.click()}
+                    disabled={endpointImporting}
+                    icon={<Download className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
+                <TabBarOverflowActions
+                  items={[
+                    {
+                      key: 'health',
+                      label: '健康检测',
+                      icon: <Activity className={iconButtonIconClass} />,
+                      onClick: () => setHealthCheckModal(true),
+                      disabled: modelHealthBatchLoading,
+                      loading: modelHealthBatchLoading,
+                    },
+                    {
+                      key: 'refresh',
+                      label: '刷新列表',
+                      icon: <RefreshCw className={iconButtonIconClass} />,
+                      onClick: refreshAllEndpoints,
+                      disabled: endpointsRefreshing,
+                      loading: endpointsRefreshing,
+                    },
+                    {
+                      key: 'add',
+                      label: '新增端点',
+                      icon: <Plus className={iconButtonIconClass} />,
+                      onClick: openAddEndpointModal,
+                      variant: 'primary',
+                    },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
+      </div>
 
       {/* ==================== 1. API 端点 Tab ==================== */}
       {activeTab === 'endpoints' && (
-        <GatewaySection
-          className="min-h-0 flex-1"
-          title="API 端点"
-          description={
-            modelHealthBatchLoading ? '正在批量检测模型可用性...' : `共 ${endpoints.length} 个端点`
-          }
-          icon={<Server className="h-4 w-4 text-kumo-brand" />}
-          actions={
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={() => setHealthCheckModal(true)}
-                disabled={modelHealthBatchLoading}
-                className="flex items-center gap-1.5"
-              >
-                <Activity
-                  className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')}
-                />
-                <span>健康检测</span>
-              </Button>
-              <Button
-                size="sm"
-                onClick={refreshAllEndpoints}
-                disabled={endpointsRefreshing}
-                className="flex items-center gap-1.5"
-              >
-                <RefreshCw
-                  className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')}
-                />
-                <span>刷新列表</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={openAddEndpointModal}
-                className="flex items-center gap-1.5"
-              >
-                <Plus className={iconButtonIconClass} />
-                <span>新增端点</span>
-              </Button>
-            </div>
-          }
-          bodyClassName="flex min-h-0 flex-1 flex-col gap-2.5"
-        >
-          <LayerCard className="flex flex-col gap-2 p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-2">
-              <Server className="h-4 w-4 shrink-0 text-kumo-brand" />
-              <span className="shrink-0 text-xs font-medium text-kumo-subtle">OpenAI 兼容入口</span>
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+          <Input
+            ref={endpointImportInputRef}
+            type="file"
+            accept="application/json,.json"
+            aria-label="导入端点 JSON"
+            className="hidden"
+            onChange={importEndpointsFromFile}
+          />
+          <div className="flex flex-col gap-2 rounded-lg border border-kumo-line bg-kumo-base p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
+<div className="flex min-w-0 items-center gap-2">
               <ClipboardText
                 size="sm"
                 text={`${gatewayOrigin}/v1`}
                 className="min-w-0 max-w-md flex-1 font-mono text-[0.9em]"
-                tooltip={{ text: '复制 API Base URL', copiedText: '地址已复制' }}
+                tooltip={{ text: '复制 API Base URL', copiedText: '地址已复制', side: 'bottom' }}
                 labels={{ copyAction: '复制 API Base URL' }}
               />
+              {defaultGatewayKey?.apiKey ? (
+                <ClipboardText
+                  size="sm"
+                  text={defaultGatewayKey.apiKey}
+                  className="min-w-0 max-w-md flex-1 font-mono text-[0.9em]"
+                  tooltip={{ text: '复制默认密钥', copiedText: '密钥已复制', side: 'bottom' }}
+                  labels={{ copyAction: '复制默认密钥' }}
+                />
+              ) : (
+                <span className="shrink-0 text-xs font-medium text-kumo-subtle">
+                  未设置默认密钥
+                </span>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              <InlineStatusPill tone="neutral">
+              <StatusBadge tone="neutral">
                 {endpoints.filter(endpoint => endpoint.enabled).length} 个启用端点
-              </InlineStatusPill>
-              <InlineStatusPill tone="brand">
-                {
-                  Array.from(
-                    new Set(
-                      endpoints
-                        .filter(endpoint => endpoint.enabled)
-                        .flatMap(endpoint => endpoint.models || [])
-                        .map(model => (typeof model === 'string' ? model : model.id))
-                        .filter(Boolean)
-                    )
-                  ).length
-                }{' '}
-                个模型
-              </InlineStatusPill>
+              </StatusBadge>
+              <StatusBadge tone="brand">
+                {enabledModelCount} 个启用模型
+              </StatusBadge>
             </div>
-          </LayerCard>
+          </div>
           {endpointsLoading ? (
             <div className="space-y-2.5">
               {[...Array(2)].map((_, i) => (
@@ -2308,10 +3571,13 @@ function OpenAIPage() {
               const endpoint = selectedEndpoint;
               const validStatus = endpoint.status === 'valid';
               const invalidStatus = endpoint.status === 'invalid';
+              const disabledModelCount = Array.isArray(endpoint.disabledModels)
+                ? endpoint.disabledModels.length
+                : 0;
 
               return (
-                <div className="grid min-h-0 min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
-                  <section className="flex min-h-0 min-w-0 flex-col gap-2">
+                <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+                  <section className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-[70px] lg:self-start">
                     <div className="flex min-h-8 items-center justify-between gap-2 px-1">
                       <div className="flex items-center gap-2 text-xs text-kumo-subtle">
                         <Server className="h-3.5 w-3.5" />
@@ -2319,8 +3585,8 @@ function OpenAIPage() {
                       </div>
                       <span className="text-xs text-kumo-subtle">{endpoints.length} 个</span>
                     </div>
-                    <LayerCard className="min-h-0 flex-1 overflow-hidden p-0 shadow-none">
-                      <div className="h-full overflow-auto scrollbar-thin">
+                    <LayerCard className="p-0 shadow-none">
+                      <div className="scrollbar-thin">
                         <Table layout="fixed" className="w-full text-xs">
                           <colgroup>
                             <col />
@@ -2339,7 +3605,12 @@ function OpenAIPage() {
                               <Table.Row
                                 key={item.id}
                                 variant={item.id === endpoint.id ? 'selected' : 'default'}
-                                className="h-11 cursor-pointer"
+                                className={`h-11 cursor-pointer ${draggedEndpointId === String(item.id) ? 'opacity-40' : ''}`}
+                                draggable={!endpointReorderSaving}
+                                onDragStart={event => handleEndpointDragStart(item, event)}
+                                onDragOver={handleEndpointDragOver}
+                                onDrop={event => handleEndpointDrop(item, event)}
+                                onDragEnd={handleEndpointDragEnd}
                                 onClick={() => setSelectedEndpointId(item.id)}
                               >
                                 <Table.Cell className="!px-2.5 !py-1.5">
@@ -2359,7 +3630,7 @@ function OpenAIPage() {
                                   </div>
                                 </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
-                                  {item.models?.length || 0}
+                                  {activeModelIdsForEndpoint(item).length}
                                 </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-center">
                                   <div
@@ -2389,19 +3660,51 @@ function OpenAIPage() {
                         <span className="truncate font-medium text-kumo-strong">
                           {endpoint.name || '未命名端点'}
                         </span>
-                        <InlineStatusPill
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label="复制端点地址"
+                          title={endpoint.baseUrl}
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(endpoint.baseUrl)
+                              .then(() => toast.success('端点地址已复制'))
+                              .catch(() => toast.error('复制失败'));
+                          }}
+                        >
+                          端点
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label="复制 API Key"
+                          title="复制 API Key"
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(endpoint.apiKey || '')
+                              .then(() => toast.success('API Key 已复制'))
+                              .catch(() => toast.error('复制失败'));
+                          }}
+                        >
+                          密钥
+                        </Button>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                        <StatusBadge
                           tone={validStatus ? 'success' : invalidStatus ? 'danger' : 'neutral'}
                         >
                           {validStatus ? '有效' : invalidStatus ? '无效' : '待检测'}
-                        </InlineStatusPill>
-                        <span
-                          className="hidden truncate font-mono text-[10px] text-kumo-subtle sm:block"
-                          title={endpoint.baseUrl}
-                        >
-                          {endpoint.baseUrl}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
+                        </StatusBadge>
+                        {Array.isArray(endpoint.headers) && endpoint.headers.length > 0 && (
+                          <StatusBadge
+                            tone="info"
+                            title={(endpoint.headers || [])
+                              .map(h => `${h.name}: ${h.value}`)
+                              .join('\n')}
+                          >
+                            {endpoint.headers.length} 请求头
+                          </StatusBadge>
+                        )}
                         <Button
                           shape="square"
                           size="sm"
@@ -2424,13 +3727,9 @@ function OpenAIPage() {
                           variant="secondary"
                           aria-label="刷新模型列表"
                           onClick={() => refreshEndpointModels(endpoint)}
-                          disabled={endpoint.refreshing}
+                          loading={endpoint.refreshing}
                           title="刷新模型列表"
-                          icon={
-                            <RefreshCw
-                              className={cx(actionIconClass, endpoint.refreshing && 'animate-spin')}
-                            />
-                          }
+                          icon={<RefreshCw className={actionIconClass} />}
                         />
                         <Button
                           shape="square"
@@ -2445,32 +3744,76 @@ function OpenAIPage() {
                         <Button
                           shape="square"
                           size="sm"
-                          variant="secondary-destructive"
-                          aria-label="删除端点"
+                          variant={
+                            deleteEndpointConfirmActive(endpoint.id)
+                              ? 'primary'
+                              : 'secondary-destructive'
+                          }
+                          aria-label={
+                            deleteEndpointConfirmActive(endpoint.id)
+                              ? `再次点击确认删除 ${endpoint.name || endpoint.baseUrl}`
+                              : `删除 ${endpoint.name || endpoint.baseUrl}`
+                          }
                           onClick={() => deleteEndpoint(endpoint)}
-                          title="删除端点"
+                          title={
+                            deleteEndpointConfirmActive(endpoint.id)
+                              ? '再次点击确认删除'
+                              : '删除端点'
+                          }
                         >
                           <Trash className={actionIconClass} />
                         </Button>
                       </div>
                     </div>
 
-                    <LayerCard className="min-h-0 min-w-0 flex-1 overflow-hidden p-0 shadow-none">
-                      <div className="h-full overflow-auto scrollbar-thin">
-                        <Table layout="fixed" className="min-w-[640px] text-xs">
+                    <LayerCard className="min-w-0 p-0 shadow-none">
+                      <div className="overflow-x-auto overscroll-x-contain touch-pan-x scrollbar-thin">
+                        <Table layout="fixed" className="min-w-[820px] text-xs">
                           <colgroup>
-                            <col />
+                            <col style={{ width: 56 }} />
+                            <col style={{ width: 260 }} />
+                            <col style={{ width: 150 }} />
                             <col style={{ width: 92 }} />
                             <col style={{ width: 96 }} />
                             <col style={{ width: 150 }} />
-                            <col style={{ width: 88 }} />
                           </colgroup>
                           <Table.Header sticky variant="compact">
                             <Table.Row className="h-8">
+                              <Table.Head className="!px-2 !py-1.5 text-center">
+                                <div
+                                  className="flex items-center justify-center"
+                                  onClick={event => event.stopPropagation()}
+                                  title={
+                                    disabledModelCount > 0
+                                      ? `启用 ${disabledModelCount} 个被停用的模型`
+                                      : '关闭所有非有效模型（检测有效的保留）'
+                                  }
+                                >
+                                  <Switch
+                                    size="sm"
+                                    aria-label={
+                                      disabledModelCount > 0
+                                        ? `启用 ${disabledModelCount} 个被停用的模型`
+                                        : '关闭所有非有效模型（检测有效的保留）'
+                                    }
+                                    checked={disabledModelCount === 0}
+                                    onCheckedChange={checked => {
+                                      if (checked) {
+                                        // 从关→开：启用全部被停用的模型
+                                        batchEnableDisabledModels(endpoint);
+                                      } else {
+                                        // 从开→关：关闭所有非有效模型
+                                        batchCloseNonHealthyModels(endpoint);
+                                      }
+                                    }}
+                                    disabled={modelBatchActionLoading || modelHealthBatchLoading}
+                                  />
+                                </div>
+                              </Table.Head>
                               <Table.Head className="!px-2.5 !py-1.5">模型</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5">模型映射</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-center">健康</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5 text-right">延迟</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5">最近检测</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">延迟</Table.Head>
                               <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                             </Table.Row>
                           </Table.Header>
@@ -2509,7 +3852,23 @@ function OpenAIPage() {
                                           : '未检测';
 
                                 return (
-                                  <Table.Row key={modelId} className="h-9">
+                                  <Table.Row key={`${endpoint.id}:${modelId}`} className="h-9">
+                                    <Table.Cell className="!px-2 !py-1.5 text-center">
+                                      <div
+                                        className="flex justify-center"
+                                        onClick={event => event.stopPropagation()}
+                                      >
+                                        <Switch
+                                          size="sm"
+                                          aria-label={modelEnabledForEndpoint(endpoint, modelId) ? `停用 ${modelId}` : `启用 ${modelId}`}
+                                          checked={modelEnabledForEndpoint(endpoint, modelId)}
+                                          onCheckedChange={enabled =>
+                                            toggleModelEnabled(endpoint, modelId, enabled)
+                                          }
+                                          disabled={!!modelSwitchLoading[`${endpoint.id}:${modelId}`]}
+                                        />
+                                      </div>
+                                    </Table.Cell>
                                     <Table.Cell className="!px-2.5 !py-1.5">
                                       <span
                                         className="block truncate font-medium text-kumo-strong"
@@ -2518,16 +3877,51 @@ function OpenAIPage() {
                                         {modelId}
                                       </span>
                                     </Table.Cell>
+                                    <Table.Cell className="!px-2 !py-1.5">
+                                      {mappingEditKey === `${endpoint.id}:${modelId}` ? (
+                                        <Input
+                                          autoFocus
+                                          size="sm"
+                                          value={mappingDraft}
+                                          onChange={event => setMappingDraft(event.target.value)}
+                                          onKeyDown={event => {
+                                            event.stopPropagation();
+                                            if (event.key === 'Enter') {
+                                              saveEndpointMapping(endpoint, modelId, mappingDraft);
+                                            } else if (event.key === 'Escape') {
+                                              setMappingEditKey(null);
+                                            }
+                                          }}
+                                          className="w-full font-mono text-[10px]"
+                                          placeholder="对外名称"
+                                        />
+                                      ) : (
+                                        <span
+                                          className="block cursor-text truncate font-mono text-[10px]"
+                                          title="双击编辑对外映射名称"
+                                          onDoubleClick={event => {
+                                            event.stopPropagation();
+                                            setMappingDraft(endpoint.modelMappings?.[modelId] || '');
+                                            setMappingEditKey(`${endpoint.id}:${modelId}`);
+                                          }}
+                                        >
+                                          {endpoint.modelMappings?.[modelId] ? (
+                                            <span className="text-kumo-brand">
+                                              {endpoint.modelMappings[modelId]}
+                                            </span>
+                                          ) : (
+                                            <span className="text-kumo-subtle">双击设置</span>
+                                          )}
+                                        </span>
+                                      )}
+                                    </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
-                                      <InlineStatusPill tone={healthTone}>
+                                      <StatusBadge tone={healthTone}>
                                         {healthLabel}
-                                      </InlineStatusPill>
+                                      </StatusBadge>
                                     </Table.Cell>
-                                    <Table.Cell className="!px-2 !py-1.5 text-right font-mono text-kumo-strong">
+                                    <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
                                       {health?.latency != null ? `${health.latency} ms` : '-'}
-                                    </Table.Cell>
-                                    <Table.Cell className="!px-2 !py-1.5 text-kumo-subtle">
-                                      {health?.checkedAt ? formatDateTime(health.checkedAt) : '-'}
                                     </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
                                       <div className="inline-flex gap-1">
@@ -2547,7 +3941,7 @@ function OpenAIPage() {
                                           onClick={() =>
                                             testModelHealth({ id: modelId }, endpoint.id)
                                           }
-                                          disabled={!!health?.loading}
+                                          disabled={modelHealthBatchLoading}
                                           title={
                                             health?.error ||
                                             (canStopHealthCheck
@@ -2564,27 +3958,27 @@ function OpenAIPage() {
                                             )
                                           }
                                         />
-                                        <Button
-                                          shape="square"
-                                          size="sm"
-                                          variant="secondary"
-                                          aria-label={`复制 ${modelId}`}
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(modelId);
-                                            toast.success('已复制模型名称');
-                                          }}
-                                          title="复制模型名称"
-                                          icon={<Copy className="h-3.5 w-3.5" />}
-                                        />
-                                      </div>
-                                    </Table.Cell>
-                                  </Table.Row>
+<Button
+                                            shape="square"
+                                            size="sm"
+                                            variant="secondary"
+                                            aria-label={`复制 ${modelId}`}
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(modelId);
+                                              toast.success('已复制模型名称');
+                                            }}
+                                            title="复制模型名称"
+                                            icon={<Copy className="h-3.5 w-3.5" />}
+                                          />
+                                        </div>
+                                      </Table.Cell>
+                                    </Table.Row>
                                 );
                               })
                             ) : (
                               <Table.Row>
                                 <Table.Cell
-                                  colSpan={5}
+                                  colSpan={6}
                                   className="py-10 text-center text-kumo-subtle"
                                 >
                                   暂无模型数据，可刷新端点获取
@@ -2600,44 +3994,14 @@ function OpenAIPage() {
               );
             })()
           )}
-        </GatewaySection>
+        </div>
       )}
 
       {/* ==================== 2. API 密钥 Tab ==================== */}
       {activeTab === 'keys' && (
-        <GatewaySection
-          className="min-h-0 flex-1"
-          title="API 密钥"
-          description="管理客户端密钥"
-          icon={<Key className="h-4 w-4 text-kumo-brand" />}
-          actions={
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={loadGatewayKeys}
-                disabled={gatewayKeysLoading}
-                className="flex items-center gap-1.5"
-              >
-                <RefreshCw
-                  className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')}
-                />
-                <span>刷新</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={openAddGatewayKeyModal}
-                className="flex items-center gap-1.5"
-              >
-                <Plus className={iconButtonIconClass} />
-                <span>新建密钥</span>
-              </Button>
-            </div>
-          }
-          bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
-        >
-          <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
-            <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
+        <div className="flex grow flex-col gap-3">
+          <LayerCard className="w-full min-w-0 overflow-hidden p-0 shadow-none">
+            <div className="min-w-0 overflow-x-auto scrollbar-thin">
               <Table layout="fixed" className="min-w-[1084px]">
                 <colgroup>
                   <col style={{ width: 180 }} />
@@ -2651,11 +4015,12 @@ function OpenAIPage() {
                 <Table.Header sticky variant="compact">
                   <Table.Row>
                     <Table.Head>名称</Table.Head>
-                    <Table.Head>密钥</Table.Head>
+                    <Table.Head className="text-center">密钥</Table.Head>
                     <Table.Head className="text-center">状态</Table.Head>
-                    <Table.Head>最近使用</Table.Head>
-                    <Table.Head>过期时间</Table.Head>
-                    <Table.Head className="text-right">请求数</Table.Head>
+                    <Table.Head className="text-center">最近使用</Table.Head>
+                    <Table.Head className="text-center">过期时间</Table.Head>
+                    <Table.Head className="text-center">请求数</Table.Head>
+                    <Table.Head className="text-center">Token 用量</Table.Head>
                     <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
@@ -2708,13 +4073,13 @@ function OpenAIPage() {
                         >
                           {key.name || '未命名密钥'}
                         </Table.Cell>
-                        <Table.Cell>
+                        <Table.Cell className="text-center">
                           {key.apiKey ? (
                             <ClipboardText
                               size="sm"
                               text={key.apiKey}
                               className="min-w-0 w-full font-mono text-[0.9em]"
-                              tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制' }}
+                              tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制', side: 'bottom' }}
                               labels={{ copyAction: `复制 ${key.name} 的 API Key` }}
                             />
                           ) : (
@@ -2722,18 +4087,40 @@ function OpenAIPage() {
                           )}
                         </Table.Cell>
                         <Table.Cell className="text-center">
-                          <InlineStatusPill tone={key.enabled ? 'success' : 'neutral'}>
+                          <StatusBadge tone={key.enabled ? 'success' : 'neutral'}>
                             {key.enabled ? '已启用' : '已停用'}
-                          </InlineStatusPill>
+                          </StatusBadge>
                         </Table.Cell>
-                        <Table.Cell className="truncate text-sm text-kumo-subtle">
+                        <Table.Cell className="truncate text-center text-sm text-kumo-subtle">
                           {key.lastUsed ? formatDateTime(key.lastUsed) : '从未使用'}
                         </Table.Cell>
-                        <Table.Cell className="truncate text-sm text-kumo-subtle">
+                        <Table.Cell className="truncate text-center text-sm text-kumo-subtle">
                           {key.expiresAt ? formatDateTime(key.expiresAt) : '永不过期'}
                         </Table.Cell>
-                        <Table.Cell className="text-right font-mono text-[0.9em] text-kumo-strong">
+                        <Table.Cell className="text-center font-mono text-[0.9em] text-kumo-strong">
                           {(key.requestCount || 0).toLocaleString()}
+                        </Table.Cell>
+                        <Table.Cell className="text-center font-mono text-[0.9em]">
+                          {key.maxTokensQuota > 0 ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span
+                                className={
+                                  (key.totalTokensUsed || 0) >= key.maxTokensQuota
+                                    ? 'text-kumo-danger'
+                                    : 'text-kumo-strong'
+                                }
+                              >
+                                {(key.totalTokensUsed || 0).toLocaleString()}
+                              </span>
+                              <span className="text-kumo-subtle">
+                                / {key.maxTokensQuota.toLocaleString()}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-kumo-subtle">
+                              {(key.totalTokensUsed || 0).toLocaleString()}
+                            </span>
+                          )}
                         </Table.Cell>
                         <Table.Cell>
                           <div className="flex justify-center gap-1.5">
@@ -2744,16 +4131,20 @@ function OpenAIPage() {
                               aria-label={key.enabled ? '停用密钥' : '启用密钥'}
                               onClick={() => toggleGatewayKey(key)}
                               title={key.enabled ? '停用密钥' : '启用密钥'}
-                              disabled={!!gatewayKeyToggleLoading[key.id]}
+                              loading={!!gatewayKeyToggleLoading[key.id]}
+                              icon={<Reboot className="h-3.5 w-3.5" />}
+                            />
+                            <Button
+                              shape="square"
+                              size="sm"
+                              variant={key.isDefault ? 'primary' : 'outline'}
+                              aria-label={key.isDefault ? '默认密钥' : '设为默认密钥'}
+                              onClick={() => setDefaultGatewayKey(key)}
+                              disabled={key.isDefault}
+                              className={key.isDefault ? undefined : 'text-kumo-subtle hover:text-kumo-brand'}
+                              title={key.isDefault ? '当前为默认密钥' : '设为默认密钥'}
                             >
-                              <span className="flex h-4 w-4 items-center justify-center">
-                                <Reboot
-                                  className={cx(
-                                    'h-3.5 w-3.5',
-                                    gatewayKeyToggleLoading[key.id] && 'animate-spin'
-                                  )}
-                                />
-                              </span>
+                              <Star className="w-3.5 h-3.5" />
                             </Button>
                             <Button
                               shape="square"
@@ -2780,10 +4171,14 @@ function OpenAIPage() {
                             <Button
                               shape="square"
                               size="sm"
-                              variant="secondary-destructive"
+                              variant={
+                                isArmed(`gateway-key-${key.id}`)
+                                  ? 'destructive'
+                                  : 'secondary-destructive'
+                              }
                               aria-label="删除密钥"
                               onClick={() => deleteGatewayKey(key)}
-                              title="删除密钥"
+                              title={isArmed(`gateway-key-${key.id}`) ? '再次点击确认删除' : '删除密钥'}
                             >
                               <Trash className="w-3.5 h-3.5" />
                             </Button>
@@ -2796,103 +4191,235 @@ function OpenAIPage() {
               </Table>
             </div>
           </LayerCard>
-        </GatewaySection>
+        </div>
       )}
 
       {/* ==================== 3. 网关分析 Tab ==================== */}
       {activeTab === 'analytics' && (
-        <GatewaySection
-          className="min-h-0 flex-1"
-          title="网关分析"
-          description="可靠性、Token、调用方"
-          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
-          actions={
-            <div className="flex items-center gap-3">
-              <Select
-                size="sm"
-                aria-label="选择分析范围"
-                value={String(analyticsDays)}
-                onValueChange={val => {
-                  setAnalyticsDays(Number(val));
-                  setAnalyticsPage(1);
-                }}
-                items={[
-                  { value: '1', label: '最近 24 小时' },
-                  { value: '7', label: '最近 7 天' },
-                  { value: '30', label: '最近 30 天' },
-                ]}
-                className="w-36 text-sm text-kumo-strong"
-              />
-              <Button
-                size="sm"
-                onClick={fetchAnalytics}
-                disabled={analyticsLoading}
-                className="flex items-center gap-1.5"
-              >
-                <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
-                <span>刷新</span>
-              </Button>
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1 overflow-hidden">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">网关请求</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <Activity className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                {analyticsLoading ? (
+                  <SkeletonLine className="h-6 w-20" />
+                ) : (
+                  <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-strong">
+                    {String(analyticsSummary.totalRequests)}
+                  </span>
+                )}
+                <span className="truncate text-[11px] text-kumo-subtle">最近 {analyticsDays} 天</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">平均端到端延迟</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-warning">
+                    <Clock className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-warning">
+                        {(analyticsSummary.avgLatency / 1000).toFixed(2)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">s</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">最近 {analyticsDays} 天</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">词元用量（含缓存）</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <Brain className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                {analyticsLoading ? (
+                  <SkeletonLine className="h-6 w-24" />
+                ) : (
+                  <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
+                    {formatTokensM(analyticsSummary.totalTokens)}
+                  </span>
+                )}
+                <span
+                  className="truncate font-mono text-[11px] text-kumo-subtle"
+                  title="非缓存输入 = 输入（含缓存）− 缓存命中的词元"
+                >
+                  <ArrowDown
+                    className="inline h-3 w-3 align-[-1px]"
+                    aria-hidden="true"
+                  />{' '}
+                  {formatTokensM(Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens))}（
+                  {analyticsSummary.totalPromptTokens > 0
+                    ? `${(
+                        (Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens) /
+                          analyticsSummary.totalPromptTokens) *
+                        100
+                      ).toFixed(1)}%`
+                    : '0.0%'}
+                  ） · <ArrowUp className="inline h-3 w-3 align-[-1px]" aria-hidden="true" />{' '}
+                  {formatTokensM(analyticsSummary.totalCompletionTokens || 0)}
+                </span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">平均 TPM</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <Cpu className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
+                        {((analyticsSummary.totalTokens || 0) / Math.max(1, analyticsDays * 24 * 60)).toFixed(1)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">/min</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">每分钟词元</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">平均 RPM</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <TrendingUp className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
+                        {((analyticsSummary.totalRequests || 0) / Math.max(1, analyticsDays * 24 * 60)).toFixed(1)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">/min</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">每分钟请求</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">上游错误率</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-danger">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-danger">
+                        {(analyticsSummary.errorRate * 100).toFixed(1)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">%</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">请求失败占比</span>
+              </AppCard>
             </div>
-          }
-          bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
-        >
-          <div className="grid shrink-0 gap-3 xl:h-44 xl:grid-cols-[minmax(24rem,1.15fr)_minmax(18rem,0.85fr)_minmax(18rem,0.85fr)]">
-            <LayerCard className="grid overflow-hidden p-0 shadow-none sm:grid-cols-2">
-              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3 sm:border-r">
-                <span className="text-sm font-medium text-kumo-subtle">网关请求</span>
-                <span className="font-mono text-lg font-semibold text-kumo-strong">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-16" />
-                  ) : (
-                    analyticsSummary.totalRequests
-                  )}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-                <span className="text-sm font-medium text-kumo-subtle">平均端到端延迟</span>
-                <span className="font-mono text-lg font-semibold text-kumo-warning">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-16" />
-                  ) : (
-                    `${analyticsSummary.avgLatency.toFixed(0)} ms`
-                  )}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3 sm:border-b-0 sm:border-r">
-                <span className="text-sm font-medium text-kumo-subtle">Token 用量</span>
-                <span className="font-mono text-lg font-semibold text-kumo-brand">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-20" />
-                  ) : (
-                    analyticsSummary.totalTokens.toLocaleString()
-                  )}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3 px-4 py-3">
-                <span className="text-sm font-medium text-kumo-subtle">上游错误率</span>
-                <span className="font-mono text-lg font-semibold text-kumo-danger">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-16" />
-                  ) : (
-                    `${(analyticsSummary.errorRate * 100).toFixed(1)}%`
-                  )}
-                </span>
-              </div>
-            </LayerCard>
 
-            <AppCard padding="md" className="flex min-h-0 flex-col gap-3 xl:h-full">
-              <div className="flex items-center gap-1.5">
-                <PieChart className="w-4 h-4 text-kumo-brand" />
-                <h4 className="text-sm font-semibold text-kumo-strong">模型 Token 分布</h4>
-              </div>
-              <div className="max-h-44 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin xl:max-h-none">
+            <div className="grid gap-3 xl:grid-cols-2">
+            {[
+              {
+                key: 'requests',
+                icon: <Activity className="h-4 w-4 text-kumo-brand" />,
+                title: '请求量趋势',
+                series: trendSeries.requests,
+              },
+              {
+                key: 'tokens',
+                icon: <Brain className="h-4 w-4 text-kumo-brand" />,
+                title: '词元趋势',
+                series: trendSeries.tokens,
+              },
+              {
+                key: 'latency',
+                icon: <Clock className="h-4 w-4 text-kumo-warning" />,
+                title: '平均延迟趋势',
+                series: trendSeries.latency,
+              },
+              {
+                key: 'errors',
+                icon: <AlertTriangle className="h-4 w-4 text-kumo-danger" />,
+                title: '错误率趋势',
+                series: trendSeries.errorRate,
+              },
+            ].map(card => (
+              <LayerCard key={card.key} className="min-w-0 p-0">
+                <LayerCard.Secondary>{card.title}</LayerCard.Secondary>
+                <LayerCard.Primary className="flex min-h-0 flex-col gap-2 !p-3">
+                  <div className="min-h-0 w-full" style={{ height: 168 }}>
+                    {analyticsLoading && !analyticsCharts.daily?.length ? (
+                      <SkeletonLine className="h-full w-full" />
+                    ) : card.series.labels.length === 0 ? (
+                      <div className="flex h-full items-center justify-center text-sm text-kumo-subtle">
+                        暂无数据
+                      </div>
+                    ) : (
+                      <TrendBarChart
+                        labels={card.series.labels}
+                        values={card.series.values}
+                        color={card.series.color}
+                        isDarkMode={isDarkMode}
+                        formatValue={card.series.formatValue}
+                        formatAxis={card.series.formatAxis}
+                      />
+                    )}
+                  </div>
+                </LayerCard.Primary>
+              </LayerCard>
+            ))}
+          </div>
+
+            <div className="grid">
+            <LayerCard className="min-w-0 p-0">
+              <LayerCard.Secondary>模型调用趋势</LayerCard.Secondary>
+              <LayerCard.Primary className="!p-3">
+              {analyticsLoading && !analyticsCharts.daily?.length ? (
+                <SkeletonLine className="h-[280px] w-full" />
+              ) : !Array.isArray(byModelTrend.labels) || byModelTrend.labels.length === 0 ? (
+                <div className="flex h-[280px] items-center justify-center text-sm text-kumo-subtle">
+                  暂无数据
+                </div>
+              ) : (
+                <ModelTrendChart
+                  labels={byModelTrend.labels}
+                  series={byModelTrend.models}
+                  isDarkMode={isDarkMode}
+                />
+              )}
+              </LayerCard.Primary>
+            </LayerCard>
+          </div>
+
+            <div className="grid gap-3 xl:grid-cols-2">
+            <LayerCard className="min-w-0 p-0">
+              <LayerCard.Secondary>模型词元分布</LayerCard.Secondary>
+              <LayerCard.Primary className="!p-3">
+                <div className="min-h-0">
                 {analyticsLoading ? (
                   <div className="space-y-2">
                     <SkeletonLine className="w-full h-4" />
                     <SkeletonLine className="w-full h-4" />
                   </div>
                 ) : !analyticsCharts.models || analyticsCharts.models.length === 0 ? (
-                  <div className="text-center py-16 text-kumo-subtle text-sm">暂无模型数据</div>
+                  <div className="py-16 text-center text-sm text-kumo-subtle">暂无模型数据</div>
                 ) : (
                   (() => {
                     const totalTokens =
@@ -2900,35 +4427,55 @@ function OpenAIPage() {
                         (sum, model) => sum + (Number(model.tokens) || 0),
                         0
                       ) || 1;
-                    return [...analyticsCharts.models]
+                    const sorted = [...analyticsCharts.models]
                       .sort((a, b) => (Number(b.tokens) || 0) - (Number(a.tokens) || 0))
-                      .map(model => {
-                        const tokens = Number(model.tokens) || 0;
-                        const percent = (tokens / totalTokens) * 100;
-                        const pct = percent.toFixed(1);
-                        return (
-                          <div key={model.model} className="space-y-1 text-sm">
-                            <Meter
-                              label={model.model}
-                              value={percent}
-                              customValue={`${tokens.toLocaleString()} Token (${pct}%)`}
-                              trackClassName="h-2 bg-kumo-recessed"
-                              indicatorClassName="bg-kumo-brand"
-                            />
-                          </div>
-                        );
-                      });
+                      .slice(0, 20);
+                    return (
+                      <div className="flex flex-col gap-1.5">
+                        {sorted.map((model, index) => {
+                          const tokens = Number(model.tokens) || 0;
+                          const percent = (tokens / totalTokens) * 100;
+                          return (
+                            <div
+                              key={model.model}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <span
+                                className="w-40 shrink-0 truncate font-medium text-kumo-strong"
+                                title={model.model}
+                              >
+                                {model.model}
+                              </span>
+                              <div className="h-3 min-w-0 flex-1 overflow-hidden rounded-full bg-kumo-recessed">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${Math.max(2, Math.min(100, percent))}%`,
+                                    background: ChartPalette.categorical(index, isDarkMode),
+                                  }}
+                                />
+                              </div>
+                              <span className="w-14 shrink-0 text-right font-mono text-[11px] text-kumo-subtle">
+                                {formatTokensM(tokens)}
+                              </span>
+                              <span className="w-11 shrink-0 text-right font-mono text-[10px] text-kumo-subtle">
+                                {percent.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
                   })()
                 )}
               </div>
-            </AppCard>
+              </LayerCard.Primary>
+            </LayerCard>
 
-            <AppCard padding="md" className="flex min-h-0 flex-col gap-3 xl:h-full">
-              <div className="flex items-center gap-1.5">
-                <Activity className="h-4 w-4 text-kumo-brand" />
-                <h4 className="text-sm font-semibold text-kumo-strong">模型调用次数</h4>
-              </div>
-              <div className="max-h-44 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin xl:max-h-none">
+            <LayerCard className="min-w-0 p-0">
+              <LayerCard.Secondary>模型调用次数</LayerCard.Secondary>
+              <LayerCard.Primary className="!p-3">
+                <div className="min-h-0">
                 {analyticsLoading ? (
                   <div className="space-y-2">
                     <SkeletonLine className="h-4 w-full" />
@@ -2943,120 +4490,221 @@ function OpenAIPage() {
                         (sum, model) => sum + (Number(model.count) || 0),
                         0
                       ) || 1;
-                    return [...analyticsCharts.models]
+                    const sorted = [...analyticsCharts.models]
                       .sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0))
-                      .map(model => {
-                        const count = Number(model.count) || 0;
-                        const percent = (count / totalCount) * 100;
-                        return (
-                          <div key={model.model} className="space-y-1 text-sm">
-                            <Meter
-                              label={model.model}
-                              value={percent}
-                              customValue={`${count.toLocaleString()} 次 (${percent.toFixed(1)}%)`}
-                              trackClassName="h-2 bg-kumo-recessed"
-                              indicatorClassName="bg-kumo-brand"
-                            />
-                          </div>
-                        );
-                      });
+                      .slice(0, 20);
+                    return (
+                      <div className="flex flex-col gap-1.5">
+                        {sorted.map((model, index) => {
+                          const count = Number(model.count) || 0;
+                          const percent = (count / totalCount) * 100;
+                          return (
+                            <div
+                              key={model.model}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <span
+                                className="w-40 shrink-0 truncate font-medium text-kumo-strong"
+                                title={model.model}
+                              >
+                                {model.model}
+                              </span>
+                              <div className="h-3 min-w-0 flex-1 overflow-hidden rounded-full bg-kumo-recessed">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${Math.max(2, Math.min(100, percent))}%`,
+                                    background: ChartPalette.categorical(index, isDarkMode),
+                                  }}
+                                />
+                              </div>
+                              <span className="w-14 shrink-0 text-right font-mono text-[11px] text-kumo-subtle">
+                                {formatCompact(count, 0)}
+                              </span>
+                              <span className="w-11 shrink-0 text-right font-mono text-[10px] text-kumo-subtle">
+                                {percent.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
                   })()
                 )}
               </div>
-            </AppCard>
+              </LayerCard.Primary>
+            </LayerCard>
           </div>
+        </div>
+      )}
 
+      {/* ==================== 4. 网关日志 Tab ==================== */}
+      {activeTab === 'logs' && (
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           {/* Logs table and pagination */}
           <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
             <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
-              <Table layout="fixed" className="min-w-[1128px]">
+              <Table layout="fixed" className="min-w-[1380px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
                 <colgroup>
-                  <col style={{ width: 156 }} />
-                  <col style={{ width: 112 }} />
-                  <col style={{ width: 136 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 80 }} />
+                  <col style={{ width: 88 }} />
+                  <col style={{ width: 68 }} />
+                  <col style={{ width: 168 }} />
                   <col style={{ width: 132 }} />
-                  <col style={{ width: 220 }} />
-                  <col style={{ width: 84 }} />
-                  <col style={{ width: 92 }} />
-                  <col style={{ width: 132 }} />
-                  <col style={{ width: 92 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 48 }} />
+                  <col style={{ width: 104 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 150 }} />
                 </colgroup>
                 <Table.Header sticky variant="compact">
                   <Table.Row>
-                    <Table.Head>时间</Table.Head>
-                    <Table.Head>路由</Table.Head>
-                    <Table.Head>端点</Table.Head>
-                    <Table.Head>调用密钥</Table.Head>
-                    <Table.Head>模型</Table.Head>
+                    <Table.Head className="text-center">时间</Table.Head>
+                    <Table.Head className="text-center">路由</Table.Head>
+                    <Table.Head className="text-center">端点</Table.Head>
+                    <Table.Head className="text-center">调用密钥</Table.Head>
+                    <Table.Head className="text-center">模型</Table.Head>
+                    <Table.Head className="text-center">出口 IP</Table.Head>
+                    <Table.Head className="text-center">客户端 IP</Table.Head>
                     <Table.Head className="text-center">状态</Table.Head>
-                    <Table.Head className="text-right">延迟</Table.Head>
-                    <Table.Head className="text-right">Prompt / Completion</Table.Head>
-                    <Table.Head className="text-right">总消耗</Table.Head>
+                    <Table.Head className="text-center">耗时/首字</Table.Head>
+                    <Table.Head className="text-center">输入 / 输出</Table.Head>
+                    <Table.Head className="text-center">缓存</Table.Head>
+                    <Table.Head className="text-center">总消耗</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
                   {analyticsLoading && analyticsLogs.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={9} className="text-center py-8">
-                        <RotateCw className="w-5 h-5 animate-spin mx-auto text-kumo-subtle" />
+                      <Table.Cell colSpan={12} className="text-center py-8">
+                        <Loader size={20} className="mx-auto text-kumo-subtle" />
                       </Table.Cell>
                     </Table.Row>
                   ) : analyticsLogs.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={9} className="text-center py-8 text-kumo-subtle text-sm">
+                      <Table.Cell colSpan={12} className="text-center py-8 text-kumo-subtle text-sm">
                         暂无网关日志记录
                       </Table.Cell>
                     </Table.Row>
                   ) : (
-                    analyticsLogs.map(log => (
-                      <Table.Row key={log.id} className="text-sm">
-                        <Table.Cell className="truncate text-kumo-subtle font-mono">
-                          {formatDateTime(log.timestamp)}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate font-mono text-kumo-subtle"
-                          title={log.route}
-                        >
-                          {log.route === 'chat.completions'
-                            ? '对话完成'
-                            : log.route === 'models'
-                              ? '模型列表'
-                              : log.route || '-'}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate text-kumo-strong font-semibold"
-                          title={log.endpointName}
-                        >
-                          {log.endpointName}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate text-kumo-subtle"
-                          title={log.gatewayKeyName}
-                        >
-                          {log.gatewayKeyName || '未识别密钥'}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate text-kumo-strong font-mono font-medium"
-                          title={log.model}
-                        >
-                          {log.model}
-                        </Table.Cell>
-                        <Table.Cell className="text-center">
-                          <InlineStatusPill tone={log.statusCode < 400 ? 'success' : 'danger'}>
-                            {log.statusCode}
-                          </InlineStatusPill>
-                        </Table.Cell>
-                        <Table.Cell className="text-right text-kumo-strong font-mono font-semibold">
-                          {log.latencyMs} ms
-                        </Table.Cell>
-                        <Table.Cell className="text-right text-kumo-subtle font-mono">
-                          {log.promptTokens} / {log.completionTokens}
-                        </Table.Cell>
-                        <Table.Cell className="text-right text-kumo-brand font-mono font-semibold">
-                          {log.totalTokens}
-                        </Table.Cell>
-                      </Table.Row>
-                    ))
+                    analyticsLogs.map(log => {
+                      return (
+                        <Table.Row key={log.id} className="text-sm">
+                          <Table.Cell className="truncate text-center font-mono text-kumo-subtle">
+                            {formatDateTime(log.timestamp)}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-mono text-kumo-subtle"
+                            title={log.route}
+                          >
+                            {!log.route ? '-' : log.route.replace(/^chat\./, '')}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-semibold text-kumo-strong"
+                            title={log.endpointName}
+                          >
+                            {log.endpointName}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center text-kumo-subtle"
+                            title={log.gatewayKeyName}
+                          >
+                            {log.gatewayKeyName || '未识别密钥'}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-mono font-medium text-kumo-strong"
+                            title={log.model}
+                          >
+                            {log.model}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="text-center font-mono text-kumo-subtle"
+                            title={log.upstreamIp || '本机出口'}
+                          >
+                            <div
+                              className="inline-flex items-center justify-center gap-1"
+                              title="经代理池出口"
+                            >
+                              <span className="truncate">{log.upstreamIp || '—'}</span>
+                              {log.viaProxy && <StatusBadge tone="info">代</StatusBadge>}
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-mono text-kumo-subtle"
+                            title={log.clientIp || '无客户端 IP'}
+                          >
+                            {log.clientIp || '—'}
+                          </Table.Cell>
+                          <Table.Cell className="text-center">
+                            <StatusBadge tone={log.statusCode < 400 ? 'success' : 'danger'}>
+                              {log.statusCode}
+                            </StatusBadge>
+                          </Table.Cell>
+                          <Table.Cell className="text-center">
+                            <div
+                              className="inline-flex items-center gap-1"
+                              title={log.stream ? '流式响应' : '非流式响应'}
+                            >
+                              <StatusBadge tone={resultTone(log.statusCode, log.completionTokens)}>
+                                {(log.latencyMs / 1000).toFixed(1)}s
+                              </StatusBadge>
+                              <StatusBadge tone={resultTone(log.statusCode, log.completionTokens)}>
+                                {log.ttfbMs > 0 ? (log.ttfbMs / 1000).toFixed(1) + 's' : '—'}
+                              </StatusBadge>
+                              <StatusBadge
+                                tone={log.stream ? 'info' : 'warning'}
+                                className="!px-1.5 !text-[10px]"
+                              >
+                                {log.stream ? '流' : '非流'}
+                              </StatusBadge>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell className="text-center font-mono">
+                            <div className="flex w-full items-baseline justify-center whitespace-nowrap">
+                              <span className="text-right text-kumo-strong">
+                                {log.promptTokens}
+                              </span>
+                              <span className="shrink-0 px-0.5 text-kumo-subtle">/</span>
+                              <span className="text-left text-kumo-strong">
+                                {log.completionTokens}
+                              </span>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell
+                            className="text-center font-mono"
+                            title="缓存命中 词元（占比 = 缓存 / 输入）"
+                          >
+                            <div className="flex w-full items-baseline justify-center whitespace-nowrap">
+                              <span className="text-right text-kumo-strong">
+                                {log.cachedTokens}
+                              </span>
+                              <span className="shrink-0 px-0.5 text-kumo-subtle">（</span>
+                              <span className="text-left text-kumo-strong">
+                                {log.promptTokens > 0
+                                  ? `${((log.cachedTokens / log.promptTokens) * 100).toFixed(1)}%）`
+                                  : '0.0%）'}
+                              </span>
+                            </div>
+                          </Table.Cell>
+<Table.Cell
+                            className="text-center font-mono"
+                            title="总消耗（实际消耗 = 总消耗 − 缓存）"
+                          >
+                            <div className="flex w-full items-baseline justify-center whitespace-nowrap">
+                              <span className="text-right font-semibold leading-none text-kumo-brand">
+                                {log.totalTokens}
+                              </span>
+                              <span className="shrink-0 px-0.5 leading-none text-kumo-subtle">（</span>
+                              <span className="text-left font-mono leading-none text-kumo-subtle">
+                                {Math.max(0, log.totalTokens - log.cachedTokens)}）
+                              </span>
+                            </div>
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })
                   )}
                 </Table.Body>
               </Table>
@@ -3077,7 +4725,7 @@ function OpenAIPage() {
                   pageNumber: '页码',
                   pageSize: '每页数量',
                 }}
-                className="shrink-0 border-x-0 border-b-0 border-t border-kumo-line bg-kumo-base px-3 py-2 text-sm shadow-none"
+                className="shrink-0 flex-wrap gap-x-3 gap-y-1 border-x-0 border-b-0 border-t border-kumo-line bg-kumo-base px-3 py-2 text-sm shadow-none [&_[data-slot=pagination-controls]]:ml-auto [&_[data-slot=pagination-info]]:min-w-0 max-sm:[&_[data-slot=pagination-info]]:hidden max-sm:[&_[data-slot=pagination-page-size]]:hidden max-sm:[&_[data-slot=pagination-separator]]:hidden max-sm:[&_[data-slot=pagination-controls]]:m-auto"
               >
                 <Pagination.Info>
                   {({ pageShowingRange, totalCount }) => (
@@ -3100,73 +4748,233 @@ function OpenAIPage() {
               </Pagination>
             )}
           </LayerCard>
-        </GatewaySection>
+        </div>
       )}
 
       {/* ==================== dialogs & modals ==================== */}
 
       {/* 1. Endpoint Add/Edit Dialog */}
       <Dialog.Root open={endpointFormOpen} onOpenChange={setEndpointFormOpen}>
-        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
-          <Dialog.Title className="text-sm font-semibold text-kumo-strong mb-1">
-            {editingEndpoint ? '编辑端点' : '添加 API 端点'}
-          </Dialog.Title>
-          <Dialog.Description className="text-sm text-kumo-subtle mb-4">
-            配置 OpenAI 兼容的 API 端点以供中转或对话使用。
-          </Dialog.Description>
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),42rem)] !w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] flex-col overflow-hidden !p-0">
+          <div className="shrink-0 px-6 pt-5">
+            <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
+              {editingEndpoint ? '编辑端点' : '添加 API 端点'}
+            </Dialog.Title>
+            <Dialog.Description className="mb-4 text-sm text-kumo-subtle">
+              配置 OpenAI 兼容的 API 端点以供中转或对话使用。
+            </Dialog.Description>
+          </div>
 
-          <div className="space-y-4">
-            <Input
-              size="sm"
-              label="名称"
-              type="text"
-              value={endpointForm.name}
-              onChange={e => setEndpointForm({ ...endpointForm, name: e.target.value })}
-              placeholder="如：DeepSeek 官方"
-              className="w-full text-kumo-strong text-sm font-sans"
-            />
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3 scrollbar-thin">
+            <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+              {/* ====== 左列：基本信息 ====== */}
+              <div className="space-y-4">
+                <Input
+                  size="sm"
+                  label="名称"
+                  type="text"
+                  value={endpointForm.name}
+                  onChange={e => setEndpointForm({ ...endpointForm, name: e.target.value })}
+                  placeholder="如：DeepSeek 官方"
+                  className="w-full text-kumo-strong text-sm font-sans"
+                />
 
-            <Input
-              size="sm"
-              label="Base URL"
-              type="text"
-              value={endpointForm.baseUrl}
-              onChange={e => setEndpointForm({ ...endpointForm, baseUrl: e.target.value })}
-              placeholder="https://api.openai.com/v1"
-              className="w-full text-kumo-strong text-[0.9em] font-mono"
-            />
+                <Input
+                  size="sm"
+                  label="Base URL"
+                  type="text"
+                  value={endpointForm.baseUrl}
+                  onChange={e => setEndpointForm({ ...endpointForm, baseUrl: e.target.value })}
+                  placeholder="https://api.openai.com/v1"
+                  className="w-full text-kumo-strong text-[0.9em] font-mono"
+                />
 
-            <Input
-              size="sm"
-              label="API Key"
-              type="text"
-              value={endpointForm.apiKey}
-              onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
-              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-              data-bwignore="true"
-              data-form-type="other"
-              spellCheck={false}
-              className="w-full text-kumo-strong text-[0.9em] font-mono"
-            />
+                <Input
+                  size="sm"
+                  label="API Key"
+                  type="text"
+                  value={endpointForm.apiKey}
+                  onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
+                  placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
+                  className="w-full text-kumo-strong text-[0.9em] font-mono"
+                />
 
-            <Input
-              size="sm"
-              label="备注"
-              type="text"
-              value={endpointForm.notes}
-              onChange={e => setEndpointForm({ ...endpointForm, notes: e.target.value })}
-              placeholder="选填"
-              className="w-full text-kumo-strong text-sm font-sans"
-            />
+                <Input
+                  size="sm"
+                  label="备注"
+                  type="text"
+                  value={endpointForm.notes}
+                  onChange={e => setEndpointForm({ ...endpointForm, notes: e.target.value })}
+                  placeholder="选填"
+                  className="w-full text-kumo-strong text-sm font-sans"
+                />
+
+                <div className="space-y-1.5">
+                  <Label showOptional>自定义请求头</Label>
+                  <div className="space-y-2">
+                    {(endpointForm.headers || []).map((header, index) => (
+                      <div
+                        key={index}
+                        className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_2rem] items-center gap-2"
+                      >
+                        <Input
+                          size="sm"
+                          type="text"
+                          value={header.name}
+                          onChange={e => updateEndpointHeader(index, 'name', e.target.value)}
+                          placeholder="Header 名称"
+                          spellCheck={false}
+                          autoComplete="off"
+                          data-1p-ignore
+                          className="w-full text-kumo-strong font-mono text-[0.85em]"
+                        />
+                        <Input
+                          size="sm"
+                          type="text"
+                          value={header.value}
+                          onChange={e => updateEndpointHeader(index, 'value', e.target.value)}
+                          placeholder="Header 值"
+                          spellCheck={false}
+                          autoComplete="off"
+                          data-1p-ignore
+                          className="w-full text-kumo-strong font-mono text-[0.85em]"
+                        />
+                        <Button
+                          shape="square"
+                          size="sm"
+                          variant="secondary-destructive"
+                          aria-label="删除请求头"
+                          onClick={() => removeEndpointHeader(index)}
+                          title="删除请求头"
+                          icon={<Trash className="h-3.5 w-3.5" />}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={addEndpointHeader}
+                    icon={<Plus className="h-3.5 w-3.5" />}
+                  >
+                    添加请求头
+                  </Button>
+                </div>
+              </div>
+
+              {/* ====== 右列：连接与代理 ====== */}
+              <div className="space-y-4">
+                <Select
+                  size="sm"
+                  label="连接协议"
+                  value={endpointForm.protocol || 'auto'}
+                  onValueChange={value => setEndpointForm(current => ({ ...current, protocol: value }))}
+                  items={ENDPOINT_PROTOCOL_OPTIONS}
+                  className="w-full"
+                />
+
+                <div className="space-y-1.5">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <Label showOptional>出口代理池</Label>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => setProxyManagerOpen(true)}
+                      icon={<Sliders className="h-3.5 w-3.5" />}
+                    >
+                      管理代理池（{endpointForm.proxyPool?.length || 0}）
+                    </Button>
+                  </div>
+                  <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2">
+                    {endpointForm.proxyPool?.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {(endpointForm.proxyBatches || []).map(batch => (
+                          <Badge
+                            key={batch.id}
+                            variant="outline"
+                            className="w-fit gap-1 !text-[11px] font-medium"
+                            title={`${batch.name}\n${batch.proxies?.length || 0} 条`}
+                          >
+                            <span className="max-w-40 truncate">{batch.name}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">
+                              {batch.proxies?.length || 0} 条
+                            </span>
+                          </Badge>
+                        ))}
+                        {manualProxyEntries.length > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="w-fit gap-1 !text-[11px] font-medium"
+                            title="手动添加/粘贴/订阅导入的代理"
+                          >
+                            <span>手动</span>
+                            <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">
+                              {manualProxyEntries.length} 条
+                            </span>
+                          </Badge>
+                        )}
+                        <span className="text-[11px] text-kumo-subtle">
+                          共 {endpointForm.proxyPool.length} 条
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-kumo-subtle">
+                        未配置代理，请求将直连上游。
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex min-h-8 items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label="代理开关"
+                    checked={!!endpointForm.proxyEnabled}
+                    onCheckedChange={checked =>
+                      setEndpointForm(current => ({ ...current, proxyEnabled: checked }))
+                    }
+                  />
+                  <span className="text-xs text-kumo-strong">代理开关</span>
+                </div>
+                <div className="flex min-h-8 items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label="限流自动切换代理"
+                    checked={!!endpointForm.autoSwitch}
+                    disabled={!endpointForm.proxyEnabled}
+                    onCheckedChange={checked =>
+                      setEndpointForm(current => ({ ...current, autoSwitch: checked }))
+                    }
+                  />
+                  <span className="text-xs text-kumo-subtle">限流或连接失败自动切换代理</span>
+                </div>
+                <div className="flex min-h-8 items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label="强制走代理池"
+                    checked={!!endpointForm.forceProxy}
+                    disabled={!endpointForm.proxyEnabled}
+                    onCheckedChange={checked =>
+                      setEndpointForm(current => ({ ...current, forceProxy: checked }))
+                    }
+                  />
+                  <span className="text-xs text-kumo-subtle">强制走代理，禁止直连</span>
+                </div>
+              </div>
+            </div>
 
             {endpointFormError && (
-              <p className="text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
-            )}
+                <p className="mt-4 text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
+              )}
+            </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-kumo-line bg-kumo-base px-6 py-4">
               <Dialog.Close
                 render={props => (
                   <Button size="sm" {...props} variant="secondary">
@@ -3178,19 +4986,332 @@ function OpenAIPage() {
                 {endpointSaving ? '保存中...' : '保存端点'}
               </Button>
             </div>
+        </Dialog>
+      </Dialog.Root>
+
+      {/* 1b. 出口代理池管理弹窗 */}
+      <Dialog.Root open={proxyManagerOpen} onOpenChange={setProxyManagerOpen}>
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),44rem)] !w-[min(38rem,calc(100vw-1rem))] !max-w-[min(38rem,calc(100vw-1rem))] flex-col overflow-hidden !p-0">
+          <div className="shrink-0 border-b border-kumo-line px-4 py-3 sm:px-5 sm:py-4">
+            <Dialog.Title className="text-sm font-semibold text-kumo-strong">
+              出口代理池（{endpointForm.proxyPool?.length || 0}）
+            </Dialog.Title>
+            <Dialog.Description className="mt-0.5 text-xs text-kumo-subtle">
+              请求按池轮换出口 IP。适合 IP 敏感的源；留空则直连。
+            </Dialog.Description>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 scrollbar-thin sm:px-5 sm:py-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={addEndpointProxy}
+                icon={<Plus className="h-3.5 w-3.5" />}
+              >
+                添加代理
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setProxyBatchOpen(current => !current)}
+                icon={<LogList className="h-3.5 w-3.5" />}
+              >
+                批量添加
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => proxyFileInputRef.current?.click()}
+                disabled={proxyImportLoading}
+                icon={proxyImportLoading ? <Loader size="sm" /> : <ArrowDown className="h-3.5 w-3.5" />}
+              >
+                {proxyImportLoading ? '解析中...' : '导入文件'}
+              </Button>
+              <input
+                ref={proxyFileInputRef}
+                type="file"
+                accept=".txt,.list,.conf,.csv,text/plain"
+                className="hidden"
+                onChange={e => importProxyFile(e.target.files?.[0])}
+              />
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setSubscriptionUrlOpen(current => !current)}
+                icon={<Globe className="h-3.5 w-3.5" />}
+              >
+                订阅链接导入
+              </Button>
+            </div>
+
+            {proxyBatchOpen && (
+              <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3">
+                <Textarea
+                  size="sm"
+                  value={proxyBatchText}
+                  onChange={e => setProxyBatchText(e.target.value)}
+                  placeholder={'每行一个代理地址，支持 socks5://、http(s):// 或 host:port\n如：\nsocks5://user:pass@1.2.3.4:1080\nhttp://5.6.7.8:8080'}
+                  spellCheck={false}
+                  rows={5}
+                  className="w-full font-mono text-[0.85em]"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setProxyBatchText('');
+                      setProxyBatchOpen(false);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={saveProxyBatch}
+                    icon={<Check className="h-3.5 w-3.5" />}
+                  >
+                    确定添加
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {subscriptionUrlOpen && (
+              <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3">
+                <Input
+                  size="sm"
+                  type="url"
+                  value={subscriptionUrl}
+                  onChange={e => setSubscriptionUrl(e.target.value)}
+                  placeholder="https://example.com/sub?token=xxx"
+                  spellCheck={false}
+                  autoComplete="off"
+                  data-1p-ignore
+                  className="w-full font-mono text-[0.85em]"
+                />
+                <p className="text-xs leading-snug text-kumo-subtle">
+                  后端将拉取订阅并解析其中的 socks/http 节点，导入为出口代理。仅本机/服务器能访问的节点可用。
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setSubscriptionUrl('');
+                      setSubscriptionUrlOpen(false);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={resolveSubscriptionProxies}
+                    disabled={proxyImportLoading}
+                    icon={proxyImportLoading ? <Loader size="sm" /> : <Globe className="h-3.5 w-3.5" />}
+                  >
+                    {proxyImportLoading ? '解析中...' : '解析并导入'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {(endpointForm.proxyBatches || []).length > 0 && (
+                <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-2">
+                  <div className="px-1 pt-0.5 text-xs font-semibold text-kumo-strong">
+                    导入批次
+                  </div>
+                  {(endpointForm.proxyBatches || []).map(batch => {
+                    const expanded = expandedBatchId === batch.id;
+                    return (
+                      <div key={batch.id} className="overflow-hidden rounded-md border border-kumo-line bg-kumo-base">
+                        <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+                          <Button
+                            shape="square"
+                            size="sm"
+                            variant="ghost"
+                            aria-label={expanded ? '收起' : '展开'}
+                            onClick={() => setExpandedBatchId(expanded ? null : batch.id)}
+                            icon={<ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xs font-semibold text-kumo-strong">{batch.name}</div>
+                            <div className="truncate font-mono text-[11px] text-kumo-subtle">
+                              {batch.proxies?.length || 0} 条 · {formatDateTime(batch.createdAt)}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            shape="square"
+                            variant="secondary-destructive"
+                            aria-label={`移除批次 ${batch.name}`}
+                            onClick={() => removeProxyBatch(batch)}
+                            icon={<Trash className="h-3.5 w-3.5" />}
+                          />
+                        </div>
+                        {expanded && (
+                          <div className="space-y-1.5 border-t border-kumo-line p-2">
+                            {(batch.proxies || []).slice(0, PROXY_PREVIEW_LIMIT).map(proxy => {
+                            const disabled = disabledProxyUntil(proxy);
+                            return (
+                              <div key={proxy} className="flex min-w-0 items-center gap-2">
+                                <span
+                                  className={`min-w-0 flex-1 truncate rounded border px-2 py-1 font-mono text-[11px] ${
+                                    disabled
+                                      ? 'border-kumo-danger/50 bg-kumo-danger/10 text-kumo-danger'
+                                      : 'border-kumo-line bg-kumo-recessed/25 text-kumo-subtle'
+                                  }`}
+                                  title={disabled ? `${proxy}\n${disabled.label}` : proxy}
+                                >
+                                  {proxy}
+                                </span>
+                                <Button
+                                  shape="square"
+                                  size="sm"
+                                  variant="secondary-destructive"
+                                  aria-label="移出此条"
+                                  onClick={() => removeProxyFromBatch(batch, proxy)}
+                                  title="移出此条"
+                                  icon={<X className="h-3 w-3" />}
+                                />
+                              </div>
+                            );
+                          })}
+                            {(batch.proxies || []).length > PROXY_PREVIEW_LIMIT && (
+                              <p className="px-1 text-[11px] text-kumo-subtle">
+                                仅预览前 {PROXY_PREVIEW_LIMIT} 条，共 {batch.proxies.length} 条
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {manualProxyEntries.length > 0 && (
+                <div className="flex items-center gap-2 px-1 pt-1">
+                  <span className="text-xs font-semibold text-kumo-strong">
+                    手动 / 未分组代理（{manualProxyEntries.length}）
+                  </span>
+                  <Button
+                    shape="square"
+                    size="xs"
+                    variant="ghost"
+                    aria-label={manualProxyExpanded ? '收起手动代理' : '展开手动代理'}
+                    onClick={() => setManualProxyExpanded(current => !current)}
+                    icon={<ChevronDown className={`h-3.5 w-3.5 transition-transform ${manualProxyExpanded ? 'rotate-180' : ''}`} />}
+                  />
+                </div>
+              )}
+              {manualProxyExpanded &&
+                manualProxyEntries.slice(0, PROXY_PREVIEW_LIMIT).map(({ proxy, index }) => {
+                const entry = parseProxyEntry(proxy);
+                const editing = editingProxyIndex === index;
+                const disabled = disabledProxyUntil(proxy);
+                return (
+                  <div key={`m-${index}`} className="flex min-w-0 items-center gap-2">
+                    {editing ? (
+                      <Input
+                        size="sm"
+                        type="text"
+                        value={proxy}
+                        onChange={e => updateEndpointProxy(index, e.target.value)}
+                        onBlur={() => setEditingProxyIndex(-1)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === 'Escape') setEditingProxyIndex(-1);
+                        }}
+                        spellCheck={false}
+                        autoComplete="off"
+                        data-1p-ignore
+                        autoFocus
+                        className="min-w-0 flex-1 font-mono text-[0.85em] text-kumo-strong"
+                      />
+                    ) : (
+                      <div
+                        className={`min-w-0 flex-1 cursor-pointer rounded-md border px-3 py-2 ${
+                          disabled
+                            ? 'border-kumo-danger/50 bg-kumo-danger/10'
+                            : 'border-kumo-line bg-kumo-recessed/25'
+                        }`}
+                        onClick={() => setEditingProxyIndex(index)}
+                        title={`${entry.full}${disabled ? `\n\n${disabled.label}` : ''}\n点击可编辑完整代理地址`}
+                      >
+                        {entry.label ? (
+                          <div className="flex min-w-0 items-baseline gap-1.5">
+                            <span className={`truncate text-sm font-semibold ${disabled ? 'text-kumo-danger' : 'text-kumo-strong'}`}>
+                              {entry.label}
+                            </span>
+                            {entry.host && entry.host !== entry.label && (
+                              <span className={`shrink-0 font-mono text-[11px] ${disabled ? 'text-kumo-danger/80' : 'text-kumo-subtle'}`}>
+                                {entry.host}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className={`truncate text-sm ${disabled ? 'text-kumo-danger' : 'text-kumo-subtle'}`}>空代理（点击编辑）</div>
+                        )}
+                      </div>
+                    )}
+                    <Button
+                      shape="square"
+                      size="sm"
+                      variant={editing ? 'primary' : 'secondary'}
+                      aria-label="编辑代理"
+                      onClick={() => setEditingProxyIndex(editing ? -1 : index)}
+                      title={editing ? '完成编辑' : '编辑代理'}
+                      icon={editing ? <Check className="h-3.5 w-3.5" /> : <Edit className="h-3.5 w-3.5" />}
+                    />
+                    <Button
+                      shape="square"
+                      size="sm"
+                      variant="secondary-destructive"
+                      aria-label="删除代理"
+                      onClick={() => removeEndpointProxy(index)}
+                      title="删除代理"
+                      icon={<Trash className="h-3.5 w-3.5" />}
+                    />
+                  </div>
+                );
+              })}
+              {!endpointForm.proxyPool?.length && (
+                <div className="rounded-md border border-dashed border-kumo-line py-8 text-center text-xs text-kumo-subtle">
+                  暂无代理。点击上方「添加代理」「导入文件」或「订阅链接导入」开始配置。
+                </div>
+              )}
+              {manualProxyEntries.length > PROXY_PREVIEW_LIMIT && (
+                <p className="text-xs text-kumo-subtle">
+                  仅预览前 {PROXY_PREVIEW_LIMIT} 条，共 {manualProxyEntries.length} 条（保存后全部生效）。
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-4 py-3 sm:px-5">
+            <Dialog.Close
+              render={props => (
+                <Button size="sm" {...props} variant="secondary">
+                  完成
+                </Button>
+              )}
+            />
           </div>
         </Dialog>
       </Dialog.Root>
 
       {/* 2. Gateway Key Dialogs */}
       <Dialog.Root open={gatewayKeyDialogOpen} onOpenChange={setGatewayKeyDialogOpen}>
-        <Dialog className="!w-[min(30rem,calc(100vw-2rem))] !max-w-[min(30rem,calc(100vw-2rem))] p-6">
+        <Dialog className="!w-[min(34rem,calc(100vw-2rem))] !max-w-[min(34rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
             {editingGatewayKey ? '编辑 API 密钥' : '新建 API 密钥'}
           </Dialog.Title>
-          <Dialog.Description className="mb-4 text-sm text-kumo-subtle">
-            此密钥用于客户端调用 /v1 兼容接口，不会暴露上游供应商 API Key。
-          </Dialog.Description>
 
           <div className="space-y-4">
             <Input
@@ -3201,9 +5322,37 @@ function OpenAIPage() {
               placeholder="如：生产环境、Open WebUI"
               className="w-full text-sm text-kumo-strong"
             />
+
             <div className="space-y-1.5">
               <Label showOptional>过期时间</Label>
-              <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_0.75rem_4.5rem] items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { label: '1 天', days: 1 },
+                  { label: '14 天', days: 14 },
+                  { label: '30 天', days: 30 },
+                  { label: '永久', days: 0 },
+                ].map(preset => (
+                  <Button
+                    key={preset.label}
+                    size="xs"
+                    variant={
+                      (preset.days === 0 && !gatewayKeyForm.expiresAt) ||
+                      (preset.days > 0 &&
+                        gatewayKeyForm.expiresAt &&
+                        Math.abs(
+                          new Date(gatewayKeyForm.expiresAt).getTime() -
+                            (Date.now() + preset.days * 24 * 60 * 60 * 1000)
+                        ) < 60 * 1000)
+                        ? 'primary'
+                        : 'outline'
+                    }
+                    onClick={() => applyGatewayKeyExpiryPreset(preset.days)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
                 <Popover>
                   <Popover.Trigger
                     render={
@@ -3211,7 +5360,7 @@ function OpenAIPage() {
                         size="sm"
                         variant="outline"
                         icon={CalendarDotsIcon}
-                        className="min-w-0 justify-start font-normal"
+                        className="min-w-0 flex-1 justify-start font-normal"
                       />
                     }
                   >
@@ -3250,8 +5399,9 @@ function OpenAIPage() {
                   value={gatewayKeyForm.expiresAt.slice(11, 13)}
                   onValueChange={value => updateGatewayKeyExpiryTime('hour', value)}
                   items={GATEWAY_EXPIRY_HOURS}
+                  className="w-[3.25rem] shrink-0"
                 />
-                <span className="text-center text-sm text-kumo-subtle">:</span>
+                <span className="shrink-0 text-sm text-kumo-subtle">:</span>
                 <Select
                   size="sm"
                   aria-label="过期分钟"
@@ -3259,9 +5409,108 @@ function OpenAIPage() {
                   value={gatewayKeyForm.expiresAt.slice(14, 16)}
                   onValueChange={value => updateGatewayKeyExpiryTime('minute', value)}
                   items={GATEWAY_EXPIRY_MINUTES}
+                  className="w-[3.25rem] shrink-0"
                 />
               </div>
             </div>
+
+            <Collapsible.Root
+              open={gatewayKeyAdvancedOpen}
+              onOpenChange={setGatewayKeyAdvancedOpen}
+            >
+              <Collapsible.DefaultTrigger>高级过滤</Collapsible.DefaultTrigger>
+              <Collapsible.DefaultPanel className="mt-2">
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label showOptional>允许的模型（白名单）</Label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(gatewayKeyForm.allowedModels || []).map(model => (
+                        <Badge
+                          key={model}
+                          variant="outline"
+                          className="max-w-full gap-1 font-mono !text-[11px] font-medium"
+                        >
+                          <span className="truncate">{model}</span>
+                          <Button
+                            size="xs"
+                            shape="square"
+                            variant="ghost"
+                            aria-label={`移除 ${model}`}
+                            onClick={() => removeGatewayKeyListItem('allowedModels', model)}
+                            icon={<X className="h-3 w-3" />}
+                          />
+                        </Badge>
+                      ))}
+                      <Input
+                        size="sm"
+                        type="text"
+                        value={gatewayKeyModelInput}
+                        onChange={e => setGatewayKeyModelInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addGatewayKeyListItem('allowedModels', gatewayKeyModelInput);
+                          }
+                        }}
+                        placeholder="输入模型名后回车"
+                        className="w-full font-mono text-[0.85em] text-kumo-strong"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label showOptional>允许的端点（白名单）</Label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(gatewayKeyForm.allowedEndpoints || []).map(endpointId => (
+                        <Badge
+                          key={endpointId}
+                          variant="outline"
+                          className="max-w-full gap-1 font-mono !text-[11px] font-medium"
+                        >
+                          <span className="truncate">{endpointId}</span>
+                          <Button
+                            size="xs"
+                            shape="square"
+                            variant="ghost"
+                            aria-label={`移除 ${endpointId}`}
+                            onClick={() => removeGatewayKeyListItem('allowedEndpoints', endpointId)}
+                            icon={<X className="h-3 w-3" />}
+                          />
+                        </Badge>
+                      ))}
+                      <Input
+                        size="sm"
+                        type="text"
+                        value={gatewayKeyEndpointInput}
+                        onChange={e => setGatewayKeyEndpointInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addGatewayKeyListItem('allowedEndpoints', gatewayKeyEndpointInput);
+                          }
+                        }}
+                        placeholder="输入端点 ID 后回车"
+                        className="w-full font-mono text-[0.85em] text-kumo-strong"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label showOptional>Token 配额</Label>
+                    <Input
+                      size="sm"
+                      type="number"
+                      min="0"
+                      value={gatewayKeyForm.maxTokensQuota}
+                      onChange={e =>
+                        setGatewayKeyForm({ ...gatewayKeyForm, maxTokensQuota: e.target.value })
+                      }
+                      placeholder="0 = 不限制"
+                      className="w-full font-mono text-[0.85em] text-kumo-strong"
+                    />
+                  </div>
+                </div>
+              </Collapsible.DefaultPanel>
+            </Collapsible.Root>
+
             {gatewayKeyFormError && (
               <p className="text-sm font-semibold text-kumo-danger">{gatewayKeyFormError}</p>
             )}
@@ -3339,7 +5588,7 @@ function OpenAIPage() {
 
             <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-kumo-strong">检测方式</span>
-              <InlineStatusPill tone="info">实时逐项回填</InlineStatusPill>
+              <StatusBadge tone="info">后端批量检测</StatusBadge>
             </div>
 
             <div className="flex items-center justify-between text-sm">
@@ -3384,8 +5633,8 @@ function OpenAIPage() {
             </div>
 
             <p className="text-xs text-kumo-subtle">
-              默认 {DEFAULT_MODEL_HEALTH_CONCURRENCY}；点击“开始检测”时最多检测前{' '}
-              {MAX_BATCH_MODEL_HEALTH_TARGETS} 个模型，并按返回顺序实时显示结果。
+              默认并发 {DEFAULT_MODEL_HEALTH_CONCURRENCY}、超时{' '}
+              {DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS} 秒；批量检测全部启用端点上的模型，完成后统一回填结果。
             </p>
 
             <div className="flex justify-end gap-3 pt-2">

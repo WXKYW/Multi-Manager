@@ -130,6 +130,7 @@ func EnsureCoreSchema(ctx context.Context, db *sql.DB) error {
 			fly_refresh_interval INTEGER DEFAULT 30000,
 			public_api_url TEXT,
 			time_zone TEXT DEFAULT 'system',
+			ui_font TEXT DEFAULT 'default',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS system_api_stats (
@@ -219,6 +220,7 @@ func ensureUserSettingsColumns(ctx context.Context, db *sql.DB) error {
 		{"fly_refresh_interval", "ALTER TABLE user_settings ADD COLUMN fly_refresh_interval INTEGER DEFAULT 30000"},
 		{"public_api_url", "ALTER TABLE user_settings ADD COLUMN public_api_url TEXT"},
 		{"time_zone", "ALTER TABLE user_settings ADD COLUMN time_zone TEXT DEFAULT 'system'"},
+		{"ui_font", "ALTER TABLE user_settings ADD COLUMN ui_font TEXT DEFAULT 'default'"},
 	}
 	for _, column := range columns {
 		exists, err := hasColumn(ctx, db, "user_settings", column.name)

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Chart, ChartPalette, Meter } from '@cloudflare/kumo';
+import { Chart, ChartLegend, ChartPalette, Meter } from '@cloudflare/kumo';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart } from 'echarts/charts';
 import {
@@ -17,6 +17,7 @@ import useStore from '../store.js';
 import { AppCard, PageStack, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { DASHBOARD_INVALIDATION_EVENT, readDashboardStatsInvalidatedAt } from '../modules/dashboardInvalidation.js';
 import { parseDashboardTrendTimestamp } from '../modules/dashboardMetrics.js';
+import { formatFileSize, formatTokens } from '../modules/utils.js';
 import {
   Cpu,
   Server,
@@ -25,14 +26,16 @@ import {
   Activity,
   RefreshCw,
   ArrowRight,
+  TrendingUp,
   Box,
   Shield,
   FolderOpen,
+  PieChart,
   KoyebBrand,
   FlyIoBrand,
   Clock,
-  GitHubBrand,
 } from '../components/Icons.jsx';
+import { PublicPageBrandIcon } from '../components/public/PublicPageIconPicker.jsx';
 
 const DEFAULT_DASHBOARD_STATS = {
   host: {
@@ -118,22 +121,15 @@ function getInitialDashboardStats() {
   };
 }
 
-function formatDashboardTime(timestamp) {
-  const date = new Date(timestamp);
-  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
 function formatKCount(count) {
   const number = Number(count) || 0;
   return `${(number / 1000).toFixed(1)}K`;
 }
 
-function formatDashboardAxisValue(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '-';
-  if (Math.abs(number) < 1000) return `${Math.round(number)}`;
-  const scaled = number / 1000;
-  return `${Number.isInteger(scaled) ? scaled : scaled.toFixed(1).replace(/\.0$/, '')}K`;
+function formatCompactCount(count) {
+  const number = Number(count) || 0;
+  if (number < 1000) return Math.round(number).toString();
+  return formatKCount(number);
 }
 
 function clampPercent(value) {
@@ -279,16 +275,10 @@ const getStatusPageUrl = (page) => {
   return `/status/${slug}`;
 };
 
-const STATUS_PAGE_SHORTCUT_VISUALS = {
-  uptime: { icon: Activity, iconClassName: 'bg-kumo-success/10 text-kumo-success' },
-  server: { icon: Server, iconClassName: 'bg-kumo-info-tint text-kumo-info' },
-  github: { icon: GitHubBrand, iconClassName: 'bg-kumo-brand/10 text-kumo-brand' },
-};
+const STATUS_PAGE_SHORTCUT_ICON_CLASS = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand';
 
 function StatusPageShortcutCard({ page }) {
   const url = getStatusPageUrl(page);
-  const visual = STATUS_PAGE_SHORTCUT_VISUALS[page.kind] || STATUS_PAGE_SHORTCUT_VISUALS.uptime;
-  const ShortcutIcon = visual.icon;
 
   return (
     <AppCard
@@ -298,8 +288,8 @@ function StatusPageShortcutCard({ page }) {
       className="group flex h-11 min-w-0 cursor-pointer items-center justify-between gap-2.5 px-3 sm:h-12 sm:px-3.5"
     >
       <span className="flex min-w-0 items-center gap-2.5">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${visual.iconClassName}`}>
-          <ShortcutIcon aria-hidden="true" className="h-4 w-4 text-base leading-none" />
+        <span className={STATUS_PAGE_SHORTCUT_ICON_CLASS}>
+          <PublicPageBrandIcon pageKind={page.kind} config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
         </span>
         <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong group-hover:text-kumo-brand">
           {page.title || page.slug}
@@ -849,88 +839,136 @@ function DashboardPage({ onNavigate } = {}) {
   const apiTrendTotal = stats.apiStats?.total?.all || 0;
   const apiTrendAudit = stats.apiStats?.total?.audit || 0;
   const apiTrendOps = stats.apiStats?.total?.ops || 0;
-  const hasApiTrendCalls = apiTrend.length >= 2 && apiTrendTotal > 0;
-  
-  const apiStatsDetailText = apiTrendTotal > 0
-    ? `读取 ${formatKCount(apiTrendAudit)}次 (${Math.round((apiTrendAudit / apiTrendTotal) * 100)}%) / 变更 ${formatKCount(apiTrendOps)}次`
-    : '暂无系统 API 调用记录';
-  const apiTrendStatusText = apiTrendTotal > 0
-    ? `最近 7 天系统共处理了 ${formatKCount(apiTrendTotal)} 次有效 API 请求`
-    : '最近 7 天暂无系统 API 调用记录';
 
-  const apiTrendChartData = useMemo(() => [
-    {
-      name: '读取请求 (GET)',
-      color: ChartPalette.semantic('Info', isDarkMode),
-      data: apiTrend
-        .map((point) => [parseDashboardTrendTimestamp(point), Number(point.audit) || 0])
-        .filter(([timestamp]) => Number.isFinite(timestamp)),
-    },
-    {
-      name: '变更请求 (Write)',
-      color: ChartPalette.semantic('Purple', isDarkMode),
-      data: apiTrend
-        .map((point) => [parseDashboardTrendTimestamp(point), Number(point.ops) || 0])
-        .filter(([timestamp]) => Number.isFinite(timestamp)),
-    },
-  ], [apiTrend, isDarkMode]);
-  const apiTrendTimestamps = useMemo(() => (
-    [...new Set(apiTrendChartData.flatMap((series) => series.data.map(([timestamp]) => timestamp)))]
-      .sort((left, right) => left - right)
-  ), [apiTrendChartData]);
-  const apiTrendChartOptions = useMemo(() => ({
-    animation: false,
-    aria: {
-      enabled: true,
-      label: { description: '最近 7 天系统 API 调用量' },
-    },
-    backgroundColor: 'transparent',
-    grid: {
-      left: 8,
-      right: 8,
-      top: 8,
-      bottom: 4,
-      containLabel: true,
-    },
-    tooltip: {
-      trigger: 'axis',
-      confine: true,
-      valueFormatter: (value) => `${Math.round(Number(value) || 0)} 次`,
-    },
-    xAxis: {
-      type: 'category',
-      data: apiTrendTimestamps.map(formatDashboardTime),
-      boundaryGap: false,
-      axisLine: { show: false },
-      axisTick: { show: true, alignWithLabel: true },
-      axisLabel: { interval: 0, hideOverlap: false, margin: 8 },
-      splitLine: { show: false },
-    },
-    yAxis: {
-      type: 'value',
-      splitNumber: 4,
-      axisTick: { show: true },
-      axisLabel: { formatter: formatDashboardAxisValue, margin: 8 },
-      splitLine: {
-        show: true,
-        lineStyle: { type: 'dashed', width: 1 },
+  // 与模型趋势一致：三种量纲（请求/词元/流量）归一为各自 7 天峰值 0-100% 共享一轴，
+  // Legend 点击隔离某序列时改用该序列的原生单位与绝对量展示。
+  const apiTrendSeries = useMemo(() => {
+    const configs = [
+      {
+        key: 'requests',
+        name: '请求次数',
+        unit: '次',
+        color: ChartPalette.categorical(0, isDarkMode),
+        pick: (point) => (Number(point.audit) || 0) + (Number(point.ops) || 0),
+        formatValue: (value) => formatCompactCount(value),
       },
-    },
-    series: apiTrendChartData.map((series) => {
-      const valuesByTimestamp = new Map(series.data);
+      {
+        key: 'tokens',
+        name: '词元用量',
+        unit: '词元',
+        color: ChartPalette.categorical(1, isDarkMode),
+        pick: (point) => Number(point.tokens) || 0,
+        formatValue: formatTokens,
+      },
+      {
+        key: 'traffic',
+        name: '订阅流量',
+        unit: '',
+        color: ChartPalette.categorical(2, isDarkMode),
+        pick: (point) => Number(point.traffic) || 0,
+        formatValue: formatFileSize,
+      },
+    ];
+    return configs.map((config) => {
+      const data = apiTrend
+        .map((point) => {
+          const timestamp = parseDashboardTrendTimestamp(point);
+          return Number.isFinite(timestamp) ? [timestamp, config.pick(point)] : null;
+        })
+        .filter(Boolean);
+      const total = data.reduce((sum, [, value]) => sum + value, 0);
+      const max = data.reduce((peak, [, value]) => Math.max(peak, value), 0);
+      return { ...config, data, total, max };
+    });
+  }, [apiTrend, isDarkMode]);
+
+  // null = 全部显示（相对归一化）；否则为被隔离序列的 key（原生单位）。
+  const [apiIsolatedSeries, setApiIsolatedSeries] = useState(null);
+
+  // 类别轴：与模型趋势一致，按日期对齐刻度，不用时间序列轴。
+  const apiTrendLabels = useMemo(() => {
+    const points = apiTrendSeries[0]?.data || [];
+    return points.map(([timestamp]) => {
+      const date = new Date(timestamp);
+      return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    });
+  }, [apiTrendSeries]);
+
+  const apiChartOptions = useMemo(() => {
+    const isolated = apiIsolatedSeries
+      ? apiTrendSeries.find((item) => item.key === apiIsolatedSeries)
+      : null;
+    const visibleSeries = isolated ? [isolated] : apiTrendSeries;
+    const normalized = !isolated;
+
+    const series = visibleSeries.map((item) => {
+      const values = item.data.map(([, value]) => (
+        normalized && item.max > 0 ? (value / item.max) * 100 : value
+      ));
       return {
-        name: series.name,
+        name: item.name,
         type: 'line',
-        data: apiTrendTimestamps.map((timestamp) => valuesByTimestamp.get(timestamp) ?? 0),
+        data: values,
+        smooth: true,
         showSymbol: true,
-        symbol: 'circle',
         symbolSize: 4,
-        lineStyle: { color: series.color, width: 2 },
-        itemStyle: { color: series.color },
+        lineStyle: { width: 2, color: item.color },
+        itemStyle: { color: item.color },
         emphasis: { focus: 'series' },
       };
-    }),
-  }), [apiTrendChartData, apiTrendTimestamps]);
+    });
+
+    const axisColor = ChartPalette.text('primary', isDarkMode);
+    const tooltipFormat = (params) => {
+      if (!Array.isArray(params)) return '';
+      const lines = params.map((param) => {
+        const match = visibleSeries.find((item) => item.name === param.seriesName);
+        const value = Number(param.value) || 0;
+        const text = !normalized && match
+          ? (match.unit ? `${match.formatValue(value)} ${match.unit}` : match.formatValue(value))
+          : `${value.toFixed(1)}%`;
+        return `${param.marker}${param.seriesName}: ${text}`;
+      });
+      return lines.join('<br/>');
+    };
+
+    return {
+      aria: {
+        enabled: true,
+        label: { description: '最近 7 天系统 API 调用 / 词元 / 订阅流量趋势' },
+      },
+      backgroundColor: 'transparent',
+      grid: { left: 8, right: 16, top: 28, bottom: 4, containLabel: true },
+      tooltip: { trigger: 'axis', confine: true, dangerousHtmlFormatter: tooltipFormat },
+      xAxis: {
+        type: 'category',
+        data: apiTrendLabels,
+        boundaryGap: false,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { color: axisColor, fontSize: 10, hideOverlap: true },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { show: false },
+        splitLine: { show: true, lineStyle: { type: 'dashed', width: 1 } },
+      },
+      series,
+    };
+  }, [apiTrendSeries, apiTrendLabels, apiIsolatedSeries, isDarkMode]);
+
+  const handleApiLegendClick = (key) => {
+    setApiIsolatedSeries((prev) => (prev === key ? null : key));
+  };
+
+  const apiStatsDetailText = apiTrendTotal > 0
+    ? `读取 ${formatKCount(apiTrendAudit)}次 / 变更 ${formatKCount(apiTrendOps)}次`
+    : '暂无系统 API 调用记录';
+  const hasApiTrendCalls = apiTrendSeries.some((series) => series.data.length >= 2 && series.total > 0);
+  const apiTrendStatusText = apiTrendTotal > 0
+    ? '最近 7 天系统 API 调用 / 词元 / 订阅流量趋势'
+    : '最近 7 天暂无系统 API 调用记录';
 
   const hostCpuUsage = clampPercent(stats.host?.cpu?.usage);
   const hostMemoryUsage = clampPercent(stats.host?.memory?.usage);
@@ -1032,7 +1070,7 @@ function DashboardPage({ onNavigate } = {}) {
 
         <DashboardOverviewCard
           onClick={() => navigateToModule('settings')}
-          icon={Activity}
+          icon={PieChart}
           iconClassName="bg-kumo-brand/10 text-kumo-brand"
           badge="系统 API"
           badgeClassName="text-kumo-subtle bg-kumo-recessed border-kumo-line"
@@ -1049,15 +1087,30 @@ function DashboardPage({ onNavigate } = {}) {
         
         <SectionCard
           title="API 调用趋势"
+          icon={<TrendingUp className="h-4 w-4 text-kumo-brand" />}
           bodyClassName="flex min-h-0 flex-1 flex-col p-2.5 sm:p-5"
         >
+          <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
+            {apiTrendSeries.map((series) => (
+              <ChartLegend.LargeItem
+                key={series.key}
+                name={series.name}
+                color={series.color}
+                value={series.formatValue(series.total)}
+                unit={series.unit}
+                inactive={apiIsolatedSeries !== null && apiIsolatedSeries !== series.key}
+                onClick={() => handleApiLegendClick(series.key)}
+              />
+            ))}
+          </div>
           <div className="min-w-0 overflow-hidden" style={{ height: apiChartHeight }}>
             {hasApiTrendCalls ? (
               <Chart
                 echarts={echarts}
-                options={apiTrendChartOptions}
-                height={apiChartHeight}
                 isDarkMode={isDarkMode}
+                options={apiChartOptions}
+                height={apiChartHeight}
+                optionUpdateBehavior={{ notMerge: true }}
               />
             ) : loading ? (
               <div className="flex h-full items-center justify-center text-xs text-kumo-subtle">加载中...</div>
@@ -1066,11 +1119,6 @@ function DashboardPage({ onNavigate } = {}) {
                 {apiTrendStatusText}
               </div>
             )}
-          </div>
-
-          <div className="mt-2 flex items-center gap-2 border-t border-kumo-line pt-2 text-[10px] text-kumo-subtle select-none sm:mt-3 sm:pt-3 sm:text-[11px]">
-            <span className="w-1.5 h-1.5 rounded-full bg-kumo-brand flex-shrink-0" />
-            <span>{apiTrendStatusText}</span>
           </div>
         </SectionCard>
 

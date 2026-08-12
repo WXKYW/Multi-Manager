@@ -2817,6 +2817,11 @@ func bindSubscriptionCredential(raw, protocol string, sub Subscription) string {
 			return raw
 		}
 		parsed.User = url.User(sub.Hysteria2Password)
+	case "socks", "http":
+		if strings.TrimSpace(sub.VLESSUUID) == "" || strings.TrimSpace(sub.Hysteria2Password) == "" {
+			return raw
+		}
+		parsed.User = url.UserPassword(sub.VLESSUUID, sub.Hysteria2Password)
 	}
 	return parsed.String()
 }

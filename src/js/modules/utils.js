@@ -31,9 +31,21 @@ export function escapeHtml(text) {
 }
 
 /**
- * 格式化日期时间 (自动转换浏览器本地时区)
+ * 全局展示时区（'system' 表示跟随浏览器本地时区）。
+ * 由 store 在用户设置加载/保存后同步；公开页等未加载 store 的场景保持 'system'。
+ */
+let displayTimeZone = 'system';
+
+export const setDisplayTimeZone = (zone) => {
+  displayTimeZone = typeof zone === 'string' && zone.trim() ? zone.trim() : 'system';
+};
+
+export const getDisplayTimeZone = () => displayTimeZone;
+
+/**
+ * 格式化日期时间 (默认转换全局展示时区，'system' 时用浏览器本地时区)
  * @param {string|Date|number} date - 日期
- * @param {Object} options - Intl.DateTimeFormat 选项
+ * @param {Object} options - Intl.DateTimeFormat 选项（显式传入的 timeZone 优先）
  * @returns {string} 格式化后的日期时间
  */
 export function formatDateTime(date, options = null) {
@@ -59,17 +71,23 @@ export function formatDateTime(date, options = null) {
     d = new Date(date);
   }
 
-  const defaultOptions = options || {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
+  const defaultOptions = {
+    ...(options || {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }),
   };
 
-  // toLocaleString 会自动使用浏览器当前时区
+  if (!defaultOptions.timeZone && displayTimeZone && displayTimeZone !== 'system') {
+    defaultOptions.timeZone = displayTimeZone;
+  }
+
+  // toLocaleString 会自动使用浏览器当前时区（或 defaultOptions.timeZone）
   return d.toLocaleString('zh-CN', defaultOptions);
 }
 

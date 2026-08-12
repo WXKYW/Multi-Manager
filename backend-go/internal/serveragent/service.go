@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -20,6 +21,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
 	"github.com/iwvw/api-monitor/backend-go/internal/managedproxy"
+	"github.com/iwvw/api-monitor/backend-go/internal/publicpageicon"
 	"github.com/iwvw/api-monitor/backend-go/internal/reconcilequeue"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
@@ -58,6 +60,9 @@ type Service struct {
 	lastNetworkQualityPersistMu   sync.Mutex
 	realtimePersistInterval       time.Duration
 	networkQualityPersistInterval time.Duration
+	tunnelHealthCheckInterval     time.Duration
+	tunnelHealthCheckAttempts     int
+	tunnelHealthCheckDelay        time.Duration
 	agentTaskWaiters              sync.Map
 	autoLocationRefreshes         sync.Map
 	lastAutoLocationRefresh       sync.Map
@@ -66,6 +71,7 @@ type Service struct {
 	notifier                      Notifier
 	cloudflare                    cloudflare.ManagedTunnelAPI
 	alertStates                   sync.Map // serverID -> *alertState
+	backgroundCtx                 context.Context
 	backgroundCancel              context.CancelFunc
 	backgroundWG                  sync.WaitGroup
 	stopOnce                      sync.Once
@@ -144,6 +150,9 @@ func New(cfg config.Config) *Service {
 		lastNetworkQualityPersist:     make(map[string]time.Time),
 		realtimePersistInterval:       resolveRealtimeMetricsPersistInterval(),
 		networkQualityPersistInterval: resolveNetworkQualityPersistInterval(),
+		tunnelHealthCheckInterval:     5 * time.Minute,
+		tunnelHealthCheckAttempts:     3,
+		tunnelHealthCheckDelay:        3 * time.Second,
 	}
 	engineIO.service = s
 	s.presence = newAgentPresenceManager(s)
@@ -195,11 +204,18 @@ func New(cfg config.Config) *Service {
 				} else if s.presence != nil {
 					s.presence.recordConnect(serverID, transport)
 				}
-				go s.refreshAccountLocationFromAgentIfMissing(serverID)
-				go func(id string) {
-					time.Sleep(2 * time.Second)
-					s.reconcileManagedProxyFacts(id)
-				}(serverID)
+				if s.backgroundCtx == nil || s.backgroundCtx.Err() == nil {
+					s.backgroundWG.Add(2)
+					go func() {
+						defer s.backgroundWG.Done()
+						s.refreshAccountLocationFromAgentIfMissing(serverID)
+					}()
+					go func(id string) {
+						defer s.backgroundWG.Done()
+						time.Sleep(2 * time.Second)
+						s.reconcileManagedProxyFacts(id)
+					}(serverID)
+				}
 			}
 		},
 		// onMessage: 接收 Agent 消息
@@ -359,6 +375,17 @@ func New(cfg config.Config) *Service {
 						}()
 					}
 				}
+			case "agent:upgrade_status":
+				// Agent 自更新结果上报（后台 updater 下载/替换成功或失败）。
+				// 写入连接元数据，供批量升级等流程中的重连检测提前判定成败，
+				// 避免 Agent 下载失败时只能干等验证超时。
+				var upgradeStatus map[string]interface{}
+				if err := json.Unmarshal(data, &upgradeStatus); err == nil {
+					if conn, exists := registry.Get(serverID); exists {
+						conn.SetMetadata("upgrade_status", upgradeStatus)
+					}
+					applog.Info(context.Background(), "serveragent", "agent self-upgrade status report", "server_id", serverID, "status", string(data))
+				}
 			case "agent:task_result":
 				// Agent 任务结果上报
 				var result struct {
@@ -499,8 +526,9 @@ func New(cfg config.Config) *Service {
 		s.presence.start()
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	s.backgroundCtx = backgroundCtx
 	s.backgroundCancel = backgroundCancel
-	s.backgroundWG.Add(3)
+	s.backgroundWG.Add(4)
 	go func() {
 		defer s.backgroundWG.Done()
 		s.startMetricsCollectorLoop(backgroundCtx)
@@ -512,6 +540,10 @@ func New(cfg config.Config) *Service {
 	go func() {
 		defer s.backgroundWG.Done()
 		s.startSubscriptionReconcileLoop(backgroundCtx)
+	}()
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startManagedTunnelHealthLoop(backgroundCtx)
 	}()
 
 	return s
@@ -1037,6 +1069,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 func migrateColumns(ctx context.Context, db *sql.DB) error {
 	proxyFields := []struct{ Name, SQL string }{
 		{"assigned_port", "ALTER TABLE server_proxy_desired_state ADD COLUMN assigned_port INTEGER NOT NULL DEFAULT 0"},
+		{"stats_port", "ALTER TABLE server_proxy_desired_state ADD COLUMN stats_port INTEGER NOT NULL DEFAULT 0"},
 		{"transport", "ALTER TABLE server_proxy_desired_state ADD COLUMN transport TEXT NOT NULL DEFAULT 'tcp'"},
 	}
 	for _, f := range proxyFields {
@@ -1463,6 +1496,21 @@ func (s *Service) getPublicServerStatusPage(ctx context.Context, db *sql.DB, slu
 	return page, true, nil
 }
 
+// PublicPageIconID 返回公开状态页配置的自定义图标 ID（未设置时为空字符串），
+// 供服务端 favicon 解析端点使用；lookup 为 slug 或域名。
+func (s *Service) PublicPageIconID(ctx context.Context, lookup string, byDomain bool) (string, bool, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer db.Close()
+	arg := normalizeServerStatusSlug(lookup)
+	if byDomain {
+		arg = normalizeServerStatusDomain(lookup)
+	}
+	return publicpageicon.LookupIconID(ctx, db, `server_status_pages`, arg, byDomain)
+}
+
 func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, ids []string, config map[string]interface{}) ([]map[string]interface{}, error) {
 	if len(ids) == 0 {
 		return []map[string]interface{}{}, nil
@@ -1754,7 +1802,11 @@ func normalizeServerStatusDomain(value string) string {
 	if index := strings.Index(domain, "/"); index >= 0 {
 		domain = domain[:index]
 	}
-	return strings.TrimSuffix(domain, "/")
+	domain = strings.TrimSuffix(domain, "/")
+	if host, _, err := net.SplitHostPort(domain); err == nil {
+		return host
+	}
+	return domain
 }
 
 func serverStatusJSON(value interface{}, fallback string) string {
@@ -2378,63 +2430,68 @@ func (s *Service) addSnippetHistory(w http.ResponseWriter, r *http.Request, db *
 		return
 	}
 
+	lastID, serverName, err := s.insertSnippetHistory(r.Context(), db, req.SnippetID, req.ServerID, req.Command, req.RenderedCommand, req.ExecutionMode, req.Status, req.ResultSummary)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	now := time.Now().Format(time.RFC3339)
+	response.OK(w, map[string]interface{}{
+		"id":               lastID,
+		"snippet_id":       req.SnippetID,
+		"server_id":        req.ServerID,
+		"server_name":      serverName,
+		"command":          firstNonEmpty(req.Command, req.RenderedCommand),
+		"rendered_command": firstNonEmpty(req.RenderedCommand, req.Command),
+		"execution_mode":   req.ExecutionMode,
+		"status":           req.Status,
+		"created_at":       now,
+	})
+}
+
+// insertSnippetHistory 写入一条命令历史记录（片段执行与 API 命令执行共用），
+// 并更新片段 run_count。返回新记录 ID 与解析出的服务器名。
+func (s *Service) insertSnippetHistory(ctx context.Context, db *sql.DB, snippetID *int, serverID *string, command, renderedCommand, executionMode, status string, resultSummary *string) (int64, string, error) {
 	var serverName sql.NullString
-	if req.ServerID != nil && *req.ServerID != "" {
+	if serverID != nil && *serverID != "" {
 		var name string
-		err := db.QueryRowContext(r.Context(), "SELECT name FROM server_accounts WHERE id = ?", *req.ServerID).Scan(&name)
+		err := db.QueryRowContext(ctx, "SELECT name FROM server_accounts WHERE id = ?", *serverID).Scan(&name)
 		if err == nil {
 			serverName = sql.NullString{String: name, Valid: true}
 		}
 	}
 
-	commandStr := req.Command
-	if commandStr == "" {
-		commandStr = req.RenderedCommand
-	}
-	renderedStr := req.RenderedCommand
-	if renderedStr == "" {
-		renderedStr = req.Command
-	}
+	commandStr := firstNonEmpty(command, renderedCommand)
+	renderedStr := firstNonEmpty(renderedCommand, command)
 
 	danger := DetectDangerousCommand(renderedStr)
 	dangerReasonsJSON, _ := json.Marshal(danger.Reasons)
 
 	now := time.Now().Format(time.RFC3339)
 
-	res, err := db.ExecContext(r.Context(), `
+	res, err := db.ExecContext(ctx, `
 		INSERT INTO server_command_history (
 			snippet_id, server_id, server_name, command, rendered_command, execution_mode, status, dangerous, danger_reasons, result_summary, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		req.SnippetID, req.ServerID, serverName, commandStr, renderedStr,
-		coalesceStr(req.ExecutionMode, "terminal"),
-		coalesceStr(req.Status, "sent"),
+		snippetID, serverID, serverName, commandStr, renderedStr,
+		coalesceStr(executionMode, "terminal"),
+		coalesceStr(status, "sent"),
 		boolToInt(danger.Dangerous),
 		string(dangerReasonsJSON),
-		req.ResultSummary,
+		resultSummary,
 		now,
 	)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
+		return 0, "", err
 	}
 
 	// Update run count
-	if req.SnippetID != nil && *req.SnippetID > 0 {
-		_, _ = db.ExecContext(r.Context(), "UPDATE server_snippets SET run_count = COALESCE(run_count, 0) + 1, last_used_at = ?, updated_at = ? WHERE id = ?", now, now, *req.SnippetID)
+	if snippetID != nil && *snippetID > 0 {
+		_, _ = db.ExecContext(ctx, "UPDATE server_snippets SET run_count = COALESCE(run_count, 0) + 1, last_used_at = ?, updated_at = ? WHERE id = ?", now, now, *snippetID)
 	}
 
 	lastID, _ := res.LastInsertId()
-	response.OK(w, map[string]interface{}{
-		"id":               lastID,
-		"snippet_id":       req.SnippetID,
-		"server_id":        req.ServerID,
-		"server_name":      serverName.String,
-		"command":          commandStr,
-		"rendered_command": renderedStr,
-		"execution_mode":   req.ExecutionMode,
-		"status":           req.Status,
-		"created_at":       now,
-	})
+	return lastID, serverName.String, nil
 }
 
 func (s *Service) getSnippetHistory(w http.ResponseWriter, r *http.Request, db *sql.DB) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallba
 import useStore from '../store.js';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { ContextMenu } from '@cloudflare/kumo/primitives/context-menu';
@@ -11,7 +12,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Loader, Meter, Tabs, TimeseriesChart, Toolbar } from '@cloudflare/kumo';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
@@ -24,9 +25,13 @@ import {
   ChartBoundaryBox,
   ChartWarmupSkeleton,
   AppCard,
+  ResponsiveSearchInput,
   ScrollableTable,
   SectionCard,
+  stickyTabsBaseClass,
+  TabBarOverflowActions,
 } from '../components/ui/AppPrimitives.jsx';
+import { PublicPageBrandIcon } from '../components/public/PublicPageIconPicker.jsx';
 import useTableResize from '../composables/useTableResize.js';
 import { formatUptime, formatFileSize, formatDateTime, maskAddress, parseSpeed } from '../modules/utils.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
@@ -2464,6 +2469,7 @@ function ServerPage() {
     serverIpDisplayMode: storedServerIpDisplayMode,
     agentDownloadUrl: storedAgentDownloadUrl,
   } = useStore();
+  const { isArmed, confirmPress } = useConfirmPress();
   const isCompactViewport = useMediaQuery('(max-width: 640px)');
   const isDenseViewport = useMediaQuery('(max-width: 1120px)');
   const expandedMainChartHeight = isCompactViewport ? 88 : isDenseViewport ? 100 : 112;
@@ -3197,7 +3203,7 @@ function ServerPage() {
   };
 
   const deleteServerStatusPage = async (page) => {
-    if (!(await dialog.deleteResource({ resourceType: '主机状态页', resourceName: page.title || page.slug }))) return;
+    if (!confirmPress(`status-page.delete::${page.id}`, `删除主机状态页「${page.title || page.slug}」`)) return;
     setServerStatusPagesLoading(true);
     try {
       const response = await fetch(`/api/server/status-pages/${page.id}`, { method: 'DELETE' });
@@ -3266,7 +3272,7 @@ function ServerPage() {
   };
 
   const deleteNetworkTarget = async (id) => {
-    if (!await dialog.confirm({ title: '确认删除', message: '确认要删除此网络拨测目标吗？' })) {
+    if (!confirmPress(`network-target.delete::${id}`, '删除网络拨测目标')) {
       return;
     }
     try {
@@ -4473,10 +4479,7 @@ function ServerPage() {
 
   const deleteServer = async (serverId) => {
     const server = serverList.find(item => item.id === serverId);
-    if (!(await dialog.deleteResource({
-      resourceType: '主机',
-      resourceName: server?.name || server?.host || `#${serverId}`,
-    }))) return;
+    if (!confirmPress(`server.delete::${serverId}`, `删除主机「${server?.name || server?.host || `#${serverId}`}」`)) return;
     try {
       let response = await fetch(`/api/server/accounts/${serverId}`, { method: 'DELETE' });
       let data = await response.json();
@@ -4797,7 +4800,7 @@ function ServerPage() {
 
     const sId = task.serverId || payload.serverId || payload.server_id;
     const serverMatch = (dockerOverviewServers || []).find(s => String(s.id) === String(sId))
-      || (servers || []).find(s => String(s.id) === String(sId));
+      || (serverList || []).find(s => String(s.id) === String(sId));
     const hostName = task.serverName || payload.serverName || serverMatch?.name;
 
     const hostPrefix = hostName ? `[${hostName}] ` : '';
@@ -4820,7 +4823,7 @@ function ServerPage() {
     const payload = task.payload || meta.payload || {};
     const sId = task.serverId || meta.serverId || payload.serverId || payload.server_id;
     const serverMatch = (dockerOverviewServers || []).find(s => String(s.id) === String(sId))
-      || (servers || []).find(s => String(s.id) === String(sId));
+      || (serverList || []).find(s => String(s.id) === String(sId));
     const serverName = task.serverName || meta.serverName || payload.serverName || serverMatch?.name;
 
     return normalizeDockerTaskResult({
@@ -5043,7 +5046,7 @@ function ServerPage() {
           serverIds: selectedBatchServers,
           force_ssh: batchAgentForceSsh,
           base_url: getAgentPublicBaseApiUrl(),
-          concurrency: 4,
+          concurrency: 16,
         }),
       });
       const payload = await response.json();
@@ -5186,7 +5189,7 @@ function ServerPage() {
 
     appendUpgradeLogEvents([
       { key: 'targets', line: `目标 Agent: ${targetServers.length} 台。` },
-      { key: `options:${upgradeFallbackSsh}`, line: `服务端批任务并发限制: 4。${upgradeFallbackSsh ? 'SSH 保底已开启。' : 'SSH 保底未开启。'}` },
+      { key: `options:${upgradeFallbackSsh}`, line: `服务端批任务并发限制: 16。${upgradeFallbackSsh ? 'SSH 保底已开启。' : 'SSH 保底未开启。'}` },
     ]);
 
     try {
@@ -5198,7 +5201,7 @@ function ServerPage() {
           force_ssh: false,
           fallback_ssh: upgradeFallbackSsh,
           base_url: getAgentPublicBaseApiUrl(),
-          concurrency: 4,
+          concurrency: 16,
         }),
       });
       const payload = await response.json();
@@ -5441,10 +5444,7 @@ function ServerPage() {
 
   const deleteCredential = async (id) => {
     const credential = serverCredentials.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '主机凭据',
-      resourceName: credential?.name || credential?.username || `#${id}`,
-    }))) return;
+    if (!confirmPress(`credential.delete::${id}`, `删除主机凭据「${credential?.name || credential?.username || `#${id}`}」`)) return;
     try {
       const response = await fetch(`/api/server/credentials/${id}`, { method: 'DELETE' });
       const data = await response.json();
@@ -5560,19 +5560,19 @@ function ServerPage() {
       },
       'image.prune': {
         title: '清理未使用镜像',
-        message: '确定要清理该主机上的未使用 Docker 镜像吗？未被容器引用的镜像会被删除。',
+        message: '确定要清理该主机上未被容器引用的 Docker 镜像吗？',
         confirmText: '清理镜像',
         variant: 'danger',
       },
       'network.prune': {
         title: '清理未使用网络',
-        message: '确定要清理该主机上的未使用 Docker 网络吗？未被容器使用的自定义网络会被删除。',
+        message: '确定要清理该主机上未被容器使用的自定义 Docker 网络吗？',
         confirmText: '清理网络',
         variant: 'danger',
       },
       'volume.prune': {
         title: '清理未使用存储卷',
-        message: '确定要清理该主机上的未使用 Docker 存储卷吗？未被容器使用的数据卷会被删除。',
+        message: '确定要清理该主机上未被容器使用的 Docker 数据卷吗？',
         confirmText: '清理存储卷',
         variant: 'danger',
       },
@@ -7666,7 +7666,7 @@ function ServerPage() {
         onClose={() => setCompactColumnMenu(prev => ({ ...prev, open: false }))}
       />
       {/* 顶部标签导航 */}
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-kumo-line pb-3 [&>*]:min-w-0">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={serverCurrentTab}
@@ -7692,72 +7692,54 @@ function ServerPage() {
         />
 
         {/* 右侧快速连接 */}
-        <div className="flex shrink-0 items-center justify-end gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {serverCurrentTab === 'list' && (
-            <div className="flex items-center justify-end gap-2">
-              <Button size="sm"
-                variant="secondary"
-                icon={<Upload className="w-3.5 h-3.5" />}
-                onClick={openUpgradeModal}
-                title="升级所有在线 Agent"
-                className="hidden md:inline-flex"
-              >
-                升级 Agent
-              </Button>
-              <Button size="sm"
-                variant="secondary"
-                icon={<Shield className="w-3.5 h-3.5" />}
-                onClick={openBatchAgentModal}
-                title="批量部署 Agent"
-                className="hidden md:inline-flex"
-              >
-                批量部署
-              </Button>
-              <Button
-                shape="square" size="sm"
-                variant="secondary"
-                icon={<RefreshCw className="w-3.5 h-3.5" />}
-                onClick={refreshServerLocationsAndList}
-                loading={serverLoading}
-                title="刷新列表和地理位置"
-                aria-label="刷新列表和地理位置"
-              />
-              <Button shape="square" size="sm"
-                variant="secondary"
-                icon={<Upload className="w-3.5 h-3.5" />}
-                onClick={exportServers}
-                title="导出主机配置"
-                className="hidden md:inline-flex"
-              >
-                {/* 导出 */}
-              </Button>
-              <Button shape="square" size="sm"
-                variant="secondary"
-                icon={<Download className="w-3.5 h-3.5" />}
-                onClick={openImportServerModal}
-                title="导入主机配置"
-                className="hidden md:inline-flex"
-              >
-                {/* 导入 */}
-              </Button>
-              {/* <Button size="sm"
-                variant="secondary"
-                icon={<RotateCw className="w-3.5 h-3.5" />}
-                onClick={probeAllServers}
-                title="触发所有主机探测"
-                className="hidden sm:inline-flex"
-              >
-                探测
-              </Button> */}
-              <Button shape="square" size="sm"
-                variant="primary"
-                icon={<Plus className="w-3.5 h-3.5" />}
-                onClick={openAddServerModal}
-              >
-                {/* 新增主机 */}
-              </Button>
-            </div>
+            <Toolbar size="sm" aria-label="导出导入主机配置" className="shrink-0">
+              <Toolbar.Button onClick={exportServers} aria-label="导出主机配置" title="导出主机配置" icon={<Upload className="h-3.5 w-3.5" />}>
+                <span className="hidden sm:inline">导出</span>
+              </Toolbar.Button>
+              <Toolbar.Button onClick={openImportServerModal} aria-label="导入主机配置" title="导入主机配置" icon={<Download className="h-3.5 w-3.5" />}>
+                <span className="hidden sm:inline">导入</span>
+              </Toolbar.Button>
+            </Toolbar>
           )}
+          <TabBarOverflowActions
+          items={
+            serverCurrentTab === 'list'
+              ? [
+                  {
+                    key: 'upgrade-agent',
+                    label: '升级 Agent',
+                    title: '升级所有在线 Agent',
+                    icon: <Upload className="w-3.5 h-3.5" />,
+                    onClick: openUpgradeModal,
+                  },
+                  {
+                    key: 'batch-deploy',
+                    label: '批量部署',
+                    title: '批量部署 Agent',
+                    icon: <Shield className="w-3.5 h-3.5" />,
+                    onClick: openBatchAgentModal,
+                  },
+                  {
+                    key: 'refresh',
+                    label: '刷新列表',
+                    title: '刷新列表和地理位置',
+                    icon: <RefreshCw className="w-3.5 h-3.5" />,
+                    onClick: refreshServerLocationsAndList,
+                    loading: serverLoading,
+                  },
+                  {
+                    key: 'add',
+                    label: '新增主机',
+                    icon: <Plus className="w-3.5 h-3.5" />,
+                    onClick: openAddServerModal,
+                    variant: 'primary',
+                  },
+                ]
+              : []
+          }
+        />
         </div>
       </div>
 
@@ -7877,6 +7859,9 @@ function ServerPage() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand">
+                              <PublicPageBrandIcon pageKind="server" config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
+                            </span>
                             <span className="truncate text-sm font-bold text-kumo-strong">{page.title || page.slug}</span>
                             <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${page.public ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-line/30 text-kumo-subtle'}`}>{page.public ? '公开' : '私有'}</span>
                             <span className="rounded bg-kumo-recessed px-2 py-0.5 font-mono text-[10px] text-kumo-subtle">{page.cacheSeconds || 300}s</span>
@@ -7888,7 +7873,7 @@ function ServerPage() {
                           <Button size="sm" variant="secondary" shape="square" icon={<Edit className="h-3.5 w-3.5" />} onClick={() => editServerStatusPage(page)} aria-label="编辑主机状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => window.open(statusUrl, '_blank', 'noopener,noreferrer')} aria-label="打开主机状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyServerStatusUrl(statusUrl)} aria-label="复制主机状态页地址" />
-                          <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteServerStatusPage(page)} aria-label="删除主机状态页" />
+                          <Button size="sm" variant={isArmed(`status-page.delete::${page.id}`) ? 'destructive' : 'secondary-destructive'} shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteServerStatusPage(page)} aria-label="删除主机状态页" />
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2">
@@ -7949,17 +7934,13 @@ function ServerPage() {
               />
             </div>
 
-            <div className="relative w-full lg:w-72">
-              <Search className="pointer-events-none absolute left-3 top-1/2 z-1 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-              <Input
-                type="text"
-                placeholder="搜索主机名称、IP 或标签..."
-                aria-label="搜索主机" size="sm"
-                value={serverSearchText}
-                onChange={e => setServerSearchText(e.target.value)}
-                className="w-full pl-9"
-              />
-            </div>
+            <ResponsiveSearchInput
+              value={serverSearchText}
+              onChange={e => setServerSearchText(e.target.value)}
+              placeholder="搜索主机名称、IP 或标签..."
+              ariaLabel="搜索主机"
+              className="lg:w-72"
+            />
           </div>
 
           {/* 列表渲染 */}
@@ -7974,7 +7955,7 @@ function ServerPage() {
             />
           ) : serverLoading && serverList.length === 0 ? (
             <AppCard padding="none" className="flex flex-col items-center justify-center gap-2 p-12 text-kumo-subtle">
-              <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin"></div>
+              <Loader size={24} />
               <p className="text-xs">正在连接并加载主机结构中...</p>
             </AppCard>
           ) : filteredServers.length === 0 ? (
@@ -8678,7 +8659,7 @@ function ServerPage() {
                                   <div className={getExpandedInfoGridClassName(isDenseViewport)}>
                                     <ExpandedSection title="系统概览" tone="success" className={getExpandedCardSpanClassName(0, 1)}>
                                       <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3 xl:grid-cols-4">
-                                        <ExpandedInfoChip label="系统" value={server.info?.platform || '-' || server.info?.platformVersion || server.info?.system?.Kernel || '-'} />
+                                        <ExpandedInfoChip label="系统" value={server.info?.platform || server.info?.platformVersion || server.info?.system?.Kernel || '-'} />
                                         {/* <ExpandedInfoChip label="版本" value={server.info?.platformVersion || server.info?.system?.Kernel || '-'} /> */}
                                         <ExpandedInfoChip label="CPU 型号" value={server.info?.cpu?.Model || server.metadata?.cpu_model || server.metadata?.cpu_name || server.metadata?.processor || '-'} />
                                         <ExpandedInfoChip label="核心" value={coreText} />
@@ -9801,10 +9782,13 @@ function ServerPage() {
                                             <Button
                                               shape="square"
                                               size="sm"
-                                              variant="ghost"
+                                              variant={isArmed(`docker.image.remove::${server.id}::${imageRef}`) ? 'destructive' : 'secondary-destructive'}
                                               aria-label={`删除 ${repository || '镜像'}`}
                                               disabled={removePending}
-                                              onClick={() => submitDockerTask('image.remove', removePayload)}
+                                              onClick={() => {
+                                                if (!confirmPress(`docker.image.remove::${server.id}::${imageRef}`, `删除镜像「${repository || '镜像'}」`)) return;
+                                                submitDockerTask('image.remove', removePayload, { skipConfirm: true });
+                                              }}
                                               className="text-kumo-danger"
                                               title="删除镜像"
                                             >
@@ -9944,10 +9928,13 @@ function ServerPage() {
                                             <Button
                                               shape="square"
                                               size="sm"
-                                              variant="ghost"
+                                              variant={isArmed(`docker.network.remove::${server.id}::${networkName}`) ? 'destructive' : 'secondary-destructive'}
                                               aria-label={`删除 ${networkName || '网络'}`}
                                               disabled={isBuiltinNetwork || removePending}
-                                              onClick={() => submitDockerTask('network.remove', removePayload)}
+                                              onClick={() => {
+                                                if (!confirmPress(`docker.network.remove::${server.id}::${networkName}`, `删除网络「${networkName || '网络'}」`)) return;
+                                                submitDockerTask('network.remove', removePayload, { skipConfirm: true });
+                                              }}
                                               className="text-kumo-danger disabled:opacity-40"
                                               title={isBuiltinNetwork ? '内置网络不可删除' : '删除网络'}
                                             >
@@ -10069,10 +10056,13 @@ function ServerPage() {
                                             <Button
                                               shape="square"
                                               size="sm"
-                                              variant="ghost"
+                                              variant={isArmed(`docker.volume.remove::${server.id}::${volumeName}`) ? 'destructive' : 'secondary-destructive'}
                                               aria-label={`删除 ${volumeName || '存储卷'}`}
                                               disabled={removePending}
-                                              onClick={() => submitDockerTask('volume.remove', removePayload)}
+                                              onClick={() => {
+                                                if (!confirmPress(`docker.volume.remove::${server.id}::${volumeName}`, `删除存储卷「${volumeName || '存储卷'}」`)) return;
+                                                submitDockerTask('volume.remove', removePayload, { skipConfirm: true });
+                                              }}
                                               className="text-kumo-danger"
                                               title="删除存储卷"
                                             >
@@ -10266,7 +10256,6 @@ function ServerPage() {
         <div className="flex flex-col gap-4">
             <SectionCard
               title="主机偏好"
-              description="列表与 Agent 下载配置"
               icon={<Settings className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10305,7 +10294,7 @@ function ServerPage() {
                   <div className="min-w-0">
                     <div className="text-xs font-semibold leading-5 text-kumo-strong">Agent 下载目录</div>
                     <div className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                      留空使用主控端内置 /agent 目录；自定义时填写目录 URL，不填写文件名。
+                      留空使用主控端内置 /agent 目录；自定义时填目录 URL，不填文件名。
                     </div>
                   </div>
                   <Input
@@ -10323,7 +10312,6 @@ function ServerPage() {
               <div className="flex min-w-0 flex-col gap-4">
             <SectionCard
               title="批量录入"
-              description="CSV 批量添加主机"
               icon={<FolderOpen className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">CSV</span>}
               bodyPadding="sm"
@@ -10355,7 +10343,6 @@ function ServerPage() {
 
             <SectionCard
               title="配置迁移"
-              description="导入或导出主机配置"
               icon={<Database className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">JSON</span>}
               bodyPadding="sm"
@@ -10368,28 +10355,26 @@ function ServerPage() {
                   </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={exportServers}
-                  aria-label="导出主机配置备份"
-                  title="导出主机配置备份"
-                  icon={<Upload className="h-3.5 w-3.5" />}
-                  className="w-full justify-center sm:w-auto"
-                >
-                  导出 JSON
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={openImportServerModal}
-                  aria-label="导入主机配置"
-                  title="导入主机配置"
-                  icon={<Download className="h-3.5 w-3.5" />}
-                  className="w-full justify-center sm:w-auto"
-                >
-                  导入 JSON
-                </Button>
+                <Toolbar size="sm" aria-label="导出导入主机配置" className="w-full justify-center sm:w-auto">
+                  <Toolbar.Button
+                    onClick={exportServers}
+                    aria-label="导出主机配置备份"
+                    title="导出主机配置备份"
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                    className="w-full sm:w-auto"
+                  >
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button
+                    onClick={openImportServerModal}
+                    aria-label="导入主机配置"
+                    title="导入主机配置"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    className="w-full sm:w-auto"
+                  >
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
                 </div>
             </SectionCard>
               </div>
@@ -10397,7 +10382,6 @@ function ServerPage() {
               <div className="flex min-w-0 flex-col gap-4">
             <SectionCard
               title="SSH 凭据库"
-              description="复用登录凭据"
               icon={<Key className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10458,7 +10442,7 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="secondary-destructive"
+                                  variant={isArmed(`credential.delete::${cred.id}`) ? 'destructive' : 'secondary-destructive'}
                                   aria-label="删除凭据"
                                   onClick={() => deleteCredential(cred.id)}
                                   icon={<Trash className="h-3.5 w-3.5" />}
@@ -10476,7 +10460,6 @@ function ServerPage() {
 
             <SectionCard
               title="网络拨测目标"
-              description="配置 TCP / HTTP 拨测"
               icon={<Globe className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10567,7 +10550,7 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="secondary-destructive"
+                                  variant={isArmed(`network-target.delete::${target.id}`) ? 'destructive' : 'secondary-destructive'}
                                   aria-label="删除目标"
                                   onClick={() => deleteNetworkTarget(target.id)}
                                   icon={<Trash className="h-3.5 w-3.5" />}
@@ -11299,7 +11282,6 @@ function ServerPage() {
                   <div className="rounded-lg border border-kumo-line bg-kumo-recessed/35 p-3 text-[11px] leading-relaxed text-kumo-subtle">
                     Agent 模式会创建或复用主机记录，并生成目标机器上的安装命令。
                   </div>
-
                   {quickDeployResult && (
                     <div className="flex flex-col gap-3">
                       <Select

@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
-import useStore, { applyThemeMode, getPendingAuthProvider } from './store.js';
+import { Loader } from '@cloudflare/kumo';
+import useStore, { applyThemeMode, applyUIFont, getPendingAuthProvider } from './store.js';
 import AuthPage from './pages/AuthPage.jsx';
 import { GitHubBrand, Shield } from './components/IconsCore.jsx';
 
@@ -82,7 +83,7 @@ function AuthTransitionScreen() {
             {isGitHub ? '正在验证 GitHub' : '正在登录'}
           </div>
         </div>
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-kumo-line border-t-kumo-brand" />
+        <Loader size={32} />
       </div>
     </main>
   );
@@ -121,6 +122,18 @@ function App() {
   useEffect(() => {
     applyThemeMode(themeMode);
   }, [themeMode]);
+
+  // 未认证页面（登录/公开页）同样应用本地字体设置，保证全站字体一致；
+  // 登录后 applyUserSettings 会再次应用后端保存的字体（来源一致）。
+  useEffect(() => {
+    let stored = null;
+    try {
+      stored = localStorage.getItem('app_ui_font');
+    } catch (e) {
+      /* ignore */
+    }
+    if (stored) applyUIFont(stored);
+  }, []);
 
   // 监听系统主题变化（仅在用户未锁定自定义主题时生效）
   useEffect(() => {

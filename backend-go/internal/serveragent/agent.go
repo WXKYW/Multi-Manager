@@ -90,7 +90,7 @@ func (s *Service) handleAgentQuickInstall(w http.ResponseWriter, r *http.Request
 		"data": map[string]interface{}{
 			"serverId": serverID,
 			"script":   script,
-			"command":  "curl -fsSL " + s.agentInstallURL(r, serverID) + " | bash",
+			"command":  "curl -fsSL " + s.agentInstallURL(r.Context(), db, r, serverID) + " | bash",
 		},
 	})
 }
@@ -137,20 +137,27 @@ func (s *Service) ensureQuickInstallAgentHost(ctx context.Context, db *sql.DB, n
 	return id, true, nil
 }
 
-func (s *Service) agentInstallURL(r *http.Request, serverID string) string {
-	proto, host := resolveInstallOrigin(r)
+func (s *Service) agentInstallURL(ctx context.Context, db *sql.DB, r *http.Request, serverID string) string {
+	proto, host := s.resolveInstallOrigin(ctx, db, r, "")
 	return fmt.Sprintf("%s://%s/api/server/agent/install-script/%s", proto, host, serverID)
 }
 
-func resolveInstallOrigin(r *http.Request) (string, string) {
-	return resolveInstallOriginWithBaseURL(r, r.URL.Query().Get("base_url"))
-}
-
-func resolveInstallOriginWithBaseURL(r *http.Request, baseURL string) (string, string) {
+// resolveInstallOrigin 解析 Agent 安装 / 自更新使用的面板来源地址。
+// 优先级：
+//  1. 显式 base_url（前端 UI 传参）；
+//  2. 面板配置的公共 API 地址（user_settings.public_api_url，权威来源）——
+//     面板部署在反代 / CDN / 容器平台（如 Fly.io）之后时，请求 Host 可能是内部
+//     地址（如 ai.internal），Agent 无法访问，必须优先使用配置的对外地址；
+//  3. 请求头推断（X-Forwarded-Host / r.Host），仅作为兜底。
+func (s *Service) resolveInstallOrigin(ctx context.Context, db *sql.DB, r *http.Request, baseURL string) (string, string) {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = r.URL.Query().Get("base_url")
 	}
 	if proto, host, ok := parseInstallBaseURL(baseURL); ok {
+		return proto, host
+	}
+
+	if proto, host, ok := s.panelPublicOrigin(ctx, db); ok {
 		return proto, host
 	}
 
@@ -171,6 +178,16 @@ func resolveInstallOriginWithBaseURL(r *http.Request, baseURL string) (string, s
 	}
 
 	return proto, host
+}
+
+// panelPublicOrigin 读取面板配置的公共 API 地址（user_settings.public_api_url）。
+func (s *Service) panelPublicOrigin(ctx context.Context, db *sql.DB) (string, string, bool) {
+	var raw sql.NullString
+	err := db.QueryRowContext(ctx, `SELECT public_api_url FROM user_settings WHERE id = 1`).Scan(&raw)
+	if err != nil || !raw.Valid {
+		return "", "", false
+	}
+	return parseInstallBaseURL(raw.String)
 }
 
 func parseInstallBaseURL(baseURL string) (string, string, bool) {
@@ -251,7 +268,7 @@ func (s *Service) getAgentInstallScript(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	proto, serverURL := resolveInstallOrigin(r)
+	proto, serverURL := s.resolveInstallOrigin(r.Context(), db, r, "")
 	serverBaseURL := fmt.Sprintf("%s://%s", proto, serverURL)
 	agentDownloadBaseURL := s.resolveAgentDownloadBaseURL(r.Context(), db, serverBaseURL)
 
@@ -758,7 +775,7 @@ func (s *Service) handleAgentAutoInstall(w http.ResponseWriter, r *http.Request,
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	// 1. 检测 Agent 是否在线
-	proto, host := resolveInstallOriginWithBaseURL(r, req.BaseURL)
+	proto, host := s.resolveInstallOrigin(r.Context(), db, r, req.BaseURL)
 	origin := agentInstallOrigin{Proto: proto, Host: host}
 
 	if conn, exists := s.registry.Get(serverID); exists && !req.ForceSSH {

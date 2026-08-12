@@ -11,8 +11,7 @@ const editorTheme = EditorView.theme({
     fontSize: '13px',
   },
   '.cm-scroller': {
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+    fontFamily: 'var(--font-sans)',
     lineHeight: '20px',
     overflow: 'auto',
     scrollbarColor: 'var(--color-kumo-fill) transparent',

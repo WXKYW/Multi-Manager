@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -235,8 +238,17 @@ func (s *Service) createBackup(ctx context.Context) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	snapshotPath, err := s.snapshotDatabase(ctx)
+	if err != nil {
+		// VACUUM INTO fails only for non-SQLite files; fall back to copying the
+		// live file as-is so edge cases still produce a restorable backup.
+		snapshotPath = ""
+	}
+	if snapshotPath != "" {
+		defer os.Remove(snapshotPath)
+	}
 	zipw := zip.NewWriter(file)
-	writeErr := s.addBackupFiles(zipw)
+	writeErr := s.addBackupFiles(zipw, snapshotPath)
 	closeErr := zipw.Close()
 	fileErr := file.Close()
 	if writeErr != nil {
@@ -266,8 +278,37 @@ func (s *Service) createBackup(ctx context.Context) (Record, error) {
 	return record, nil
 }
 
-func (s *Service) addBackupFiles(zipw *zip.Writer) error {
-	if err := addFile(zipw, s.cfg.DatabasePath(), "data/"+s.cfg.DBName); err != nil && !os.IsNotExist(err) {
+func (s *Service) snapshotDatabase(ctx context.Context) (string, error) {
+	if _, err := os.Stat(s.cfg.DatabasePath()); err != nil {
+		return "", err
+	}
+	db, err := sql.Open("sqlite", s.cfg.DatabasePath())
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+	tmp, err := os.CreateTemp("", "api-monitor-backup-snapshot-*.db")
+	if err != nil {
+		return "", err
+	}
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	_ = os.Remove(path)
+	quoted := "'" + strings.ReplaceAll(path, "'", "''") + "'"
+	if _, err := db.ExecContext(ctx, "VACUUM INTO "+quoted); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *Service) addBackupFiles(zipw *zip.Writer, snapshotPath string) error {
+	dbSource := s.cfg.DatabasePath()
+	if snapshotPath != "" {
+		dbSource = snapshotPath
+	}
+	if err := addFile(zipw, dbSource, "data/"+s.cfg.DBName); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	for _, dir := range []string{"filebox", "files"} {

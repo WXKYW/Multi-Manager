@@ -64,7 +64,7 @@ function VisualMarkdownEditor({ value, onChange, readOnly, label, placeholder })
       if (adapterRef.current === adapter) adapterRef.current = null;
       if (adapter) adapter.destroy();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   // Sync external value changes
   useEffect(() => {

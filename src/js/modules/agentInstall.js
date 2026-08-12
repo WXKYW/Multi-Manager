@@ -39,8 +39,8 @@ export function buildAgentInstallCommand(options = {}) {
 
 export function getAgentInstallExecutionHint(osType = 'linux') {
   if (isWindowsAgentInstallOs(osType)) {
-    return '请在 Windows PowerShell 中执行，不要在 CMD、bash 或 zsh 中运行。';
+    return '请在 Windows PowerShell 中执行（勿用 CMD/bash/zsh）。';
   }
 
-  return '请在 Linux / macOS 终端中执行，不要在 PowerShell 中运行。';
+  return '请在 Linux/macOS 终端中执行（勿用 PowerShell）。';
 }

@@ -6,7 +6,7 @@ This is the first file an AI maintainer should read before changing API Monitor.
 
 ## Current Architecture
 
-- Frontend: React 19, Vite 8, Tailwind CSS 4, Zustand, and `@cloudflare/kumo` 2.6.
+- Frontend: React 19, Vite 8, Tailwind CSS 4, Zustand, and `@cloudflare/kumo` 2.10.0.
 - UI system: Kumo-only for base controls and charts. Local components should be business compositions or narrow transition wrappers.
 - Backend: Go single-process backend in `backend-go/`, with routes governed by `backend-go/internal/manifest/manifest.go`.
 - Persistence: SQLite remains the only durable store. Do not replace it unless there is an explicit product decision.
@@ -134,3 +134,32 @@ For giant files, split only when a related change justifies it. Use this order:
 5. Page container.
 
 Keep each step independently verifiable.
+
+## Multi-Window Agent Collaboration
+
+Applies when multiple Agent windows run different tasks against this repo at the same time. The core principle: conflict may only happen at the controlled, serialized merge moment — never in the shared workspace.
+
+### File Ownership (first line of defense)
+
+- Before starting work, register in `docs/多Agent协作登记.md`: task name, window/agent ID, file domain, branch. Read it before starting; never touch a file another active task holds.
+- Hard rule: a file is held by at most one active task at a time.
+- Single-owner files (only one task may modify at a time): `src/js/pages/ServerPage.jsx`, `src/js/pages/DnsPage.jsx`, `src/js/pages/OpenAIPage.jsx`, `src/js/components/MainLayout.jsx`, `src/js/store.js`, `backend-go/internal/server/server.go`, `backend-go/internal/manifest/manifest.go`, `backend-go/internal/serveragent/service.go`.
+- Natural parallelism: backend-go/ (Go), src/js/ (frontend), agent-rust/ (Rust) are independent domains.
+
+### Commit Rhythm (keep the workspace clean)
+
+- Commit as soon as an independently verifiable step is done; do not accumulate uncommitted changes.
+- Check `git status` before starting; if someone else has uncommitted changes, coordinate or wait for their commit instead of stacking on top.
+- Follow the existing commit message style in `git log`.
+
+### Single Integrator
+
+- One designated window performs the final integration: merge, full audit (`npm run audit:full`), and release. Others submit changes but do not merge.
+- For large cross-module work, each agent works on its own branch `agent/<task>` and merges back to `dev` in the integration window only.
+
+### Shared Resource Mutex
+
+- Port 3000 / Go backend process: only one window starts it; others read code only or use a different port.
+- SQLite (`data/`, `backend-go/data/`): only one task performs migrations or backup scripts at a time.
+- Slow commands (`npm run audit:full`): run serially to avoid interference.
+- `dist/`, `node_modules/`, `.cache/`: writable concurrently but regenerable; conflicts are harmless.

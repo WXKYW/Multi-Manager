@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '../modules/toast.js';
-import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
@@ -14,7 +14,7 @@ import { Flow } from '@cloudflare/kumo/components/flow';
 import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
 import { LayerCard, Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Activity,
@@ -201,6 +201,13 @@ function workflowNodeKindLabel(node) {
   if (node.task_id) return '引用任务';
   if (node.type === 'task') return '待绑定';
   return '内联';
+}
+
+function workflowNodeKindVariant(node) {
+  if (node.type === 'start') return 'blue';
+  if (node.task_id) return 'purple';
+  if (node.type === 'task') return 'orange';
+  return 'teal';
 }
 
 function conditionLabel(value) {
@@ -457,7 +464,7 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
                 <span className="block truncate text-sm font-semibold text-kumo-strong">{node.name || node.id}</span>
                 <span className="mt-1 block truncate text-xs leading-5 text-kumo-subtle">{workflowNodeTypeLabel(node)}</span>
               </span>
-              <Badge variant="neutral">{workflowNodeKindLabel(node)}</Badge>
+              <Badge variant={workflowNodeKindVariant(node)}>{workflowNodeKindLabel(node)}</Badge>
             </span>
             <span className={`mt-auto flex min-w-0 items-center justify-between gap-2 ${compact ? 'pt-3' : 'pt-5'}`}>
               <Badge variant={statusBadgeVariant(status || (node.enabled === 0 ? 'skipped' : 'queued'))} appearance="dot">
@@ -503,6 +510,7 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
 }
 
 function SchedulerPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('tasks');
   const [tasks, setTasks] = useState([]);
   const [workflows, setWorkflows] = useState([]);
@@ -705,7 +713,7 @@ function SchedulerPage() {
   };
 
   const deleteTask = async (task) => {
-    if (!(await dialog.confirm(`确定删除任务“${task.name}”吗？`))) return;
+    if (!confirmPress(`task:${task.id}`, `删除任务「${task.name}」`)) return;
     try {
       const res = await fetch(`/api/scheduler/tasks/${task.id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -846,7 +854,7 @@ function SchedulerPage() {
   };
 
   const deleteWorkflow = async (workflow) => {
-    if (!(await dialog.confirm(`确定删除工作流“${workflow.name}”吗？`))) return;
+    if (!confirmPress(`workflow:${workflow.id}`, `删除工作流「${workflow.name}」`)) return;
     try {
       const res = await fetch(`/api/scheduler/workflows/${workflow.id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -928,7 +936,7 @@ function SchedulerPage() {
   };
 
   const clearOldRuns = async () => {
-    if (!(await dialog.confirm('确定清理 30 天前的工作流运行记录吗？'))) return;
+    if (!confirmPress('runs:clear-old', '清理 30 天前运行记录')) return;
     try {
       const res = await fetch('/api/scheduler/runs?days=30', { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -941,7 +949,7 @@ function SchedulerPage() {
   };
 
   const clearAllRuns = async () => {
-    if (!(await dialog.confirm('确定清空全部工作流运行记录吗？此操作不可恢复。'))) return;
+    if (!confirmPress('runs:clear-all', '清空全部运行记录')) return;
     try {
       const res = await fetch('/api/scheduler/runs?all=true', { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -1032,26 +1040,47 @@ function SchedulerPage() {
   return (
     <TooltipProvider>
       <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-        <div className="flex flex-wrap items-center justify-between border-b border-kumo-line pb-3 gap-4">
+        <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
           <Tabs
             {...MODULE_TABS_PROPS}
             value={activeTab}
             onValueChange={setActiveTab}
             tabs={TASK_TABS}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <IconButton label="刷新" onClick={loadAll} icon={<RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />} />
-            {activeTab === 'workflows' && (
-              <>
-                <IconButton label="导入工作流" onClick={importWorkflows} icon={<Download className="h-3.5 w-3.5" />} />
-                <IconButton label="导出工作流" onClick={exportWorkflows} icon={<Upload className="h-3.5 w-3.5" />} />
-              </>
-            )}
-            <Button size="sm" variant="primary" onClick={activeTab === 'workflows' ? openCreateWorkflow : openCreateTask}>
-              <Plus className="h-3.5 w-3.5" />
-              {activeTab === 'workflows' ? '新建工作流' : '新建任务'}
-            </Button>
-          </div>
+          <TabBarOverflowActions
+            items={[
+              {
+                key: 'refresh',
+                label: '刷新',
+                icon: <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />,
+                onClick: loadAll,
+                loading,
+              },
+              ...(activeTab === 'workflows'
+                ? [
+                    {
+                      key: 'import',
+                      label: '导入工作流',
+                      icon: <Download className="h-3.5 w-3.5" />,
+                      onClick: importWorkflows,
+                    },
+                    {
+                      key: 'export',
+                      label: '导出工作流',
+                      icon: <Upload className="h-3.5 w-3.5" />,
+                      onClick: exportWorkflows,
+                    },
+                  ]
+                : []),
+              {
+                key: 'create',
+                label: activeTab === 'workflows' ? '新建工作流' : '新建任务',
+                icon: <Plus className="h-3.5 w-3.5" />,
+                onClick: activeTab === 'workflows' ? openCreateWorkflow : openCreateTask,
+                variant: 'primary',
+              },
+            ]}
+          />
         </div>
 
         <div className="grid grid-cols-4 gap-2 sm:gap-3">
@@ -1070,7 +1099,6 @@ function SchedulerPage() {
         {activeTab === 'tasks' && (
           <SectionCard
             title="任务列表"
-            description="统一调度任务"
             icon={<Clock className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
@@ -1097,7 +1125,7 @@ function SchedulerPage() {
                             <IconButton label="立即运行" onClick={() => runTask(task)} icon={<Play className="h-3.5 w-3.5" />} />
                             <IconButton label={task.enabled ? '停用' : '启用'} onClick={() => toggleTask(task)} icon={task.enabled ? <Pause className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />} />
                             <IconButton label="编辑" onClick={() => openEditTask(task)} icon={<Edit className="h-3.5 w-3.5" />} />
-                            <IconButton label="删除" variant="secondary-destructive" onClick={() => deleteTask(task)} icon={<Trash className="h-3.5 w-3.5" />} />
+                            <IconButton label="删除" variant={isArmed(`task:${task.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTask(task)} icon={<Trash className="h-3.5 w-3.5" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -1112,7 +1140,6 @@ function SchedulerPage() {
         {activeTab === 'workflows' && (
           <SectionCard
             title="工作流编排"
-            description="按 DAG 编排任务"
             icon={<GitBranch className="h-4 w-4 text-kumo-brand" />}
             bodyClassName={workflows.length === 0 ? '' : 'space-y-3'}
             bodyPadding={workflows.length === 0 ? 'none' : 'md'}
@@ -1136,7 +1163,7 @@ function SchedulerPage() {
                           <div className="flex shrink-0 gap-1">
                             <IconButton label="运行工作流" onClick={() => runWorkflow(workflow)} icon={<Play className="h-3.5 w-3.5" />} />
                             <IconButton label="编辑工作流" onClick={() => openEditWorkflow(workflow)} icon={<Edit className="h-3.5 w-3.5" />} />
-                            <IconButton label="删除工作流" variant="secondary-destructive" onClick={() => deleteWorkflow(workflow)} icon={<Trash className="h-3.5 w-3.5" />} />
+                            <IconButton label="删除工作流" variant={isArmed(`workflow:${workflow.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorkflow(workflow)} icon={<Trash className="h-3.5 w-3.5" />} />
                           </div>
                         </div>
                         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
@@ -1165,12 +1192,11 @@ function SchedulerPage() {
         {activeTab === 'runs' && (
           <SectionCard
             title="运行记录"
-            description="查看状态、耗时和输出摘要"
             icon={<Activity className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
-                <Button size="sm" variant="secondary" onClick={clearOldRuns}><Trash className="h-3.5 w-3.5" />清理 30 天前</Button>
-                <Button size="sm" variant="secondary-destructive" onClick={clearAllRuns}><Trash className="h-3.5 w-3.5" />清空全部</Button>
+                <Button size="sm" variant={isArmed('runs:clear-old') ? 'destructive' : 'secondary-destructive'} onClick={clearOldRuns}><Trash className="h-3.5 w-3.5" />清理 30 天前</Button>
+                <Button size="sm" variant={isArmed('runs:clear-all') ? 'destructive' : 'secondary-destructive'} onClick={clearAllRuns}><Trash className="h-3.5 w-3.5" />清空全部</Button>
               </>
             )}
             bodyPadding="none"
@@ -1207,7 +1233,6 @@ function SchedulerPage() {
         {activeTab === 'nodes' && (
           <SectionCard
             title="执行节点"
-            description="查看节点状态与并发"
             icon={<Server className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >

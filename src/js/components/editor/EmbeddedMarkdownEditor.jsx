@@ -63,7 +63,7 @@ export default function EmbeddedMarkdownEditor({
       onChangeRef.current?.(markdown);
     });
     return adapter;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   return (
     <div

@@ -95,6 +95,20 @@ module.exports = [
         auth: 'readonly',
         AbortController: 'readonly',
         WebAssembly: 'readonly',
+        // 常用浏览器/边缘 API（项目 JSX 中用到）
+        btoa: 'readonly',
+        atob: 'readonly',
+        File: 'readonly',
+        EventSource: 'readonly',
+        crypto: 'readonly',
+        RTCPeerConnection: 'readonly',
+        RTCIceCandidate: 'readonly',
+        MediaStream: 'readonly',
+        MediaStreamTrack: 'readonly',
+        OffscreenCanvas: 'readonly',
+        Node: 'readonly',
+        Element: 'readonly',
+        ClipboardItem: 'readonly',
       },
     },
     rules: {
@@ -135,9 +149,25 @@ module.exports = [
   },
   // 前端文件特定配置
   {
-    files: ['src/js/**/*.js'],
+    files: ['src/js/**/*.js', 'src/js/**/*.jsx'],
+    plugins: {
+      'react-hooks': require('eslint-plugin-react-hooks'),
+      react: require('eslint-plugin-react'),
+    },
+    rules: {
+      // 检查 JSX 中引用的未定义组件（<Toolbar/>、<Upload/> 等未导入时报错），防止漏导入变量
+      'react/jsx-no-undef': 'error',
+    },
     languageOptions: {
       sourceType: 'module', // 前端使用 ESM
+      parser: require('@babel/eslint-parser'),
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          presets: ['@babel/preset-react'],
+        },
+        ecmaFeatures: { jsx: true },
+      },
     },
   },
   {
@@ -153,6 +183,7 @@ module.exports = [
       'agent-rust/**',
       'modules/_template/**', // 模板文件包含占位符语法
       'plugin/**', // 浏览器扩展使用特殊 API
+      'src/pwa-public/vendor/**', // 第三方 vendor 归档（Draw.io 等）
       'src/js/modules/template.js', // 模板文件
       'src/*_snippet*.js', // 代码片段
 

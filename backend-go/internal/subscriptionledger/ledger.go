@@ -47,7 +47,9 @@ type BatchResult struct {
 }
 
 const (
-	reportRetentionWindow    = 72 * time.Hour
+	// 原始流量增量保留 14 天，支撑仪表盘“最近 7 天”的逐日流量趋势查询。
+	// 与回放键保留窗口一致，折叠后的周期用量（subscription_usage_cycles）不受裁剪影响。
+	reportRetentionWindow    = 14 * 24 * time.Hour
 	replayKeyRetentionWindow = 14 * 24 * time.Hour
 )
 

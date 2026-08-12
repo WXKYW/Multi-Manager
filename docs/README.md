@@ -44,6 +44,15 @@
 - 登录、初始化和密钥输入必须逐个核对具体输入框，不要只按页面关键字替换。管理员密码、新密码、确认密码使用 `type="password"`；2FA 验证码仍使用 `type="text"` + `inputMode="numeric"`。
 - 将自绘按钮、占位操作、状态标签等替换为 Kumo 组件时，保留语义和交互状态：按钮用 `Button`，状态用 `Badge/StatusBadge`，可复制文本用 `ClipboardText`，面板优先用 `SectionCard/LayerCard`。替换后要检查 hover、focus、disabled、loading 和无数据状态是否仍然完整。
 - 导入/导出、批量操作、自动刷新等配置区应保持紧凑一致：相关操作尽量合并到同一控制组，避免同一模块在“自然页面滚动”和“内部工作区视口”之间切换。
+- 整页滚动页面（Servers、订阅分发、模型网关、OpenAI、DNS、Oracle、阿里云、腾讯云、M365 等）统一由 `app-main-panel` 承担页面滚动，`main` 使用 `flex-1 min-w-0 overflow-x-clip`（不要 `overflow-y-auto`，否则 tab 无法滑入覆盖面包屑）。面包屑（`z-20`）与 tab 栏（`z-30`）在同一滚动流，页面滚动时 tab 自动吸顶覆盖面包屑，效果等同 Cloudflare 官方。
+- 模块默认走“整页滚动 + tab 吸附”模式；只有日志、Draw.io、提示词库这类真正需要填满视口并在内容内部滚动的页面才归入 viewport 工作区。表格/双栏页面不要再额外做“表格内部滚动、页面不滚”的混合模式——统一整页滚动，表格、双栏面板自然高，随页面一起滚。
+- 模块级 tab 栏统一用 `stickyTabsBaseClass`（`flex items-center`，无 `flex-wrap`），不要用 `PageToolbar`（基类自带 `flex-col/flex-wrap/pb`，叠加 sticky 会换行并使 tab 栏高度异常）。tab 栏与右侧“更多”`按钮同行且不换行。
+- tab 栏右侧的操作一律收进 `TabBarOverflowActions`：宽屏（`md`）内联展示带文字 Kumo 按钮，窄屏收起为一个与 tab 同高（`h-9 w-9 !rounded-lg`）的「更多」按钮，点击弹出官方 `DropdownMenu` 列表；每一项带图标与文字，禁止自绘列表。Select 类操作折叠进 `DropdownMenu.Sub` 子菜单，用 `RadioItem` 勾选。
+- tab 栏右侧的搜索框用 `ResponsiveSearchInput`：宽屏展示输入框，窄屏折叠为搜索图标 Popover（内部输入 + 可选搜索按钮）。所有搜索框在移动端都应折叠为搜索按钮，不要占整行宽度。
+- 双列表格布局（如 DNS 域名+记录、模型网关端点+模型）依赖祖先 `container-type` 容器与 `@container` 断点切换两列。改造页面时不要把容器类（如 `dns-workspace`）一并删掉，否则双列退回单列。两列都保持自然高、一起滚动，某列内容较短时直接变短，不强行拉平。
+- 表格/列表底部不留额外间隙：PageStack 使用 `viewport`（`pb-0`）变体 + 内容自然高度，不要再用 `h-full/flex-1` 撑满或内部 `overflow-auto` 制造填满视口的假象；底部被 content 自身内容决定，多余空白来自额外的底部 padding 或少显 `flex-1`。
+- 所有页面内容区四边距统一为 12px（`--app-canvas-gutter-x/top/bottom`），由 `MainLayout.jsx` 统一负责；viewport 工作区分支与普通滚动分支都使用同一套 gutter 变量，保证仪表盘、系统日志、Draw.io 等页面四边一致。页面内部不要额外叠加 `px-px/pt-px` 这类 padding 造成内外累计不均匀。
+- 改页面模板时必须同步检查 import（如 `stickyTabsBaseClass`、`TabBarOverflowActions`、`ResponsiveSearchInput`）；漏 import 会导致对应模块整页崩溃（`X is not defined`）。改动共享组件/常量（例如 `MODULE_TABS_PROPS`）会影响所有模块，需全局评估后再提交。修改后立即跑一次 `vite build` 兜底，能发现变量名笔误（如 `viewportWorkspace` 与 `viewportWorkspaceModule`）导致的构建失败。
 
 ## 参考资料
 

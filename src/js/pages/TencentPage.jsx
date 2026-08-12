@@ -1,18 +1,19 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Tabs } from '@cloudflare/kumo';
+import { Tabs, Toolbar } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import useTableResize from '../composables/useTableResize.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { AppTable, DataTableFrame, EmptyState, InlineStatusPill, PageStack, PageToolbar, SectionCard, getStatusPillClass } from '../components/ui/AppPrimitives.jsx';
-import { Cloud, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash } from '../components/Icons.jsx';
+import { AppTable, DataTableFrame, EmptyState, StatusBadge, PageStack, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
+import { Cloud, Download, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash, Upload } from '../components/Icons.jsx';
 
 const emptyAccountForm = {
   name: '',
@@ -77,7 +78,7 @@ function LoadingRows({ columns = 5, rows = 5 }) {
 
 function CloudToolbar({ activeTab, setActiveTab, accounts, selectedAccountId, setSelectedAccountId, refreshing, refreshData }) {
   return (
-    <PageToolbar>
+    <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
       <Tabs
         {...MODULE_TABS_PROPS}
         value={activeTab}
@@ -90,28 +91,30 @@ function CloudToolbar({ activeTab, setActiveTab, accounts, selectedAccountId, se
         ]}
       />
       {activeTab !== 'accounts' && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Select
-            size="sm"
-            aria-label="腾讯云账号"
-            value={selectedAccountId}
-            onValueChange={(value) => setSelectedAccountId(String(value))}
-            items={accounts.map((account) => ({ value: String(account.id), label: account.name }))}
-            className="w-56 min-w-0"
-          />
-          <Button
-            size="sm"
-            shape="square"
-            variant="secondary"
-            onClick={refreshData}
-            disabled={refreshing || !selectedAccountId}
-            aria-label="刷新"
-            title="刷新"
-            icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />}
-          />
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'account',
+              type: 'select',
+              label: '账号',
+              icon: <Cloud className="h-3.5 w-3.5" />,
+              value: selectedAccountId,
+              onValueChange: (value) => setSelectedAccountId(String(value)),
+              disabled: false,
+              options: accounts.map((account) => ({ value: String(account.id), label: account.name })),
+            },
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />,
+              onClick: refreshData,
+              disabled: refreshing || !selectedAccountId,
+              loading: refreshing,
+            },
+          ]}
+        />
       )}
-    </PageToolbar>
+    </div>
   );
 }
 
@@ -126,6 +129,7 @@ function InstanceActions({ disabled, onAction }) {
 }
 
 function TencentPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('dns');
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -158,6 +162,56 @@ function TencentPage() {
       toast.error('加载腾讯云账号失败');
     }
   }, [getAuthHeaders, selectedAccountId]);
+
+  const accountImportInputRef = useRef(null);
+  const [accountImporting, setAccountImporting] = useState(false);
+
+  const exportAccounts = async () => {
+    if (accounts.length === 0) { toast.warning('暂无账号可导出'); return; }
+    try {
+      const response = await fetch('/api/tencent/accounts/export', { headers: getAuthHeaders() });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导出账号失败');
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `tencent-accounts-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${payload.accounts?.length || 0} 个账号（含 SecretKey，请注意保管）`);
+    } catch (error) {
+      toast.error(error.message || '导出账号失败');
+    }
+  };
+
+  const importAccountsFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setAccountImporting(true);
+    try {
+      const data = JSON.parse(await file.text());
+      const list = Array.isArray(data) ? data : (data.accounts || []);
+      if (list.length === 0) throw new Error('文件中没有账号数据');
+      if (!(await dialog.confirm(`确认导入 ${list.length} 个账号？已存在相同 SecretId 的账号会自动跳过。`))) return;
+      const response = await fetch('/api/tencent/accounts/import', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts: list, overwrite: false }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导入账号失败');
+      await loadAccounts();
+      toast.success(`导入完成：新增 ${payload.imported ?? 0} 个，跳过 ${payload.skipped ?? 0} 个`);
+    } catch (error) {
+      toast.error(error.message || '导入账号失败');
+    } finally {
+      setAccountImporting(false);
+    }
+  };
 
   const loadDnsData = useCallback(async (accountId) => {
     setLoadingData(true);
@@ -217,7 +271,7 @@ function TencentPage() {
 
   useEffect(() => {
     if (selectedAccountId && activeTab !== 'accounts') refreshData();
-  }, [activeTab, selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedAccountId]);  
 
   const saveAccount = async () => {
     if (!accountForm.name || !accountForm.secretId || (!editingAccount && !accountForm.secretKey)) {
@@ -247,7 +301,7 @@ function TencentPage() {
   };
 
   const deleteAccount = async (account) => {
-    if (!(await dialog.confirm(`确定要删除腾讯云账号“${account.name}”吗？`))) return;
+    if (!confirmPress(`account:${account.id}`, `删除腾讯云账号「${account.name}」`)) return;
     try {
       const response = await fetch(`/api/tencent/accounts/${account.id}`, { method: 'DELETE', headers: getAuthHeaders() });
       const result = await response.json();
@@ -298,7 +352,7 @@ function TencentPage() {
   };
 
   const renderDns = () => (
-    <SectionCard title="DNS 域名" description="域名与解析记录" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+    <SectionCard title="DNS 域名" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
       <DataTableFrame variant="embedded" density="compact">
         <AppTable layout="fixed" widths={dnsColWidths}>
           <colgroup>{dnsColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
@@ -318,7 +372,7 @@ function TencentPage() {
               <Table.Row key={domain.DomainId || domain.Name}>
                 <Table.Cell className="font-semibold text-kumo-strong">{domain.Name}</Table.Cell>
                 <Table.Cell className="tabular-nums">{domain.RecordCount || '-'}</Table.Cell>
-                <Table.Cell><InlineStatusPill tone={domain.Status === 'ENABLE' ? 'success' : 'neutral'}>{domain.Status === 'ENABLE' ? '正常' : '已暂停'}</InlineStatusPill></Table.Cell>
+                <Table.Cell><StatusBadge tone={domain.Status === 'ENABLE' ? 'success' : 'neutral'}>{domain.Status === 'ENABLE' ? '正常' : '已暂停'}</StatusBadge></Table.Cell>
                 <Table.Cell className="truncate text-kumo-subtle">{domain.Expiration || '-'}</Table.Cell>
                 <Table.Cell><div className="flex w-full justify-end"><Button size="sm" variant="secondary">管理解析</Button></div></Table.Cell>
               </Table.Row>
@@ -333,7 +387,7 @@ function TencentPage() {
     const items = kind === 'cvm' ? cvmInstances : lighthouseInstances;
     const title = kind === 'cvm' ? 'CVM 实例' : '轻量应用服务器';
     return (
-      <SectionCard title={title} description="按状态和地域查看资源" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+      <SectionCard title={title} icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
         <DataTableFrame variant="embedded" density="compact">
           <AppTable tableId={`tencent-${kind}-instances`} columns={TENCENT_INSTANCE_COLUMNS}>
             <Table.Header sticky variant="compact">
@@ -362,7 +416,7 @@ function TencentPage() {
                         <div className="truncate font-mono text-[11px] text-kumo-subtle">{item.InstanceId}</div>
                       </div>
                     </Table.Cell>
-                    <Table.Cell><span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-bold ${getStatusPillClass(statusTone(status))}`}>{statusText(status)}</span></Table.Cell>
+                    <Table.Cell><StatusBadge tone={statusTone(status)}>{statusText(status)}</StatusBadge></Table.Cell>
                     <Table.Cell className="truncate">{zone || '-'}</Table.Cell>
                     <Table.Cell className="font-mono text-[11px]">{address}</Table.Cell>
                     <Table.Cell>{item.CPU || '-'}核 {item.Memory || '-'}GB</Table.Cell>
@@ -388,7 +442,27 @@ function TencentPage() {
       title="腾讯云账号"
       description="Secret 保存后不回显"
       icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
-      action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>}
+      action={(
+        <div className="flex shrink-0 items-center gap-2">
+          <Input
+            ref={accountImportInputRef}
+            type="file"
+            accept=".json,application/json"
+            aria-label="导入腾讯云账号 JSON"
+            className="hidden"
+            onChange={importAccountsFromFile}
+          />
+          <Toolbar size="sm" aria-label="导出导入账号" className="shrink-0">
+            <Toolbar.Button onClick={exportAccounts} disabled={accounts.length === 0} aria-label="导出账号" title="导出账号（含 SecretKey）" icon={<Upload className="h-3.5 w-3.5" />}>
+              <span className="hidden sm:inline">导出</span>
+            </Toolbar.Button>
+            <Toolbar.Button onClick={() => accountImportInputRef.current?.click()} disabled={accountImporting} aria-label="导入账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+              <span className="hidden sm:inline">导入</span>
+            </Toolbar.Button>
+          </Toolbar>
+          <Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>
+        </div>
+      )}
       bodyPadding="none"
     >
       <DataTableFrame variant="embedded" density="compact">
@@ -415,7 +489,7 @@ function TencentPage() {
                 <Table.Cell className="text-right">
                   <div className="flex w-full justify-end gap-1">
                     <Button size="sm" shape="square" variant="secondary" onClick={() => openEditModal(account)} aria-label="编辑账号" title="编辑账号" icon={<Settings className="h-3.5 w-3.5" />} />
-                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteAccount(account)} aria-label="删除账号" title="删除账号" icon={<Trash className="h-3.5 w-3.5" />} />
+                    <Button size="sm" shape="square" variant={isArmed(`account:${account.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteAccount(account)} aria-label="删除账号" title="删除账号" icon={<Trash className="h-3.5 w-3.5" />} />
                   </div>
                 </Table.Cell>
               </Table.Row>
@@ -427,7 +501,7 @@ function TencentPage() {
   );
 
   return (
-    <PageStack>
+    <PageStack viewport className="min-h-0 flex-1">
       <CloudToolbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}

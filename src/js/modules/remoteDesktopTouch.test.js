@@ -70,7 +70,19 @@ describe('remote desktop touch controls', () => {
       current: { fps: 60, bitrate: 12_000_000 },
     });
     expect(next.profile.fps).toBe(30);
-    expect(next.profile.bitrate).toBeLessThanOrEqual(6_000_000);
+    expect(next.profile.bitrate).toBeLessThanOrEqual(8_000_000);
+    expect(next.profile.bitrate).toBeGreaterThanOrEqual(6_000_000);
+    expect(next.healthyIntervals).toBe(0);
+  });
+
+  it('deeply degraded links fall back to the 6 Mbps reaction floor', () => {
+    const next = nextRemoteDesktopProfile({
+      loss: 8,
+      nativeBitrate: 12_000_000,
+      current: { fps: 60, bitrate: 12_000_000 },
+    });
+    expect(next.profile.fps).toBe(30);
+    expect(next.profile.bitrate).toBe(6_000_000);
     expect(next.healthyIntervals).toBe(0);
   });
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/manifest"
 )
 
 func TestHostMetricsShape(t *testing.T) {
@@ -103,6 +104,11 @@ func TestAIAccessOverviewAndMCP(t *testing.T) {
 		t.Fatal("expected agent key")
 	}
 
+	guide, _ := overview["guide"].(string)
+	if !strings.Contains(guide, "/api/ai/mcp") || !strings.Contains(guide, agentKey) || !strings.Contains(guide, "list_apis") {
+		t.Fatalf("expected AI access guide to include endpoint, key and tools, got: %s", guide)
+	}
+
 	unauthorized := httptest.NewRequest(http.MethodGet, "http://example.test/api/ai/manifest", nil)
 	if _, err := service.aiManifest(unauthorized); err == nil {
 		t.Fatal("expected unauthorized manifest request to fail")
@@ -138,8 +144,366 @@ func TestAIAccessOverviewAndMCP(t *testing.T) {
 	}
 }
 
-func TestAPICallStats(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "api_monitor_api_stats_test_*")
+func TestAIAuditPage(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "api_monitor_ai_audit_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg := config.Config{
+		DataDir: tempDir,
+		DBName:  "data.db",
+		Version: "test",
+	}
+
+	service := New(cfg)
+	defer service.Shutdown()
+
+	overviewReq := httptest.NewRequest(http.MethodGet, "http://example.test/api/system/ai-access", nil)
+	if _, err := service.aiAccessOverview(overviewReq); err != nil {
+		t.Fatal(err)
+	}
+
+	rotateReq := httptest.NewRequest(http.MethodPost, "http://example.test/api/system/ai-access/key/rotate", nil)
+	if _, err := service.rotateAIAgentKey(rotateReq); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.rotateAIAgentKey(rotateReq); err != nil {
+		t.Fatal(err)
+	}
+
+	pageReq := httptest.NewRequest(http.MethodGet, "http://example.test/api/system/ai-access/audit?days=7&page=1&pageSize=10", nil)
+	payload, err := service.listAIAuditPage(pageReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, ok := payload["total"].(int)
+	if !ok || total < 2 {
+		t.Fatalf("expected total >= 2, got %#v", payload["total"])
+	}
+	records, ok := payload["records"].([]aiAuditEntry)
+	if !ok || len(records) == 0 {
+		t.Fatalf("expected non-empty records, got %#v", payload["records"])
+	}
+	if records[0].Action != "rotate_key" {
+		t.Fatalf("unexpected newest audit action: %#v", records[0])
+	}
+}
+func TestAIMCPToolSchemasAreValidJSONSchema(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DBName: "data.db"}
+	service := New(cfg)
+	defer service.Shutdown()
+
+	var walk func(t *testing.T, path string, node interface{}, depth int)
+	walk = func(t *testing.T, path string, node interface{}, depth int) {
+		if depth > 24 {
+			t.Fatalf("schema too deep at %s", path)
+		}
+		if node == nil {
+			return
+		}
+		if boolVal, ok := node.(bool); ok {
+			_ = boolVal
+			return
+		}
+		obj, ok := node.(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s: schema node must be object or boolean, got %T", path, node)
+		}
+		typeVal, _ := obj["type"].(string)
+		if typeVal == "" {
+			t.Fatalf("%s: property missing type: %#v", path, obj)
+		}
+		switch typeVal {
+		case "object":
+			props, _ := obj["properties"].(map[string]interface{})
+			if required, ok := obj["required"].([]string); ok {
+				for _, r := range required {
+					if _, exists := props[r]; !exists {
+						t.Fatalf("%s: required %q not in properties", path, r)
+					}
+				}
+			}
+			for propName, propNode := range props {
+				walk(t, path+"."+propName, propNode, depth+1)
+			}
+			if ap, ok := obj["additionalProperties"].(map[string]interface{}); ok {
+				walk(t, path+".additionalProperties", ap, depth+1)
+			}
+		case "array":
+			if items, ok := obj["items"].(map[string]interface{}); ok {
+				walk(t, path+".items", items, depth+1)
+			}
+		}
+	}
+
+	// 1) 校验 MCP 工具 schema
+	for _, tool := range service.aiTools() {
+		name, _ := tool["name"].(string)
+		raw, ok := tool["inputSchema"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("tool %s missing inputSchema", name)
+		}
+		walk(t, "tool."+name, raw, 0)
+	}
+
+	// 2) 校验 get_route 返回的全部契约 schema（apiDocs 注入的 requestSchema）
+	checked := 0
+	for _, route := range service.apiDocs()["routes"].([]apiDocRoute) {
+		if route.RequestSchema != nil {
+			walk(t, "requestSchema."+route.Prefix, route.RequestSchema, 0)
+			checked++
+		}
+	}
+	// 3) 校验契约注册表本身
+	for prefix, raw := range routeRequestContracts {
+		if m, ok := raw.(map[string]interface{}); ok {
+			walk(t, "contract."+prefix, m, 0)
+		}
+	}
+	t.Logf("validated request schemas for %d routes", checked)
+}
+
+
+func TestAIMCPSpec(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "api_monitor_mcp_spec_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg := config.Config{
+		DataDir: tempDir,
+		DBName:  "data.db",
+	}
+
+	service := New(cfg)
+	defer service.Shutdown()
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/api/system/ai-access", nil)
+	overview, err := service.aiAccessOverview(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentKey := overview["agentKey"].(map[string]interface{})["value"].(string)
+
+	mcpRequest := func(method string, params map[string]interface{}, id interface{}) (interface{}, int, error) {
+		payload := map[string]interface{}{"jsonrpc": "2.0", "method": method}
+		if id != nil {
+			payload["id"] = id
+		}
+		if params != nil {
+			payload["params"] = params
+		}
+		body, _ := json.Marshal(payload)
+		r := httptest.NewRequest(http.MethodPost, "http://example.test/api/ai/mcp", bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+agentKey)
+		return service.handleMCP(r)
+	}
+
+	pingResult, status, err := mcpRequest("ping", nil, 1)
+	if err != nil {
+		t.Fatalf("ping failed: %v", err)
+	}
+	if status != http.StatusOK || pingResult == nil {
+		t.Fatalf("ping status = %d, result = %#v", status, pingResult)
+	}
+
+	notifResult, notifStatus, err := mcpRequest("notifications/initialized", nil, nil)
+	if err != nil {
+		t.Fatalf("notification failed: %v", err)
+	}
+	if notifStatus != http.StatusAccepted {
+		t.Fatalf("notification status = %d, want 202", notifStatus)
+	}
+	if notifResult != nil {
+		t.Fatalf("notification must have no payload, got %#v", notifResult)
+	}
+
+	resList, _, err := mcpRequest("resources/list", nil, 2)
+	if err != nil {
+		t.Fatalf("resources/list failed: %v", err)
+	}
+	resources := resList.(map[string]interface{})["result"].(map[string]interface{})["resources"].([]map[string]interface{})
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d", len(resources))
+	}
+
+	readResult, _, err := mcpRequest("resources/read", map[string]interface{}{"uri": "api-monitor://routes"}, 3)
+	if err != nil {
+		t.Fatalf("resources/read routes failed: %v", err)
+	}
+	contents := readResult.(map[string]interface{})["result"].(map[string]interface{})["contents"].([]map[string]interface{})
+	if len(contents) != 1 {
+		t.Fatalf("expected 1 content item, got %d", len(contents))
+	}
+
+	if unknownRes, _, err := mcpRequest("resources/read", map[string]interface{}{"uri": "unknown://uri"}, 4); err != nil {
+		t.Fatalf("resources/read unknown returned transport error: %v", err)
+	} else if _, isError := unknownRes.(map[string]interface{})["error"]; !isError {
+		t.Fatal("expected unknown resource to produce a JSON-RPC error")
+	}
+}
+
+func TestRouteContractCoverage(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DBName: "data.db"}
+	service := New(cfg)
+	defer service.Shutdown()
+
+	routes := service.apiDocs()["routes"].([]apiDocRoute)
+	uncovered := []string{}
+	covered := 0
+	familyPrefix := 0
+	for _, route := range routes {
+		isWrite := false
+		for _, method := range route.Methods {
+			if method == "POST" || method == "PUT" || method == "PATCH" {
+				isWrite = true
+				break
+			}
+		}
+		if !isWrite {
+			continue
+		}
+		if route.MatchMode == "prefix" {
+			// 家族前缀路由只是索引条目，不是真实写接口，不参与契约覆盖统计。
+			familyPrefix++
+			continue
+		}
+		if route.RequestSchema != nil || route.RequestBody != nil {
+			covered++
+		} else {
+			uncovered = append(uncovered, route.Prefix)
+		}
+	}
+	t.Logf("write routes covered: %d, uncovered: %d, family-prefix skipped: %d", covered, len(uncovered), familyPrefix)
+	for _, prefix := range uncovered {
+		t.Logf("  uncovered: %s", prefix)
+	}
+	if len(uncovered) > 0 {
+		t.Fatalf("仍有 %d 个写接口缺少请求契约，请在 route_contracts.go 中登记：%v", len(uncovered), uncovered)
+	}
+}
+
+func TestAIProgressiveDisclosure(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "api_monitor_disclosure_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	cfg := config.Config{DataDir: tempDir, DBName: "data.db"}
+	service := New(cfg)
+	defer service.Shutdown()
+
+	overviewReq := httptest.NewRequest(http.MethodGet, "http://example.test/api/system/ai-access", nil)
+	overview, err := service.aiAccessOverview(overviewReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentKey := overview["agentKey"].(map[string]interface{})["value"].(string)
+
+	callTool := func(name string, args map[string]interface{}) (interface{}, error) {
+		body, _ := json.Marshal(map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]interface{}{"name": name, "arguments": args}})
+		req := httptest.NewRequest(http.MethodPost, "http://example.test/api/ai/mcp", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+agentKey)
+		result, status, err := service.handleMCP(req)
+		if err != nil || status != http.StatusOK {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	// list_apis 紧凑 + 过滤
+	raw, err := callTool("list_apis", map[string]interface{}{"group": "PaaS"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := raw.(map[string]interface{})["result"].(map[string]interface{})["structuredContent"].(map[string]interface{})
+	routes := catalog["routes"].([]map[string]interface{})
+	if len(routes) == 0 {
+		t.Fatal("expected PaaS routes in compact catalog")
+	}
+	first := routes[0]
+	for _, key := range []string{"path", "methods", "group", "auth", "desc", "hasBody"} {
+		if _, ok := first[key]; !ok {
+			t.Fatalf("compact catalog missing key %s: %#v", key, first)
+		}
+	}
+	if _, ok := first["requestSchema"]; ok {
+		t.Fatal("compact catalog should not include requestSchema")
+	}
+
+	// get_route 返回完整契约（含 requestSchema）
+	raw, err = callTool("get_route", map[string]interface{}{"path": "/api/flyio/apps/apimnt/update-image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := raw.(map[string]interface{})["result"].(map[string]interface{})["structuredContent"].(map[string]interface{})
+	if contract["matchedPath"] != "/api/flyio/apps/apimnt/update-image" {
+		t.Fatalf("unexpected matchedPath: %#v", contract["matchedPath"])
+	}
+	schema := contract["requestSchema"].(map[string]interface{})
+	required, _ := schema["required"].([]string)
+	found := map[string]bool{}
+	for _, r := range required {
+		found[r] = true
+	}
+	if !found["accountId"] || !found["image"] {
+		t.Fatalf("expected required accountId+image in flyio update-image schema: %#v", schema)
+	}
+}
+
+func TestRouteGroupsFollowSidebarModules(t *testing.T) {
+	cases := []struct {
+		prefix string
+		group  string
+	}{
+		{"/api/openai/endpoints", "模型网关"},
+		{"/v1/chat/completions", "模型网关"},
+		{"/api/subscription/accounts", "订阅分发"},
+		{"/sub/{token}", "订阅分发"},
+		{"/api/cloudflare/accounts", "Cloudflare"},
+		{"/api/aliyun/accounts", "阿里云"},
+		{"/api/tencent/accounts", "腾讯云"},
+		{"/api/oracle/accounts", "甲骨文云"},
+		{"/api/m365/accounts", "Microsoft 365"},
+		{"/api/github/tokens", "GitHub"},
+		{"/api/server/accounts", "主机实例"},
+		{"/api/koyeb/accounts", "PaaS"},
+		{"/api/flyio/accounts", "PaaS"},
+		{"/api/scheduler/tasks", "定时任务"},
+		{"/api/cron/tasks", "定时任务"},
+		{"/api/uptime/monitors", "可用性监测"},
+		{"/api/filebox/files", "文件柜"},
+		{"/api/drawio/documents", "图编辑器"},
+		{"/api/prompts/entries", "提示词库"},
+		{"/api/totp/accounts", "双因子认证"},
+		{"/api/notification/rules", "通知中心"},
+		{"/api/auth/login", "认证"},
+		{"/api/system/logs/stream", "系统日志"},
+		{"/api/settings/sys-logs", "系统日志"},
+		{"/api/system/api-docs", "API 接口"},
+		{"/api/openapi.json", "API 接口"},
+		{"/api/api-keys", "API 接口"},
+		{"/api/ai/manifest", "API 接口"},
+		{"/api/ai/mcp", "API 接口"},
+		{"/api/ai-access", "API 接口"},
+		{"/api/settings/site-brand", "系统设置"},
+		{"/api/backup/run", "系统设置"},
+		{"/health", "仪表盘"},
+		{"/api/system/host-metrics", "仪表盘"},
+	}
+	for _, tc := range cases {
+		got := routeGroup(manifest.Route{Prefix: tc.prefix})
+		if got != tc.group {
+			t.Errorf("routeGroup(%s) = %q, want %q", tc.prefix, got, tc.group)
+		}
+	}
+}
+
+func TestAPICallStats(t *testing.T) {	tempDir, err := os.MkdirTemp("", "api_monitor_api_stats_test_*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +564,16 @@ func TestAPICallStats(t *testing.T) {
 	trend, ok := stats2["trend"].([]map[string]interface{})
 	if !ok || len(trend) != 7 {
 		t.Fatalf("expected 7 days of trend data, got %#v", stats2["trend"])
+	}
+
+	// 每个趋势桶应带 tokens / traffic 字段（无数据时回落为 0）。
+	for _, item := range trend {
+		if _, hasTokens := item["tokens"]; !hasTokens {
+			t.Errorf("expected tokens key on trend bucket %#v", item)
+		}
+		if _, hasTraffic := item["traffic"]; !hasTraffic {
+			t.Errorf("expected traffic key on trend bucket %#v", item)
+		}
 	}
 
 	today := time.Now().Format("2006-01-02")

@@ -475,7 +475,8 @@ func TestResolveInstallOriginPrefersPublicBaseURL(t *testing.T) {
 	req.Header.Set("X-Forwarded-Host", "internal.local:8080")
 	req.Header.Set("X-Forwarded-Proto", "http")
 
-	proto, host := resolveInstallOrigin(req)
+	service := &Service{}
+	proto, host := service.resolveInstallOrigin(context.Background(), nil, req, "")
 	if proto != "https" || host != "panel.example.com" {
 		t.Fatalf("origin = %s://%s, want https://panel.example.com", proto, host)
 	}
@@ -2418,6 +2419,53 @@ func TestGeneratedRealityNodeHasMihomoCompatibleFields(t *testing.T) {
 	}
 }
 
+func TestGeneratedSocksNodeHasPlainUsernamePassword(t *testing.T) {
+	config, raw, transport, err := generateManagedNode("mnode-socks", "LA SOCKS", "socks", "edge.example.com", "www.cloudflare.com", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport != "tcp" {
+		t.Fatalf("transport=%s", transport)
+	}
+	if !strings.HasPrefix(raw, "socks://") || !strings.Contains(raw, "@edge.example.com:0#") {
+		t.Fatalf("invalid client URI: %s", raw)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	if inbound["type"] != "socks" {
+		t.Fatalf("inbound type=%v", inbound["type"])
+	}
+	users := inbound["users"].([]interface{})
+	user := users[0].(map[string]interface{})
+	if strings.TrimSpace(user["username"].(string)) == "" || strings.TrimSpace(user["password"].(string)) == "" {
+		t.Fatalf("missing plain credential: %#v", user)
+	}
+}
+
+func TestGeneratedHTTPNodeHasPlainUsernamePassword(t *testing.T) {
+	config, raw, transport, err := generateManagedNode("mnode-http", "Tokyo HTTP", "http", "edge.example.com", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport != "tcp" {
+		t.Fatalf("transport=%s", transport)
+	}
+	if !strings.HasPrefix(raw, "http://") || !strings.Contains(raw, "@edge.example.com:0#") {
+		t.Fatalf("invalid client URI: %s", raw)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	if inbound["type"] != "http" {
+		t.Fatalf("inbound type=%v", inbound["type"])
+	}
+}
+
 func TestFailedManagedProxyNodeCanBeDeletedWithoutAgentCleanup(t *testing.T) {
 	service, db := testService(t)
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('failed-proxy-host','Debian 11','192.0.2.10','agent','password')`); err != nil {
@@ -3107,5 +3155,208 @@ func toIntTest(value interface{}) int {
 		return v
 	default:
 		return 0
+	}
+}
+
+func TestPublicPageIconID(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO server_status_pages (slug, domain, title, public, cache_seconds, config_json, server_ids_json)
+		VALUES ('fav-slug', 'fav.example.com', 'Fav Test', 1, 300, '{"publicIconId":"site-custom"}', '[]')`); err != nil {
+		t.Fatalf("insert status page: %v", err)
+	}
+
+	iconID, found, err := service.PublicPageIconID(ctx, "fav-slug", false)
+	if err != nil || !found || iconID != "site-custom" {
+		t.Fatalf("custom slug lookup = (%q, %v, %v), want (site-custom, true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "fav.example.com", true)
+	if err != nil || !found || iconID != "site-custom" {
+		t.Fatalf("custom domain lookup = (%q, %v, %v), want (site-custom, true, nil)", iconID, found, err)
+	}
+	iconID, found, err = service.PublicPageIconID(ctx, "missing-slug", false)
+	if err != nil || found {
+		t.Fatalf("missing slug lookup = (%q, %v, %v), want ('', false, nil)", iconID, found, err)
+	}
+}
+
+// ---- agent command (POST /api/server/agent/command/{id}) ----
+
+// taskFailedReplySocket 与 taskReplySocket 相同，但以失败状态回执（模拟命令退出码非 0）
+type taskFailedReplySocket struct {
+	t       *testing.T
+	service *Service
+	reply   func(taskType int, data string) string
+}
+
+func (s *taskFailedReplySocket) WriteMessage(_ int, data []byte) error {
+	raw := string(data)
+	if !strings.HasPrefix(raw, "42") {
+		s.t.Fatalf("unexpected socket frame: %s", raw)
+	}
+	var frame []interface{}
+	if err := json.Unmarshal([]byte(raw[2:]), &frame); err != nil {
+		s.t.Fatalf("decode socket frame: %v frame=%s", err, raw)
+	}
+	if len(frame) != 2 || frame[0] != "dashboard:task" {
+		s.t.Fatalf("unexpected socket event: %#v", frame)
+	}
+	payload, ok := frame[1].(map[string]interface{})
+	if !ok {
+		s.t.Fatalf("unexpected socket payload: %#v", frame[1])
+	}
+	taskID, _ := payload["id"].(string)
+	taskType, _ := payload["type"].(float64)
+	taskData, _ := payload["data"].(string)
+	result := s.reply(int(taskType), taskData)
+	go s.service.taskRegistry.Fail(taskID, result)
+	return nil
+}
+
+// silentTaskSocket 接收任务下发但从不回执（用于超时测试）
+type silentTaskSocket struct{}
+
+func (s *silentTaskSocket) WriteMessage(_ int, _ []byte) error {
+	return nil
+}
+
+func TestAgentExecCommandSuccess(t *testing.T) {
+	service, db := testService(t)
+	service.registry.Register("server-1", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		if taskType != 1 {
+			t.Fatalf("task type = %d, want RUN_COMMAND(1)", taskType)
+		}
+		if data != "echo hello" {
+			t.Fatalf("task data = %q, want echo hello", data)
+		}
+		return "hello from agent\n"
+	}})
+
+	rec := perform(service, http.MethodPost, "/api/server/agent/command/server-1", `{"command":"echo hello"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	payload := decodePayload(t, rec)
+	if payload["success"] != true {
+		t.Fatalf("success=%v, want true: %s", payload["success"], rec.Body.String())
+	}
+	if payload["output"] != "hello from agent\n" {
+		t.Fatalf("output=%v, want hello from agent", payload["output"])
+	}
+
+	// 命令历史应写入 execution_mode=api
+	var mode, status string
+	if err := db.QueryRow(`SELECT execution_mode, status FROM server_command_history WHERE server_id='server-1' ORDER BY id DESC LIMIT 1`).Scan(&mode, &status); err != nil {
+		t.Fatalf("command history not written: %v", err)
+	}
+	if mode != "api" || status != "success" {
+		t.Fatalf("history = (%s, %s), want (api, success)", mode, status)
+	}
+}
+
+func TestAgentExecCommandFailed(t *testing.T) {
+	service, _ := testService(t)
+	service.registry.Register("server-1", &taskFailedReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		return "some error output\n"
+	}})
+
+	rec := perform(service, http.MethodPost, "/api/server/agent/command/server-1", `{"command":"false"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	payload := decodePayload(t, rec)
+	if payload["success"] != false {
+		t.Fatalf("success=%v, want false: %s", payload["success"], rec.Body.String())
+	}
+	if payload["output"] != "some error output\n" {
+		t.Fatalf("output=%v, want error output preserved", payload["output"])
+	}
+}
+
+func TestAgentExecCommandDangerous(t *testing.T) {
+	service, _ := testService(t)
+	// 不注册 socket：危险检测必须先于在线检查返回 400
+	rec := perform(service, http.MethodPost, "/api/server/agent/command/server-1", `{"command":"rm -rf /tmp/x"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	payload := decodePayload(t, rec)
+	if payload["dangerous"] != true {
+		t.Fatalf("dangerous=%v, want true: %s", payload["dangerous"], rec.Body.String())
+	}
+	if len(payload["dangerReasons"].([]interface{})) == 0 {
+		t.Fatalf("dangerReasons empty: %s", rec.Body.String())
+	}
+}
+
+func TestAgentExecCommandOffline(t *testing.T) {
+	service, _ := testService(t)
+	rec := perform(service, http.MethodPost, "/api/server/agent/command/server-1", `{"command":"echo hi"}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentExecCommandTimeout(t *testing.T) {
+	service, _ := testService(t)
+	service.registry.Register("server-1", &silentTaskSocket{})
+
+	start := time.Now()
+	rec := perform(service, http.MethodPost, "/api/server/agent/command/server-1", `{"command":"sleep 100","timeout":1}`)
+	if rec.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if time.Since(start) < 900*time.Millisecond {
+		t.Fatalf("returned before timeout window elapsed")
+	}
+	payload := decodePayload(t, rec)
+	if payload["task_id"] == "" || payload["task_id"] == nil {
+		t.Fatalf("task_id missing in timeout response: %s", rec.Body.String())
+	}
+}
+
+func TestCreateTaskDangerous(t *testing.T) {
+	service, _ := testService(t)
+	rec := perform(service, http.MethodPost, "/api/server/tasks", `{"server_id":"server-1","command":"rm -rf /tmp/x"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	payload := decodePayload(t, rec)
+	if payload["dangerous"] != true {
+		t.Fatalf("dangerous=%v, want true: %s", payload["dangerous"], rec.Body.String())
+	}
+}
+
+// TestDetectDangerousCommandVariants 覆盖 rm 递归+强制删除的常见变体与误伤场景
+func TestDetectDangerousCommandVariants(t *testing.T) {
+	shouldBlock := []string{
+		"rm -rf /tmp/x",
+		"rm -fr /tmp/x",
+		"rm -rfv /tmp/x",
+		"rm -vfr /tmp/x",
+		"rm -rvf /tmp/x",
+		"rm -r -f /tmp/x",
+		"rm -i -rf /tmp/x",
+		"rm --recursive --force /tmp/x",
+		"rm --force --recursive /tmp/x",
+	}
+	shouldAllow := []string{
+		"echo hello",
+		"rm -f /tmp/single.log",
+		"rm -r /tmp/emptydir",
+		"rm --recursive /tmp/emptydir",
+		"ls -la",
+		"systemctl status sshd",
+		"uname -a",
+	}
+	for _, c := range shouldBlock {
+		if !DetectDangerousCommand(c).Dangerous {
+			t.Errorf("should block: %q", c)
+		}
+	}
+	for _, c := range shouldAllow {
+		if DetectDangerousCommand(c).Dangerous {
+			t.Errorf("should allow: %q (reasons=%v)", c, DetectDangerousCommand(c).Reasons)
+		}
 	}
 }

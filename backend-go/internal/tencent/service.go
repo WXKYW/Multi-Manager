@@ -77,6 +77,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(parts) == 1 && parts[0] == "accounts":
 		s.accounts(w, r)
+	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "export" && r.Method == http.MethodGet:
+		s.exportAccounts(w, r)
+	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "import" && r.Method == http.MethodPost:
+		s.importAccounts(w, r)
 	case len(parts) == 2 && parts[0] == "accounts" && (r.Method == http.MethodPut || r.Method == http.MethodDelete):
 		s.accountMutation(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "accounts" && parts[2] == "domains":
@@ -206,6 +210,91 @@ func (s *Service) accounts(w http.ResponseWriter, r *http.Request) {
 	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request) {
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	defer db.Close()
+	accounts, err := loadAccounts(r.Context(), db)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"accounts":   accounts,
+		"exportedAt": time.Now().Format(time.RFC3339),
+	})
+}
+
+func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Accounts  []map[string]interface{} `json:"accounts"`
+		Overwrite bool                     `json:"overwrite"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	ctx := r.Context()
+	db, err := s.open(ctx)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	defer db.Close()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
+	if req.Overwrite {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM tencent_accounts`); err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+	}
+	imported, skipped := 0, 0
+	for _, account := range req.Accounts {
+		name := strings.TrimSpace(stringValue(account["name"], ""))
+		secretID := strings.TrimSpace(stringValue(account["secretId"], stringValue(account["secret_id"], "")))
+		secretKey := strings.TrimSpace(stringValue(account["secretKey"], stringValue(account["secret_key"], "")))
+		regionID := strings.TrimSpace(stringValue(account["regionId"], stringValue(account["region_id"], defaultRegion)))
+		if regionID == "" {
+			regionID = defaultRegion
+		}
+		if name == "" || secretID == "" || secretKey == "" {
+			skipped++
+			continue
+		}
+		if !req.Overwrite {
+			var exists int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tencent_accounts WHERE secret_id = ?`, secretID).Scan(&exists); err != nil {
+				response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			if exists > 0 {
+				skipped++
+				continue
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO tencent_accounts (name, secret_id, secret_key, region_id, description) VALUES (?, ?, ?, ?, ?)`,
+			name, secretID, secretKey, regionID, stringValue(account["description"], "")); err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+			return
+		}
+		imported++
+	}
+	if err := tx.Commit(); err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "imported": imported, "skipped": skipped, "total": imported + skipped})
 }
 
 func (s *Service) accountMutation(w http.ResponseWriter, r *http.Request, idText string) {
