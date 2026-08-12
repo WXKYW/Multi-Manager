@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -201,7 +202,11 @@ func normalizeGitHubPublicDomain(value string) string {
 	normalized = strings.TrimPrefix(normalized, "https://")
 	normalized = strings.TrimPrefix(normalized, "http://")
 	normalized = strings.Split(normalized, "/")[0]
-	return strings.TrimSuffix(normalized, "/")
+	normalized = strings.TrimSuffix(normalized, "/")
+	if host, _, err := net.SplitHostPort(normalized); err == nil {
+		return host
+	}
+	return normalized
 }
 
 func int64SliceValue(value interface{}) []int64 {

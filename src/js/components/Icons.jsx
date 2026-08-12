@@ -84,6 +84,7 @@ import {
   SlidersHorizontal,
   SpeakerHigh,
   SpeakerSlash,
+  Sparkle as PhSparkle,
   SquaresFour,
   Square as PhSquare,
   Stack,
@@ -217,6 +218,7 @@ export const Plug = createIcon(Plugs);
 export const Brain = createIcon(PhBrain);
 export const Image = createIcon(PhImage);
 export const Star = createIcon(PhStar);
+export const Sparkle = createIcon(PhSparkle);
 export const Pin = createIcon(PushPin);
 export const Check = createIcon(PhCheck);
 export const Paperclip = createIcon(PhPaperclip);
@@ -256,9 +258,9 @@ export const FlyIoBrand = createFontIcon('si si-flydotio', 'Fly.io');
 export const MODULE_ICON_MAP = {
   dashboard: LayoutDashboard,
   settings: Settings,
-  openai: Bot,
+  openai: Sparkle,
   subscription: Plug,
-  paas: Cloud,
+  paas: Rocket,
   dns: CloudflareBrand,
   aliyun: AlibabaCloudBrand,
   tencent: TencentCloudBrand,

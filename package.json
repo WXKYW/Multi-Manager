@@ -36,7 +36,7 @@
     "clean:workspace": "node tools/workspace-cleanup.mjs --apply"
   },
   "dependencies": {
-    "@cloudflare/kumo": "^2.9.2",
+    "@cloudflare/kumo": "^2.10.0",
     "@codemirror/lang-markdown": "^6.5.1",
     "@codemirror/language": "^6.12.4",
     "@codemirror/language-data": "^6.5.2",
@@ -63,6 +63,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.1",
     "@babel/eslint-parser": "^8.0.1",
     "@babel/preset-react": "^8.0.1",
     "@eslint/js": "^10.0.1",
@@ -75,6 +76,7 @@
     "@xterm/xterm": "^5.5.0",
     "concurrently": "^9.1.0",
     "eslint": "^10.8.0",
+    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.7.4",
     "rollup-plugin-visualizer": "^6.0.5",

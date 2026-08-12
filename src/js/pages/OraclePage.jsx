@@ -5,7 +5,7 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
-import { DropdownMenu, Tabs } from '@cloudflare/kumo';
+import { DropdownMenu, Tabs, Toolbar } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -19,6 +19,7 @@ import {
   Cpu,
   Download,
   Edit,
+  Globe,
   HardDrive,
   Info,
   Key,
@@ -58,11 +59,11 @@ const emptyResizeForm = {
 };
 
 const tabs = [
-  { value: 'instances', label: '实例' },
-  { value: 'network', label: '网络' },
-  { value: 'storage', label: '卷' },
-  { value: 'console', label: '控制台' },
-  { value: 'accounts', label: '账号管理' },
+  { value: 'instances', label: <span className="inline-flex items-center gap-1.5"><Server className="h-3.5 w-3.5" />实例</span> },
+  { value: 'network', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />网络</span> },
+  { value: 'storage', label: <span className="inline-flex items-center gap-1.5"><HardDrive className="h-3.5 w-3.5" />卷</span> },
+  { value: 'console', label: <span className="inline-flex items-center gap-1.5"><Terminal className="h-3.5 w-3.5" />控制台</span> },
+  { value: 'accounts', label: <span className="inline-flex items-center gap-1.5"><Key className="h-3.5 w-3.5" />账号管理</span> },
 ];
 
 const stateOptions = [
@@ -1050,9 +1051,9 @@ function OraclePage() {
           <SectionCard
             title="实例详情"
             icon={<Settings className="h-4 w-4" />}
-            className="min-h-0 xl:sticky xl:top-[70px] xl:max-h-[calc(100vh-82px)] xl:overflow-y-auto xl:self-start"
+            className="min-w-0 xl:sticky xl:top-0 xl:self-start"
             bodyPadding="none"
-            bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+            bodyClassName="flex flex-col"
             actions={selectedInstance && (
               <>
                 <Button type="button" size="sm" variant="secondary" onClick={() => runAction('START')}><Play className="h-4 w-4" /></Button>
@@ -1200,8 +1201,14 @@ function OraclePage() {
                 className="hidden"
                 onChange={loadAccountImportFile}
               />
-              <Button type="button" size="sm" shape="square" variant="secondary" onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-4 w-4" />} />
-              <Button type="button" size="sm" shape="square" variant="secondary" onClick={openAccountImportDialog} aria-label="导入账号" title="导入账号" icon={<Download className="h-4 w-4" />} />
+              <Toolbar size="sm" aria-label="导出导入账号" className="shrink-0">
+                <Toolbar.Button type="button" onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />}>
+                  <span className="hidden sm:inline">导出</span>
+                </Toolbar.Button>
+                <Toolbar.Button type="button" onClick={openAccountImportDialog} aria-label="导入账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+                  <span className="hidden sm:inline">导入</span>
+                </Toolbar.Button>
+              </Toolbar>
               <Button type="button" size="sm" shape="square" variant="primary" onClick={() => openAccountDialog()} aria-label="添加账号" title="添加账号" icon={<Plus className="h-4 w-4" />} />
             </>
           )}

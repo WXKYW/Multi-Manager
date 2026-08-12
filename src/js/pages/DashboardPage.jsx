@@ -30,11 +30,12 @@ import {
   Box,
   Shield,
   FolderOpen,
+  PieChart,
   KoyebBrand,
   FlyIoBrand,
   Clock,
-  GitHubBrand,
 } from '../components/Icons.jsx';
+import { PublicPageBrandIcon } from '../components/public/PublicPageIconPicker.jsx';
 
 const DEFAULT_DASHBOARD_STATS = {
   host: {
@@ -274,16 +275,10 @@ const getStatusPageUrl = (page) => {
   return `/status/${slug}`;
 };
 
-const STATUS_PAGE_SHORTCUT_VISUALS = {
-  uptime: { icon: Activity, iconClassName: 'bg-kumo-success/10 text-kumo-success' },
-  server: { icon: Server, iconClassName: 'bg-kumo-info-tint text-kumo-info' },
-  github: { icon: GitHubBrand, iconClassName: 'bg-kumo-brand/10 text-kumo-brand' },
-};
+const STATUS_PAGE_SHORTCUT_ICON_CLASS = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand';
 
 function StatusPageShortcutCard({ page }) {
   const url = getStatusPageUrl(page);
-  const visual = STATUS_PAGE_SHORTCUT_VISUALS[page.kind] || STATUS_PAGE_SHORTCUT_VISUALS.uptime;
-  const ShortcutIcon = visual.icon;
 
   return (
     <AppCard
@@ -293,8 +288,8 @@ function StatusPageShortcutCard({ page }) {
       className="group flex h-11 min-w-0 cursor-pointer items-center justify-between gap-2.5 px-3 sm:h-12 sm:px-3.5"
     >
       <span className="flex min-w-0 items-center gap-2.5">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${visual.iconClassName}`}>
-          <ShortcutIcon aria-hidden="true" className="h-4 w-4 text-base leading-none" />
+        <span className={STATUS_PAGE_SHORTCUT_ICON_CLASS}>
+          <PublicPageBrandIcon pageKind={page.kind} config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
         </span>
         <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong group-hover:text-kumo-brand">
           {page.title || page.slug}
@@ -1075,7 +1070,7 @@ function DashboardPage({ onNavigate } = {}) {
 
         <DashboardOverviewCard
           onClick={() => navigateToModule('settings')}
-          icon={Activity}
+          icon={PieChart}
           iconClassName="bg-kumo-brand/10 text-kumo-brand"
           badge="系统 API"
           badgeClassName="text-kumo-subtle bg-kumo-recessed border-kumo-line"

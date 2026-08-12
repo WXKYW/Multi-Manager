@@ -8,7 +8,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
-import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Loader, Tabs, Text } from '@cloudflare/kumo';
+import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Loader, Tabs, Text, Toolbar } from '@cloudflare/kumo';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -709,6 +709,14 @@ function PaasPage() {
     if (up === 'STARTING') return 'info';
     if (up === 'SUSPENDED' || up === 'PAUSED' || up === 'STOPPED') return 'warning';
     if (up === 'ERROR' || up === 'ERRORED' || up === 'UNHEALTHY') return 'danger';
+    return 'neutral';
+  };
+
+  const koyebServiceTypeVariant = (type) => {
+    const value = String(type || 'web').toLowerCase();
+    if (value === 'web') return 'blue';
+    if (value === 'worker') return 'purple';
+    if (value === 'job') return 'orange';
     return 'neutral';
   };
 
@@ -1900,7 +1908,7 @@ function PaasPage() {
                                                 </Button>
                                               )}
                                               <div className="flex flex-wrap items-center gap-1.5">
-                                                <Badge variant="neutral">{service.type || 'web'}</Badge>
+                                                <Badge variant={koyebServiceTypeVariant(service.type)}>{service.type || 'web'}</Badge>
                                                 {service.resourceLimit?.cpu || service.resourceLimit?.memory ? (
                                                   <Badge variant="outline">
                                                     {service.resourceLimit?.cpu || '-'} CPU / {service.resourceLimit?.memory || '-'} RAM
@@ -2276,8 +2284,14 @@ function PaasPage() {
                 <>
                   <Button size="sm" onClick={() => setShowAddKoyebModal(true)} icon={<KoyebBrand className="h-3.5 w-3.5" />}>添加 Koyeb</Button>
                   <Button size="sm" onClick={() => setShowAddFlyModal(true)} icon={<FlyIoBrand className="h-3.5 w-3.5" />}>添加 Fly.io</Button>
-                  <Button size="sm" shape="square" variant="secondary" onClick={exportPaasAccounts} aria-label="导出 PaaS 账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />} />
-                  <Button size="sm" shape="square" variant="secondary" onClick={importPaasAccounts} aria-label="导入 PaaS 账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />} />
+                  <Toolbar size="sm" aria-label="导出导入 PaaS 账号" className="shrink-0">
+                    <Toolbar.Button onClick={exportPaasAccounts} aria-label="导出 PaaS 账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导出</span>
+                    </Toolbar.Button>
+                    <Toolbar.Button onClick={importPaasAccounts} aria-label="导入 PaaS 账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导入</span>
+                    </Toolbar.Button>
+                  </Toolbar>
               </>
             )}
             bodyPadding="none"

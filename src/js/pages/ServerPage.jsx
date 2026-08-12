@@ -12,7 +12,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Loader, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Loader, Meter, Tabs, TimeseriesChart, Toolbar } from '@cloudflare/kumo';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
@@ -31,6 +31,7 @@ import {
   stickyTabsBaseClass,
   TabBarOverflowActions,
 } from '../components/ui/AppPrimitives.jsx';
+import { PublicPageBrandIcon } from '../components/public/PublicPageIconPicker.jsx';
 import useTableResize from '../composables/useTableResize.js';
 import { formatUptime, formatFileSize, formatDateTime, maskAddress, parseSpeed } from '../modules/utils.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
@@ -6058,7 +6059,7 @@ function ServerPage() {
       { label: '主机', value: hosts.length, className: 'text-kumo-subtle' },
     ].slice(0, 4);
     return (
-      <div className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-[70px] xl:max-h-[calc(100vh-82px)] xl:overflow-y-auto xl:overscroll-contain xl:self-start">
+      <div className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-0 xl:self-start">
         <LayerCard className="overflow-hidden p-0">
           <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
             <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
@@ -7691,7 +7692,18 @@ function ServerPage() {
         />
 
         {/* 右侧快速连接 */}
-        <TabBarOverflowActions
+        <div className="flex shrink-0 items-center gap-2">
+          {serverCurrentTab === 'list' && (
+            <Toolbar size="sm" aria-label="导出导入主机配置" className="shrink-0">
+              <Toolbar.Button onClick={exportServers} aria-label="导出主机配置" title="导出主机配置" icon={<Upload className="h-3.5 w-3.5" />}>
+                <span className="hidden sm:inline">导出</span>
+              </Toolbar.Button>
+              <Toolbar.Button onClick={openImportServerModal} aria-label="导入主机配置" title="导入主机配置" icon={<Download className="h-3.5 w-3.5" />}>
+                <span className="hidden sm:inline">导入</span>
+              </Toolbar.Button>
+            </Toolbar>
+          )}
+          <TabBarOverflowActions
           items={
             serverCurrentTab === 'list'
               ? [
@@ -7718,20 +7730,6 @@ function ServerPage() {
                     loading: serverLoading,
                   },
                   {
-                    key: 'export',
-                    label: '导出配置',
-                    title: '导出主机配置',
-                    icon: <Upload className="w-3.5 h-3.5" />,
-                    onClick: exportServers,
-                  },
-                  {
-                    key: 'import',
-                    label: '导入配置',
-                    title: '导入主机配置',
-                    icon: <Download className="w-3.5 h-3.5" />,
-                    onClick: openImportServerModal,
-                  },
-                  {
                     key: 'add',
                     label: '新增主机',
                     icon: <Plus className="w-3.5 h-3.5" />,
@@ -7742,6 +7740,7 @@ function ServerPage() {
               : []
           }
         />
+        </div>
       </div>
 
       {serverCurrentTab === 'status-pages' && (
@@ -7860,6 +7859,9 @@ function ServerPage() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand">
+                              <PublicPageBrandIcon pageKind="server" config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
+                            </span>
                             <span className="truncate text-sm font-bold text-kumo-strong">{page.title || page.slug}</span>
                             <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${page.public ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-line/30 text-kumo-subtle'}`}>{page.public ? '公开' : '私有'}</span>
                             <span className="rounded bg-kumo-recessed px-2 py-0.5 font-mono text-[10px] text-kumo-subtle">{page.cacheSeconds || 300}s</span>
@@ -10353,28 +10355,26 @@ function ServerPage() {
                   </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={exportServers}
-                  aria-label="导出主机配置备份"
-                  title="导出主机配置备份"
-                  icon={<Upload className="h-3.5 w-3.5" />}
-                  className="w-full justify-center sm:w-auto"
-                >
-                  导出 JSON
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={openImportServerModal}
-                  aria-label="导入主机配置"
-                  title="导入主机配置"
-                  icon={<Download className="h-3.5 w-3.5" />}
-                  className="w-full justify-center sm:w-auto"
-                >
-                  导入 JSON
-                </Button>
+                <Toolbar size="sm" aria-label="导出导入主机配置" className="w-full justify-center sm:w-auto">
+                  <Toolbar.Button
+                    onClick={exportServers}
+                    aria-label="导出主机配置备份"
+                    title="导出主机配置备份"
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                    className="w-full sm:w-auto"
+                  >
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button
+                    onClick={openImportServerModal}
+                    aria-label="导入主机配置"
+                    title="导入主机配置"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    className="w-full sm:w-auto"
+                  >
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
                 </div>
             </SectionCard>
               </div>

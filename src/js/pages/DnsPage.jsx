@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChartPalette, ClipboardText, LayerCard, Popover, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, LayerCard, Popover, Tabs, TimeseriesChart, Toolbar } from '@cloudflare/kumo';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
@@ -31,10 +31,12 @@ import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import {
+  AlertTriangle,
   ArrowLeft,
   Box,
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Cloud,
   Copy,
@@ -350,6 +352,10 @@ function DnsPage() {
   const [r2CurrentPrefix, setR2CurrentPrefix] = useState('');
   const [r2BucketSearch, setR2BucketSearch] = useState('');
   const [r2ObjectSearch, setR2ObjectSearch] = useState('');
+  const [r2DirCache, setR2DirCache] = useState({});
+  const [r2ExpandedPrefixes, setR2ExpandedPrefixes] = useState([]);
+  const [r2DirErrors, setR2DirErrors] = useState({});
+  const [r2Metrics, setR2Metrics] = useState(null);
   const r2UploadInputRef = useRef(null);
   const [tunnels, setTunnels] = useState([]);
   const [sslInfo, setSslInfo] = useState(null);
@@ -685,12 +691,15 @@ function DnsPage() {
   const loadR2Buckets = useCallback(async () => {
     if (!selectedAccountId) {
       setR2Buckets([]);
+      setR2Metrics(null);
       return;
     }
     setLoadingKey('r2', true);
     try {
       const data = await cfApi(`/accounts/${selectedAccountId}/r2/buckets`);
       setR2Buckets(data.buckets || []);
+      const metrics = await cfApi(`/accounts/${selectedAccountId}/r2/metrics`).catch(() => null);
+      setR2Metrics(metrics || null);
     } catch (error) {
       toast.error(`加载 R2 存储桶失败：${error.message}`);
     } finally {
@@ -698,17 +707,92 @@ function DnsPage() {
     }
   }, [cfApi, selectedAccountId, setLoadingKey]);
 
-  const loadR2Objects = useCallback(async (bucketName = r2SelectedBucket?.name, prefix = r2CurrentPrefix) => {
-    if (!selectedAccountId || !bucketName) return;
-    setLoadingKey('r2Objects', true);
+  const r2MetricsTotals = useMemo(() => {
+    let bytes = 0;
+    let objects = 0;
+    ['standard', 'infrequentAccess'].forEach((storageClass) => {
+      const group = r2Metrics?.[storageClass];
+      if (!group) return;
+      ['uploaded', 'published'].forEach((state) => {
+        const entry = group?.[state];
+        if (!entry) return;
+        bytes += Number(entry.payloadSize || 0) + Number(entry.metadataSize || 0);
+        objects += Number(entry.objects || 0);
+      });
+    });
+    return { bytes, objects };
+  }, [r2Metrics]);
+
+  const r2CacheKey = useCallback((bucketName, prefix) => `${selectedAccountId}|${bucketName}|${prefix}`, [selectedAccountId]);
+
+  const fetchR2Dir = useCallback(async (bucketName, prefix, { force = false } = {}) => {
+    const key = r2CacheKey(bucketName, prefix);
+    const cached = r2DirCache[key];
+    if (cached && !force) return cached;
+    const params = new URLSearchParams({ delimiter: '/', limit: '1000' });
+    if (prefix) params.set('prefix', prefix);
     try {
-      const params = new URLSearchParams({ delimiter: '/', limit: '1000' });
-      if (prefix) params.set('prefix', prefix);
       const data = await cfApi(
         `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${params.toString()}`
       );
-      setR2Objects(data.objects || []);
-      setR2Prefixes(data.delimited_prefixes || []);
+      const entry = { objects: data.objects || [], prefixes: data.delimited_prefixes || [] };
+      setR2DirCache((prev) => ({ ...prev, [key]: entry }));
+      setR2DirErrors((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return entry;
+    } catch (error) {
+      // 失败态单独记录，UI 显示「加载失败」行并可重试，避免永久 loading 占位。
+      setR2DirErrors((prev) => ({ ...prev, [key]: true }));
+      throw error;
+    }
+  }, [cfApi, r2CacheKey, r2DirCache, selectedAccountId]);
+
+  const retryR2Dir = useCallback((prefix) => {
+    const bucketName = r2SelectedBucket?.name;
+    if (!bucketName || !selectedAccountId) return;
+    const key = r2CacheKey(bucketName, prefix);
+    setR2DirErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    fetchR2Dir(bucketName, prefix, { force: true }).catch((error) => toast.error(`加载目录「${prefix}」失败：${error.message}`));
+  }, [fetchR2Dir, r2CacheKey, r2SelectedBucket, selectedAccountId]);
+
+  const clearR2BucketCache = useCallback((bucketName) => {
+    setR2DirCache((prev) => Object.fromEntries(
+      Object.entries(prev).filter(([key]) => !key.startsWith(`${selectedAccountId}|${bucketName}|`))
+    ));
+    setR2DirErrors((prev) => Object.fromEntries(
+      Object.entries(prev).filter(([key]) => !key.startsWith(`${selectedAccountId}|${bucketName}|`))
+    ));
+  }, [selectedAccountId]);
+
+  const toggleR2FolderExpanded = useCallback((prefix) => {
+    setR2ExpandedPrefixes((prev) => (prev.includes(prefix) ? prev.filter((p) => p !== prefix) : [...prev, prefix]));
+  }, []);
+
+  const loadR2Objects = useCallback(async (bucketName = r2SelectedBucket?.name, prefix = r2CurrentPrefix, { force = false } = {}) => {
+    if (!selectedAccountId || !bucketName) return;
+    const cached = r2DirCache[r2CacheKey(bucketName, prefix)];
+    if (cached && !force) {
+      setR2Objects(cached.objects);
+      setR2Prefixes(cached.prefixes);
+      if ((prefix || '') !== r2CurrentPrefix) setR2ObjectSearch('');
+      setR2CurrentPrefix(prefix || '');
+      setSelectedR2Objects([]);
+      return;
+    }
+    setLoadingKey('r2Objects', true);
+    try {
+      const entry = await fetchR2Dir(bucketName, prefix, { force });
+      setR2Objects(entry.objects);
+      setR2Prefixes(entry.prefixes);
       if ((prefix || '') !== r2CurrentPrefix) setR2ObjectSearch('');
       setR2CurrentPrefix(prefix || '');
       setSelectedR2Objects([]);
@@ -717,7 +801,18 @@ function DnsPage() {
     } finally {
       setLoadingKey('r2Objects', false);
     }
-  }, [cfApi, r2CurrentPrefix, r2SelectedBucket, selectedAccountId, setLoadingKey]);
+  }, [cfApi, fetchR2Dir, r2CacheKey, r2CurrentPrefix, r2DirCache, r2SelectedBucket, selectedAccountId, setLoadingKey]);
+
+  useEffect(() => {
+    const bucketName = r2SelectedBucket?.name;
+    if (!bucketName || !selectedAccountId) return;
+    r2ExpandedPrefixes.forEach((prefix) => {
+      const key = r2CacheKey(bucketName, prefix);
+      if (!r2DirCache[key] && !r2DirErrors[key]) {
+        fetchR2Dir(bucketName, prefix).catch((error) => toast.error(`加载目录「${prefix}」失败：${error.message}`));
+      }
+    });
+  }, [fetchR2Dir, r2CacheKey, r2DirCache, r2DirErrors, r2ExpandedPrefixes, r2SelectedBucket, selectedAccountId]);
 
   const loadTunnels = useCallback(async () => {
     if (!selectedAccountId) {
@@ -1496,6 +1591,8 @@ function DnsPage() {
   const selectR2Bucket = async (bucket) => {
     setR2SelectedBucket(bucket);
     setR2CurrentPrefix('');
+    setR2ExpandedPrefixes([]);
+    setR2DirErrors({});
     await loadR2Objects(bucket.name, '');
   };
 
@@ -1531,6 +1628,7 @@ function DnsPage() {
         return uploadR2Object(key, file, file.type || 'application/octet-stream');
       }));
       toast.success(`已上传 ${files.length} 个文件`);
+      clearR2BucketCache(r2SelectedBucket.name);
       await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
     } catch (error) {
       toast.error(`上传 R2 对象失败：${error.message}`);
@@ -1552,6 +1650,7 @@ function DnsPage() {
       toast.success('文件夹已创建');
       setR2FolderForm({ name: '' });
       setModal({ type: null, data: null });
+      clearR2BucketCache(r2SelectedBucket.name);
       await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
     } catch (error) {
       toast.error(`创建文件夹失败：${error.message}`);
@@ -1560,30 +1659,70 @@ function DnsPage() {
     }
   };
 
-  const deleteR2Object = async (objectKey) => {
-    if (!confirmPress(`r2-object:${objectKey}`, `删除对象「${objectKey}」`)) return;
-    try {
-      await cfApi(
-        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
-        { method: 'DELETE' }
+  const listAllR2Keys = async (bucketName, prefix) => {
+    const keys = [];
+    let cursor = '';
+    do {
+      const params = new URLSearchParams({ prefix, limit: '1000' });
+      if (cursor) params.set('cursor', cursor);
+      const data = await cfApi(
+        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucketName)}/objects?${params.toString()}`
       );
-      toast.success('R2 对象已删除');
+      (data.objects || []).forEach((object) => {
+        const key = object.key || object.name;
+        if (key) keys.push(key);
+      });
+      cursor = data.cursor || '';
+    } while (cursor);
+    return keys;
+  };
+
+  const deleteR2KeysChunked = async (bucketName, keys, chunkSize = 25) => {
+    for (let i = 0; i < keys.length; i += chunkSize) {
+      await Promise.all(keys.slice(i, i + chunkSize).map((key) => cfApi(
+        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucketName)}/objects/${encodeURIComponent(key)}`,
+        { method: 'DELETE' }
+      )));
+    }
+  };
+
+  const deleteR2Object = async (objectKey) => {
+    const isFolder = String(objectKey).endsWith('/');
+    if (!confirmPress(`r2-object:${objectKey}`, isFolder ? `删除目录「${objectKey}」及其全部内容？` : `删除对象「${objectKey}」？`)) return;
+    try {
+      if (isFolder) {
+        const keys = await listAllR2Keys(r2SelectedBucket.name, objectKey);
+        await deleteR2KeysChunked(r2SelectedBucket.name, keys);
+      } else {
+        await cfApi(
+          `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
+          { method: 'DELETE' }
+        );
+      }
+      toast.success(isFolder ? `目录「${objectKey}」已删除` : 'R2 对象已删除');
+      clearR2BucketCache(r2SelectedBucket.name);
       loadR2Objects();
     } catch (error) {
-      toast.error(`删除 R2 对象失败：${error.message}`);
+      toast.error(`删除 R2 ${isFolder ? '目录' : '对象'}失败：${error.message}`);
     }
   };
 
   const batchDeleteR2Objects = async () => {
     if (selectedR2Objects.length === 0) return;
-    if (!confirmPress('batch-r2-objects', `删除选中的 ${selectedR2Objects.length} 个 R2 对象`)) return;
+    if (!confirmPress('batch-r2-objects', `删除选中的 ${selectedR2Objects.length} 个 R2 对象（含目录全部内容）`)) return;
     setLoadingKey('batchDeleteR2', true);
     try {
-      await Promise.all(selectedR2Objects.map((objectKey) => cfApi(
-        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
-        { method: 'DELETE' }
-      )));
+      const folderKeys = selectedR2Objects.filter((key) => String(key).endsWith('/'));
+      const fileKeys = selectedR2Objects.filter((key) => !String(key).endsWith('/'));
+      if (fileKeys.length > 0) {
+        await deleteR2KeysChunked(r2SelectedBucket.name, fileKeys);
+      }
+      for (const folderKey of folderKeys) {
+        const keys = await listAllR2Keys(r2SelectedBucket.name, folderKey);
+        await deleteR2KeysChunked(r2SelectedBucket.name, keys);
+      }
       toast.success('选中的 R2 对象已删除');
+      clearR2BucketCache(r2SelectedBucket.name);
       loadR2Objects();
     } catch (error) {
       toast.error(`批量删除 R2 对象失败：${error.message}`);
@@ -1594,6 +1733,10 @@ function DnsPage() {
 
   const downloadR2Object = async (objectKey) => {
     window.open(`/api/cloudflare${r2ObjectApiPath(objectKey, '/download')}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const downloadR2Folder = (prefix) => {
+    window.open(`/api/cloudflare/accounts/${encodeURIComponent(selectedAccountId)}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/folder-download?prefix=${encodeURIComponent(prefix)}`, '_blank', 'noopener,noreferrer');
   };
 
   const r2ObjectPreviewUrl = (objectKey) => (
@@ -1771,14 +1914,44 @@ function DnsPage() {
       })),
   ], [r2CurrentPrefix, r2Objects, r2Prefixes]);
 
+  const r2TreeRows = useMemo(() => {
+    const bucketName = r2SelectedBucket?.name;
+    const rows = [];
+    const walk = (prefix, depth) => {
+      const entry = bucketName ? r2DirCache[r2CacheKey(bucketName, prefix)] : null;
+      if (!entry) {
+        if (bucketName && r2DirErrors[r2CacheKey(bucketName, prefix)]) {
+          rows.push({ key: `r2-error:${prefix}`, prefix, name: '', isFolder: false, isError: true, depth });
+          return;
+        }
+        rows.push({ key: `r2-loading:${prefix}`, prefix, name: '', isFolder: false, isLoading: true, depth });
+        return;
+      }
+      entry.prefixes.forEach((subPrefix) => {
+        rows.push({ key: subPrefix, name: subPrefix.slice(prefix.length).replace(/\/$/, ''), isFolder: true, depth });
+        if (r2ExpandedPrefixes.includes(subPrefix)) walk(subPrefix, depth + 1);
+      });
+      entry.objects.forEach((object) => {
+        const objectKey = object.key || object.name;
+        if (String(objectKey || '').endsWith('/.keep')) return;
+        rows.push({ ...object, key: objectKey, name: (objectKey || '').slice(prefix.length) || objectKey, isFolder: false, depth });
+      });
+    };
+    r2Rows.forEach((row) => {
+      rows.push({ ...row, depth: 0 });
+      if (row.isFolder && r2ExpandedPrefixes.includes(row.key)) walk(row.key, 1);
+    });
+    return rows;
+  }, [r2CacheKey, r2DirCache, r2DirErrors, r2ExpandedPrefixes, r2Rows, r2SelectedBucket]);
+
   const filteredR2Rows = useMemo(() => {
     const keyword = r2ObjectSearch.trim().toLowerCase();
-    if (!keyword) return r2Rows;
-    return r2Rows.filter((row) => String(row.name || row.key || '').toLowerCase().includes(keyword));
-  }, [r2ObjectSearch, r2Rows]);
+    if (!keyword) return r2TreeRows;
+    return r2TreeRows.filter((row) => String(row.name || row.key || '').toLowerCase().includes(keyword));
+  }, [r2ObjectSearch, r2TreeRows]);
 
-  const r2VisibleObjectKeys = useMemo(
-    () => filteredR2Rows.filter((row) => !row.isFolder).map((row) => row.key),
+  const r2VisibleKeys = useMemo(
+    () => filteredR2Rows.filter((row) => !row.isLoading && !row.isError).map((row) => row.key),
     [filteredR2Rows]
   );
 
@@ -2182,12 +2355,14 @@ function DnsPage() {
                       <Button size="sm" onClick={() => openRecordModal()} icon={<Plus className="h-4 w-4" />}>
                         添加记录
                       </Button>
-                      <Button shape="square" size="sm" variant="secondary" onClick={exportRecords} icon={<Upload className="h-4 w-4" />}>
-                        {/* 导出 */}
-                      </Button>
-                      <Button shape="square" size="sm" variant="secondary" onClick={() => openImportModal('records')} icon={<Download className="h-4 w-4" />}>
-                        {/* 导入 */}
-                      </Button>
+                      <Toolbar size="sm" aria-label="导出导入 DNS 记录" className="shrink-0">
+                        <Toolbar.Button onClick={exportRecords} aria-label="导出 DNS 记录" icon={<Upload className="h-3.5 w-3.5" />}>
+                          <span className="hidden sm:inline">导出</span>
+                        </Toolbar.Button>
+                        <Toolbar.Button onClick={() => openImportModal('records')} aria-label="导入 DNS 记录" icon={<Download className="h-3.5 w-3.5" />}>
+                          <span className="hidden sm:inline">导入</span>
+                        </Toolbar.Button>
+                      </Toolbar>
                       {selectedRecordIds.length > 0 && (
                         <Button size="sm" variant={isArmed('batch-records') ? 'destructive' : 'secondary-destructive'} onClick={batchDeleteRecords} icon={<Trash className="h-4 w-4" />}>
                           删除 {selectedRecordIds.length}
@@ -2443,7 +2618,12 @@ function DnsPage() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-kumo-strong">存储桶</div>
-                    <div className="text-xs text-kumo-subtle">{r2Buckets.length} 个 Bucket</div>
+                    <div className="text-xs text-kumo-subtle">
+                      {r2Buckets.length} 个 Bucket
+                      {r2Metrics && (r2MetricsTotals.bytes > 0 || r2MetricsTotals.objects > 0) && (
+                        <span> · 已用 {formatBytes(r2MetricsTotals.bytes)} · {r2MetricsTotals.objects.toLocaleString()} 个对象</span>
+                      )}
+                    </div>
                   </div>
                   <Button
                     size="sm"
@@ -2479,19 +2659,21 @@ function DnsPage() {
                     return (
                       <div
                         key={bucket.name}
-                        className={`rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/60'}`}
+                        className={`group rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10 shadow-sm' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/50 hover:bg-kumo-recessed/40'}`}
                       >
                         <Button
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="h-auto w-full min-w-0 items-start justify-start gap-2 px-0 py-0 text-left"
+                          className="h-auto w-full min-w-0 items-start justify-start gap-2 px-0 py-0 text-left bg-transparent! hover:bg-transparent! active:bg-transparent! data-[active=true]:bg-transparent! data-[selected=true]:bg-transparent! focus-visible:bg-transparent!"
                           onClick={() => selectR2Bucket(bucket)}
                         >
                           <Box className={`mt-0.5 h-4 w-4 shrink-0 ${isSelected ? 'text-kumo-brand' : 'text-kumo-subtle'}`} />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium text-kumo-strong">{bucket.name}</span>
-                            <span className="mt-1 block truncate text-xs text-kumo-subtle">{formatDate(bucket.creation_date || bucket.created_at)}</span>
+                            <span className={`block truncate text-sm font-medium ${isSelected ? 'text-kumo-brand' : 'text-kumo-strong'}`}>{bucket.name}</span>
+                            <span className="mt-1 block truncate text-xs text-kumo-subtle" title={`创建于 ${formatDate(bucket.creation_date || bucket.created_at)}`}>
+                              {formatDate(bucket.creation_date || bucket.created_at)}
+                            </span>
                           </span>
                         </Button>
                         <div className="mt-2 flex items-center justify-between gap-2">
@@ -2587,7 +2769,7 @@ function DnsPage() {
                               上一级
                             </Button>
                           )}
-                          <Button size="sm" shape="square" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix)} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => { clearR2BucketCache(r2SelectedBucket.name); loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix, { force: true }); }} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
                           {selectedR2Objects.length > 0 && (
                             <Button size="sm" variant={isArmed('batch-r2-objects') ? 'destructive' : 'secondary-destructive'} onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
                               删除 {selectedR2Objects.length}
@@ -2620,9 +2802,9 @@ function DnsPage() {
                           <Table.Header variant="compact">
                             <Table.Row>
                               <Table.CheckHead
-                                checked={r2VisibleObjectKeys.length > 0 && r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
-                                indeterminate={selectedR2Objects.length > 0 && !r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
-                                onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleObjectKeys : [])}
+                                checked={r2VisibleKeys.length > 0 && r2VisibleKeys.every((key) => selectedR2Objects.includes(key))}
+                                indeterminate={selectedR2Objects.length > 0 && !r2VisibleKeys.every((key) => selectedR2Objects.includes(key))}
+                                onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleKeys : [])}
                                 aria-label="全选当前可见 R2 对象"
                               />
                               <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
@@ -2641,11 +2823,11 @@ function DnsPage() {
                             ) : filteredR2Rows.map((row) => (
                               <Table.Row
                                 key={row.key}
-                                className="cursor-pointer hover:bg-kumo-recessed/35"
-                                onClick={() => (row.isFolder ? loadR2Objects(r2SelectedBucket.name, row.key) : previewR2Object(row.key))}
-                                title={row.isFolder ? '打开目录' : '预览文件'}
+                                className={`cursor-pointer hover:bg-kumo-recessed/35 ${row.isLoading ? 'opacity-70' : ''}`}
+                                onClick={() => { if (row.isLoading || row.isError) return; if (row.isFolder) toggleR2FolderExpanded(row.key); else previewR2Object(row.key); }}
+                                title={row.isError ? '目录加载失败' : (row.isFolder ? '展开目录' : '预览文件')}
                               >
-                                {row.isFolder ? (
+                                {(row.isLoading || row.isError) ? (
                                   <Table.Cell />
                                 ) : (
                                   <Table.CheckCell
@@ -2656,27 +2838,66 @@ function DnsPage() {
                                   />
                                 )}
                                 <Table.Cell>
-                                  <Button
-                                    type="button"
-                                    size="xs"
-                                    variant="ghost"
-                                    className={`h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
-                                      else previewR2Object(row.key);
-                                    }}
-                                    title={row.key}
-                                  >
-                                    {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
-                                    <span className="truncate">{row.name || row.key}</span>
-                                  </Button>
+                                  <div className="flex min-w-0 items-center gap-1" style={{ marginLeft: row.depth * 18 }}>
+                                    {row.isError ? (
+                                      <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="ghost"
+                                        className="h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left bg-transparent! hover:bg-transparent! active:bg-transparent! focus-visible:bg-transparent!"
+                                        onClick={(event) => { event.stopPropagation(); retryR2Dir(row.prefix); }}
+                                        aria-label={`重试加载目录 ${row.prefix}`}
+                                        title={`重试加载 ${row.prefix}`}
+                                      >
+                                        <AlertTriangle className="h-4 w-4 shrink-0 text-kumo-warning" />
+                                        <span className="truncate text-kumo-danger">加载失败，点击重试</span>
+                                      </Button>
+                                    ) : row.isLoading ? (
+                                      <span className="inline-flex items-center gap-2 px-1 text-xs text-kumo-subtle"><SkeletonLine className="h-3.5 w-3.5" />加载中…</span>
+                                    ) : (
+                                      <>
+                                    {row.isFolder && (
+                                      <Button
+                                        type="button"
+                                        size="xs"
+                                        shape="square"
+                                        variant="ghost"
+                                        className="h-6 w-6 shrink-0 bg-transparent! text-kumo-subtle hover:bg-transparent! active:bg-transparent! hover:text-kumo-brand! focus-visible:bg-transparent!"
+                                        onClick={(event) => { event.stopPropagation(); toggleR2FolderExpanded(row.key); }}
+                                        aria-label={r2ExpandedPrefixes.includes(row.key) ? `折叠目录 ${row.name}` : `展开目录 ${row.name}`}
+                                        title={r2ExpandedPrefixes.includes(row.key) ? '折叠目录' : '展开目录'}
+                                      >
+                                        {r2ExpandedPrefixes.includes(row.key) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                      </Button>
+                                    )}
+                                    <Button
+                                      type="button"
+                                      size="xs"
+                                      variant="ghost"
+                                      className={`h-auto min-w-0 flex-1 justify-start gap-2 px-0 py-0 text-left bg-transparent! hover:bg-transparent! active:bg-transparent! focus-visible:bg-transparent! ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand!' : 'text-kumo-strong'}`}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        if (row.isLoading) return;
+                                        if (row.isFolder) toggleR2FolderExpanded(row.key);
+                                        else previewR2Object(row.key);
+                                      }}
+                                      title={row.key}
+                                    >
+                                      {row.isLoading ? <SkeletonLine className="h-3.5 w-3.5" /> : row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
+                                      <span className="truncate">{row.isLoading ? '加载中…' : (row.name || row.key)}</span>
+                                    </Button>
+                                      </>
+                                    )}
+                                  </div>
                                 </Table.Cell>
                                 <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
                                 <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
                                 <Table.Cell className="text-right">
                                   {row.isFolder ? (
-                                    <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); loadR2Objects(r2SelectedBucket.name, row.key); }}>进入</Button>
+                                    <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
+                                      <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Folder(row.key)} aria-label={`下载目录 ${row.key}`} title="下载目录" icon={<Download className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant={isArmed(`r2-object:${row.key}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteR2Object(row.key)} aria-label={`删除目录 ${row.key}`} title="删除目录" icon={<Trash className="h-4 w-4" />} />
+                                    </div>
                                   ) : (
                                     <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
                                       <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
@@ -2757,8 +2978,14 @@ function DnsPage() {
               icon={<FileText className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('templates')} aria-label="导入模板" title="导入模板" icon={<Download className="h-4 w-4" />} />
-                <Button size="sm" shape="square" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} aria-label="导出模板" title="导出模板" icon={<Upload className="h-4 w-4" />} />
+                <Toolbar size="sm" aria-label="导出导入模板" className="shrink-0">
+                  <Toolbar.Button onClick={() => openImportModal('templates')} aria-label="导入模板" title="导入模板" icon={<Download className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} aria-label="导出模板" title="导出模板" icon={<Upload className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                </Toolbar>
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
                 </>
               )}
@@ -2810,8 +3037,14 @@ function DnsPage() {
               icon={<Settings className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" shape="square" variant="secondary" onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-4 w-4" />} />
-                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('accounts')} aria-label="导入账号" title="导入账号" icon={<Download className="h-4 w-4" />} />
+                <Toolbar size="sm" aria-label="导出导入账号" className="shrink-0">
+                  <Toolbar.Button onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button onClick={() => openImportModal('accounts')} aria-label="导入账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
                 <Button size="sm" variant="primary" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
                 </>
               )}

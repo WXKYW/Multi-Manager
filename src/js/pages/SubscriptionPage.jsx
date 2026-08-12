@@ -18,7 +18,7 @@ import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import CountryFlag from '../components/CountryFlag.jsx';
-import { Copy, Download, Edit, Plus, RefreshCw, Save, Star, Trash, X } from '../components/Icons.jsx';
+import { Box, Copy, Download, Edit, FileText, Globe, Plug, Plus, RefreshCw, Save, Server, Star, Trash, X } from '../components/Icons.jsx';
 
 const API = '/api/subscription';
 const INTERNAL_API = '/api/server/agent/proxy/nodes';
@@ -40,11 +40,14 @@ const SUBSCRIPTION_LOG_COLUMNS = [
   { id: 'traffic', role: 'meta', grow: 1, minWidth: 176, align: 'right' },
 ];
 
-const PREFERRED_ADDRESS_COLUMNS = [
-  { id: 'name', role: 'primary' },
-  { id: 'address', role: 'identifier' },
-  { id: 'actions', role: 'actions-sm' },
-];
+const TUNNEL_STATUS_META = {
+  running: { variant: 'success', label: '已连接' },
+  disconnected: { variant: 'warning', label: '已断开' },
+  failed: { variant: 'error', label: '部署失败' },
+  cleanup_failed: { variant: 'error', label: '清理失败' },
+  removing: { variant: 'neutral', label: '卸载中' },
+};
+const tunnelStatusMeta = (applyStatus) => TUNNEL_STATUS_META[applyStatus] || { variant: 'warning', label: '部署中' };
 
 const SUBSCRIPTION_COLUMNS = [
   { id: 'enabled', role: 'control' },
@@ -684,25 +687,25 @@ function NodeHostQuality({ node, serverNameById }) {
 const nodeTypeBadgeVariant = (type) => {
   switch (String(type || '').toLowerCase()) {
     case 'vless':
-		return 'success';
+		return 'purple';
     case 'vmess':
-		return 'neutral';
+		return 'blue';
     case 'trojan':
-		return 'error';
+		return 'red';
     case 'ss':
     case 'shadowsocks':
-		return 'success';
+		return 'green';
     case 'hysteria2':
     case 'hy2':
     case 'hysteria':
-		return 'warning';
+		return 'teal';
     case 'tuic':
-		return 'success';
+		return 'orange';
     case 'socks':
     case 'socks5':
       return 'neutral';
     case 'http':
-		return 'neutral';
+		return 'secondary';
     default:
 		return 'neutral';
   }
@@ -1138,6 +1141,16 @@ function SubscriptionPage() {
 			await loadAll();
 			toast.success('优选地址已删除');
 		} catch (error) { toast.error(error.message || '删除优选地址失败'); }
+	};
+
+	const setPreferredDefault = async (item) => {
+		try {
+			const response = await fetch(`${PREFERRED_API}/${item.id}`, { method: 'PUT', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: item.name, address: item.address, port: item.port, enabled: item.enabled !== false, is_default: true, sort_order: item.sort_order || 0 }) });
+			const payload = await response.json();
+			if (!response.ok || payload.success === false) throw new Error(payload.error || payload.message || '设为默认失败');
+			await loadAll();
+			toast.success(`已将 ${item.name} 设为默认`);
+		} catch (error) { toast.error(error.message || '设为默认失败'); }
 	};
 
   const uninstallTunnel = async (server) => {
@@ -2244,16 +2257,62 @@ function SubscriptionPage() {
 
   const renderTunnelControls = () => (
     <LayerCard className="mb-3 overflow-hidden rounded-lg border border-kumo-line bg-kumo-base p-0 shadow-none ring-0">
-      <LayerCard.Primary className="flex min-h-12 flex-col gap-2 px-3 py-2 sm:!flex-row sm:items-center">
-        <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:shrink-0">
-          <div className="text-sm font-semibold text-kumo-strong">Tunnel 与优选地址</div>
-          <Button className="shrink-0 sm:hidden" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理</Button>
+      <LayerCard.Secondary className="flex min-h-12 items-center justify-between gap-3 px-3 sm:px-4">
+        <div className="text-sm font-semibold text-kumo-strong">Tunnel 与优选地址</div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button className="sm:hidden" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理</Button>
+          <Button className="hidden sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />优选地址</Button>
         </div>
-        {(managedTunnels.length > 0 || preferredAddresses.length > 0) && <div className="flex w-full min-w-0 flex-nowrap items-center gap-3 overflow-x-auto py-0.5 overscroll-x-contain whitespace-nowrap touch-pan-x scrollbar-thin sm:flex-1">
-          {managedTunnels.map((item) => <span key={item.server_id} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-kumo-strong"><span className={`h-2 w-2 rounded-full ${item.apply_status === 'running' ? 'bg-kumo-success' : item.apply_status === 'failed' ? 'bg-kumo-danger' : 'bg-kumo-warning'}`} />{item.server_name} · <span className="font-mono text-kumo-subtle">{item.hostname}</span></span>)}
-          {preferredAddresses.map((item) => <span key={item.id} className="shrink-0 font-mono text-xs text-kumo-subtle">{item.name} · {item.address}:{item.port}</span>)}
-        </div>}
-        <Button className="ml-auto hidden shrink-0 sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />优选地址</Button>
+      </LayerCard.Secondary>
+      <LayerCard.Primary className="px-3 py-2.5 sm:px-4">
+        {managedTunnels.length > 0 || preferredAddresses.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {managedTunnels.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span className="text-xs font-semibold text-kumo-subtle">Tunnel</span>
+                {managedTunnels.map((item) => {
+                  const meta = tunnelStatusMeta(item.apply_status);
+                  return (
+                    <span
+                      key={item.server_id}
+                      className="cursor-pointer"
+                      title={item.last_error ? `${item.last_error}；${item.hostname}（点击复制）` : `${item.hostname}（点击复制）`}
+                      onClick={() => copyText(item.hostname, `已复制 ${item.server_name} 的 Tunnel 地址`)}
+                    >
+                      <Badge variant="secondary" className="gap-1.5 !text-xs">
+                        <Badge variant={meta.variant} appearance="dot">{meta.label}</Badge>
+                        <span className="font-semibold">{item.server_name}</span>
+                        <Copy className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                      </Badge>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {preferredAddresses.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span className="text-xs font-semibold text-kumo-subtle">优选地址</span>
+                {preferredAddresses.map((item) => (
+                  <span
+                    key={item.id}
+                    className={`cursor-pointer ${item.enabled === false ? 'opacity-50' : ''}`}
+                    title={item.last_error ? `${item.last_error}；${item.address}:${item.port}（点击复制）` : `${item.address}:${item.port}（点击复制）`}
+                    onClick={() => copyText(`${item.address}:${item.port}`, `已复制 ${item.name} 的地址`)}
+                  >
+                    <Badge variant={item.is_default ? 'blue' : 'secondary'} className="gap-1.5 !text-xs">
+                      <span className={`font-semibold ${item.enabled === false ? 'text-kumo-subtle' : ''}`}>{item.name}</span>
+                      <Copy className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                      {item.last_status === 'healthy' && <Badge variant="success" appearance="dot">{item.last_latency_ms > 0 ? `${item.last_latency_ms}ms` : '正常'}</Badge>}
+                      {item.last_status === 'failed' && <Badge variant="error" appearance="dot">不可达</Badge>}
+                    </Badge>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-kumo-subtle">暂无 Tunnel 与优选地址</span>
+        )}
       </LayerCard.Primary>
     </LayerCard>
   );
@@ -2442,11 +2501,11 @@ function SubscriptionPage() {
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
           tabs={[
-            { value: 'instances', label: '实例管理' },
-            { value: 'nodes', label: '节点管理' },
-            { value: 'plans', label: '套餐管理' },
-            { value: 'subscriptions', label: '订阅管理' },
-            { value: 'templates', label: '模板管理' },
+            { value: 'instances', label: <span className="inline-flex items-center gap-1.5"><Server className="h-3.5 w-3.5" />实例管理</span> },
+            { value: 'nodes', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />节点管理</span> },
+            { value: 'plans', label: <span className="inline-flex items-center gap-1.5"><Box className="h-3.5 w-3.5" />套餐管理</span> },
+            { value: 'subscriptions', label: <span className="inline-flex items-center gap-1.5"><Plug className="h-3.5 w-3.5" />订阅管理</span> },
+            { value: 'templates', label: <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" />模板管理</span> },
           ]}
         />
       </div>
@@ -2525,10 +2584,64 @@ function SubscriptionPage() {
 
 		<Dialog.Root open={preferredModalOpen} onOpenChange={setPreferredModalOpen}>
 			<Dialog size="lg" className="!w-[min(56rem,calc(100vw-1rem))] !max-w-[min(56rem,calc(100vw-1rem))] overflow-hidden p-0">
-				<div className="border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Dialog.Title>优选地址</Dialog.Title></div>
-				<div className="grid min-w-0 items-end gap-3 p-3 sm:grid-cols-2 sm:p-5 lg:grid-cols-[minmax(10rem,1fr)_minmax(14rem,1.4fr)_9rem_7rem]"><Input size="sm" label="名称" value={preferredForm.name} onChange={(event) => setPreferredForm((prev) => ({ ...prev, name: event.target.value }))} /><Input size="sm" label="域名或 IP" placeholder="saas.sin.fan" value={preferredForm.address} onChange={(event) => setPreferredForm((prev) => ({ ...prev, address: event.target.value }))} /><Input size="sm" label="端口" type="number" value={preferredForm.port} onChange={(event) => setPreferredForm((prev) => ({ ...prev, port: Number(event.target.value) || 443 }))} /><div className="min-w-0"><Label className="block h-5">全局默认</Label><div className="mt-2 flex h-[26px] items-center"><Switch size="sm" aria-label="设为全局默认" checked={!!preferredForm.is_default} onCheckedChange={(checked) => setPreferredForm((prev) => ({ ...prev, is_default: checked }))} /></div></div></div>
-				<div className="max-h-48 overflow-x-auto overflow-y-auto border-t border-kumo-line overscroll-x-contain touch-pan-x scrollbar-thin"><AppTable tableId="preferred-addresses" columns={PREFERRED_ADDRESS_COLUMNS}><Table.Header><Table.Row><Table.Head>名称</Table.Head><Table.Head>地址</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header><Table.Body>{preferredAddresses.map((item) => <Table.Row key={item.id}><Table.Cell>{item.name}</Table.Cell><Table.Cell className="font-mono text-xs">{item.address}:{item.port}</Table.Cell><Table.Cell className="text-center"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} /></Table.Cell></Table.Row>)}</Table.Body></AppTable></div>
-				<div className="flex justify-end gap-2 border-t border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(false)}>关闭</Button><Button size="sm" variant="primary" onClick={savePreferredAddress}><Save className="h-3.5 w-3.5" />保存地址</Button></div>
+				<div className="flex min-h-12 items-center justify-between gap-3 border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-3.5">
+					<Dialog.Title>优选地址</Dialog.Title>
+					<div className="flex shrink-0 items-center gap-2">
+						<Badge variant="neutral">{preferredAddresses.length} 个地址</Badge>
+						<Dialog.Close
+							aria-label="关闭"
+							render={(props) => (
+								<Button
+									{...props}
+									type="button"
+									variant="secondary"
+									shape="square"
+									size="sm"
+									icon={<X className="h-3.5 w-3.5" />}
+									aria-label="关闭"
+								/>
+							)}
+						/>
+					</div>
+				</div>
+				<div className="grid min-h-0 min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+					<div className="flex min-w-0 flex-col gap-3 border-b border-kumo-line p-3 sm:p-4 lg:border-b-0 lg:border-r">
+						<div className="text-xs font-semibold text-kumo-strong">添加新地址</div>
+						<Input size="sm" label="名称" value={preferredForm.name} onChange={(event) => setPreferredForm((prev) => ({ ...prev, name: event.target.value }))} />
+						<Input size="sm" label="域名或 IP" placeholder="saas.sin.fan" value={preferredForm.address} onChange={(event) => setPreferredForm((prev) => ({ ...prev, address: event.target.value }))} />
+						<Input size="sm" label="端口" type="number" value={preferredForm.port} onChange={(event) => setPreferredForm((prev) => ({ ...prev, port: Number(event.target.value) || 443 }))} />
+						<div className="flex min-w-0 items-center justify-between gap-3">
+							<Label className="min-w-0 truncate text-xs text-kumo-subtle">保存后设为全局默认</Label>
+							<Switch size="sm" aria-label="保存后设为全局默认" checked={!!preferredForm.is_default} onCheckedChange={(checked) => setPreferredForm((prev) => ({ ...prev, is_default: checked }))} />
+						</div>
+						<Button size="sm" variant="primary" className="self-end" onClick={savePreferredAddress}><Save className="h-3.5 w-3.5" />添加地址</Button>
+					</div>
+					<div className="flex min-h-0 min-w-0 flex-col">
+						<div className="px-3 pt-3 sm:px-4"><div className="text-xs font-semibold text-kumo-strong">地址列表</div></div>
+						<div className="max-h-64 min-h-0 overflow-y-auto p-2 scrollbar-thin">
+							{preferredAddresses.length === 0 ? (
+								<div className="p-6 text-center text-xs text-kumo-subtle">暂无优选地址，请先添加</div>
+							) : [...preferredAddresses].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.created_at || '').localeCompare(String(b.created_at || ''))).map((item) => (
+								<div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 ${item.is_default ? 'bg-kumo-recessed/60' : 'hover:bg-kumo-recessed/40'}`}>
+									<div className="min-w-0 flex-1">
+										<div className="flex min-w-0 items-center gap-1.5">
+											<span className={`truncate text-xs font-semibold ${item.enabled === false ? 'text-kumo-subtle' : 'text-kumo-strong'}`}>{item.name}</span>
+											{item.is_default && <Badge variant="blue">默认</Badge>}
+										</div>
+										<div className="truncate font-mono text-[11px] text-kumo-subtle">{item.address}:{item.port}</div>
+									</div>
+									<div className="flex shrink-0 items-center gap-1">
+										{!item.is_default && <Button size="sm" variant="secondary" onClick={() => setPreferredDefault(item)} icon={<Star className="h-3.5 w-3.5" />}>默认</Button>}
+										<Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} />
+									</div>
+								</div>
+							))}
+						</div>
+					</div>
+				</div>
+				<div className="flex justify-end gap-2 border-t border-kumo-line px-3 py-3 sm:px-5 sm:py-4">
+					<Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(false)}>关闭</Button>
+				</div>
 			</Dialog>
 		</Dialog.Root>
 

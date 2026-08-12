@@ -536,6 +536,18 @@ func (s *Service) createTask(w http.ResponseWriter, r *http.Request, taskRegistr
 		return
 	}
 
+	// 危险命令拦截
+	danger := DetectDangerousCommand(command)
+	if danger.Dangerous {
+		response.JSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success":       false,
+			"error":         "dangerous command rejected: " + strings.Join(danger.Reasons, ", "),
+			"dangerous":     true,
+			"dangerReasons": danger.Reasons,
+		})
+		return
+	}
+
 	timeout := 60 * time.Second
 	if req.Params.TimeoutMs > 0 {
 		timeout = time.Duration(req.Params.TimeoutMs) * time.Millisecond
@@ -633,4 +645,41 @@ func (s *Service) writeNamedSSE(w http.ResponseWriter, eventName string, payload
 		fmt.Fprintf(w, "event: %s\n", eventName)
 	}
 	fmt.Fprintf(w, "data: %s\n\n", data)
+}
+
+const (
+	// defaultExecTimeout 命令执行默认等待超时
+	defaultExecTimeout = 30 * time.Second
+	// maxExecTimeout 命令执行等待超时上限
+	maxExecTimeout = 300 * time.Second
+)
+
+// waitAgentTaskResult 等待任务到达终态并返回执行结果。
+// 返回 status 为 "success"/"failed"；timedOut 为 true 表示等待超时（任务已被标记失败）。
+// 事件通道提前关闭时回退到任务快照，保证已完成任务也能拿到终态结果。
+func waitAgentTaskResult(registry *TaskRegistry, task *Task, eventCh <-chan TaskEvent, timeout time.Duration) (output, status string, timedOut bool) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case event, ok := <-eventCh:
+			if !ok {
+				snap := task.Snapshot()
+				if snap.Status == TaskCompleted {
+					return fmt.Sprintf("%v", snap.Data), "success", false
+				}
+				return snap.Error, "failed", false
+			}
+			if event.Status == TaskCompleted {
+				return fmt.Sprintf("%v", event.Data), "success", false
+			}
+			if event.Status == TaskFailed {
+				return event.Error, "failed", false
+			}
+		case <-timer.C:
+			registry.Fail(task.ID, "task timeout")
+			return "", "failed", true
+		}
+	}
 }

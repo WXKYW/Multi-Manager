@@ -3,7 +3,6 @@ package drawio
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 )
@@ -62,7 +61,6 @@ func (r *Renderer) loop(ctx context.Context) {
 func (r *Renderer) processPendingJobs(ctx context.Context) {
 	// Stage 1: stub — render jobs are created but not processed yet.
 	// In M3, this will use a headless browser to generate thumbnails.
-	log.Println("[drawio] Renderer: checking pending jobs (stub)")
 }
 
 // EnqueueThumbnailRender 创建缩略图渲染任务

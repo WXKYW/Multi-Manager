@@ -504,7 +504,10 @@ func init() {
 		"version":  {t: "string"},
 		"metrics":  {t: "object"},
 	})
-	routeRequestContracts["/api/server/agent/command/{id}"] = obj([]string{"command"}, map[string]prop{"command": {t: "string", req: true}})
+	routeRequestContracts["/api/server/agent/command/{id}"] = obj([]string{"command"}, map[string]prop{
+		"command": {t: "string", req: true},
+		"timeout": {t: "integer"},
+	})
 	routeRequestContracts["/api/server/agent/auto-install/{id}"] = obj(nil, map[string]prop{"protocol": {t: "string"}})
 	routeRequestContracts["/api/server/agent/batch-install"] = obj([]string{"serverIds"}, map[string]prop{
 		"serverIds": {t: "array", req: true},
@@ -833,7 +836,7 @@ func init() {
 		"siteName":   {t: "string"},
 		"themeMode":  {t: "string"},
 		"pageWidth":  {t: "string", e: []string{"standard", "wide", "full"}},
-		"uiFont":     {t: "string", e: []string{"default", "lxgw-wenkai-screen"}},
+		"uiFont":     {t: "string", e: []string{"default", "serif", "lxgw-wenkai-screen"}},
 	})
 	routeRequestContracts["/api/settings/site-brand/icons"] = obj([]string{"name"}, map[string]prop{
 		"name":     {t: "string", req: true},
@@ -865,6 +868,9 @@ func init() {
 	routeRequestContracts["/api/cloudflare/accounts/{id}/workers/{scriptName}/toggle"] = obj([]string{"enabled"}, map[string]prop{"enabled": {t: "boolean", req: true}})
 	routeRequestContracts["/api/cloudflare/accounts/{id}/workers/{scriptName}/domains"] = obj([]string{"domain"}, map[string]prop{"domain": {t: "string", req: true}})
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info"] = noBody
+	routeRequestContracts["/api/cloudflare/accounts/{accountId}/r2/metrics"] = noBody
+	routeRequestContracts["/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download"] = noBody
+	routeRequestContracts["/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/folder-download"] = noBody
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview"] = noBody
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/token"] = noBody
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/connections"] = noBody

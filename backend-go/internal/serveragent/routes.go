@@ -51,6 +51,11 @@ func (s *Service) handleAgentRoutes(w http.ResponseWriter, r *http.Request, db *
 		accountID := subparts[1]
 		s.getAgentInstallCommand(w, r, db, accountID)
 
+	// POST /api/server/agent/command/{id}
+	case len(subparts) == 2 && subparts[0] == "command" && r.Method == http.MethodPost:
+		accountID := subparts[1]
+		s.handleAgentExecCommand(w, r, db, accountID)
+
 	// GET /api/server/agent/install/win/{id}/{key}
 	case len(subparts) == 4 && subparts[0] == "install" && subparts[1] == "win" && r.Method == http.MethodGet:
 		accountID := subparts[2]

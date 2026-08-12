@@ -166,10 +166,13 @@ func buildRoutes() []Route {
 		{Prefix: "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains/{domainId}", Module: "cloudflare-workers", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare Worker custom domain delete", MatchMode: MatchPattern},
 
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 bucket list/create", MatchMode: MatchPattern},
+		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/metrics", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 account metrics (storage usage and object count)", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 bucket delete", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 object list", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 object delete", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 object download info", MatchMode: MatchPattern},
+		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseProxy, Description: "Cloudflare R2 object download proxy", MatchMode: MatchPattern},
+		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/folder-download", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseProxy, Description: "Cloudflare R2 folder download zip proxy", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseProxy, Description: "Cloudflare R2 object preview proxy", MatchMode: MatchPattern},
 
 		{Prefix: "/api/cloudflare/accounts/{id}/tunnels", Module: "cloudflare-tunnels", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare Tunnel list/create", MatchMode: MatchPattern},
@@ -250,6 +253,7 @@ func buildRoutes() []Route {
 		{Prefix: "/api/subscription", Module: "subscription", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Subscription distribution, nodes, templates, logs, and settings"},
 		{Prefix: "/sub/{token}", Module: "subscription-public", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseStream, Description: "Public Clash/v2ray subscription endpoint", MatchMode: MatchPattern},
 		{Prefix: "/v1", Module: "openai-compatible", Owner: OwnerGo, Auth: AuthAPIKey, ResponseMode: ResponseStream, Description: "OpenAI-compatible API"},
+		{Prefix: "/v1/messages", Module: "anthropic-compatible", Owner: OwnerGo, Auth: AuthAPIKey, ResponseMode: ResponseStream, Description: "Anthropic Messages API compatible gateway"},
 
 		// Server Agent routes (Wave 5b)
 		{Prefix: "/api/server/info", Module: "server-operations", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Server info", MatchMode: MatchExact},
@@ -259,7 +263,7 @@ func buildRoutes() []Route {
 
 		{Prefix: "/api/server/agent/quick-install", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent quick install", MatchMode: MatchExact},
 		{Prefix: "/api/server/agent/regenerate-key", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Regenerate agent key", MatchMode: MatchExact},
-		{Prefix: "/api/server/agent/command/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent install command", MatchMode: MatchPattern},
+		{Prefix: "/api/server/agent/command/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent command (GET install / POST execute)", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/install/win/{id}/{key}", Module: "server-agent", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "Windows Agent install script", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/install/linux/{id}/{key}", Module: "server-agent", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "Linux Agent install script", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/install/linux/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "Linux Agent install script", MatchMode: MatchPattern},

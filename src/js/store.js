@@ -26,7 +26,7 @@ export const MODULE_CONFIG = {
   openai: {
     name: '模型网关',
     shortName: '模型',
-    icon: 'fa-robot',
+    icon: 'fa-wand',
     description: 'OpenAI 网关',
   },
   subscription: {
@@ -39,7 +39,7 @@ export const MODULE_CONFIG = {
   paas: {
     name: 'PaaS',
     shortName: 'PaaS',
-    icon: 'fa-cloud',
+    icon: 'fa-rocket',
     description: 'Koyeb / Fly.io',
   },
   dns: {
@@ -392,6 +392,7 @@ export const applyCustomCss = (css = '') => {
 
 export const FONT_OPTIONS = [
   { value: 'default', label: '系统默认' },
+  { value: 'serif', label: '衬线字体' },
   { value: 'lxgw-wenkai-screen', label: '霞鹜文楷屏幕阅读版' },
 ];
 
@@ -418,7 +419,19 @@ export const applyUIFont = (font) => {
     if (document.body) {
       document.body.style.setProperty('font-family', '"LXGW WenKai Screen", ui-sans-serif, system-ui, sans-serif');
     }
+    return;
   }
+
+  if (existing) existing.remove();
+
+  if (font === 'serif') {
+    if (document.body) {
+      document.body.style.setProperty('font-family', 'Georgia, "Noto Serif SC", "Songti SC", "SimSun", serif');
+    }
+    return;
+  }
+
+  if (document.body) document.body.style.removeProperty('font-family');
 };
 
 export const normalizeUserSettings = (settings = {}) => {

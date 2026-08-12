@@ -12,6 +12,33 @@
   <link rel="shortcut icon" href="/logo.svg" />
   <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
+  <script>
+    (function () {
+      try {
+        var path = window.location.pathname.replace(/\/+$/, '') || '/';
+        var target = '';
+        var match = path.match(/^\/(?:status|u)\/([^/]+)$/);
+        if (match) target = 'uptime/' + match[1];
+        if (!target) {
+          match = path.match(/^\/(?:servers|s)\/([^/]+)$/);
+          if (match) target = 'server/' + match[1];
+        }
+        if (!target) {
+          match = path.match(/^\/(?:github|gh)\/([^/]+)$/);
+          if (match) target = 'github/' + match[1];
+        }
+        if (!target && path === '/' && !/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(window.location.host)) {
+          target = 'domain/' + encodeURIComponent(window.location.host);
+        }
+        if (!target) return;
+        var href = '/public-page-favicon/' + target;
+        var links = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+        for (var i = 0; i < links.length; i++) {
+          links[i].setAttribute('href', href);
+        }
+      } catch (e) { }
+    })();
+  </script>
   <meta name="theme-color" content="#f8f7f4" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#050505" media="(prefers-color-scheme: dark)" />
   <meta name="color-scheme" content="light dark" />

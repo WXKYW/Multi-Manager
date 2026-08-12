@@ -23,6 +23,7 @@ import {
   Popover,
   Table,
   Tabs,
+  Toolbar,
 } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
@@ -264,18 +265,24 @@ function OpenAIPage() {
     };
   }, []);
 
-  const fetchAnalytics = useCallback(async () => {
-    setAnalyticsLoading(true);
+  const fetchAnalytics = useCallback(async ({ dashboardOnly = false } = {}) => {
+    // dashboardOnly（实时/轮询刷新看板）静默更新，避免已展示的卡片闪烁。
+    if (!dashboardOnly) setAnalyticsLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [sumRes, chartsRes, logsRes] = await Promise.all([
-        fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
-        fetch(`/api/openai/analytics/charts?days=${analyticsDays}&granularity=${analyticsGranularity}`, { headers }),
-        fetch(
-          `/api/openai/analytics/logs?days=${analyticsDays}&page=${analyticsPage}&pageSize=${analyticsPageSize}`,
-          { headers }
-        ),
-      ]);
+      const [sumRes, chartsRes, logsRes] = dashboardOnly
+        ? await Promise.all([
+            fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
+            fetch(`/api/openai/analytics/charts?days=${analyticsDays}&granularity=${analyticsGranularity}`, { headers }),
+          ])
+        : await Promise.all([
+            fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
+            fetch(`/api/openai/analytics/charts?days=${analyticsDays}&granularity=${analyticsGranularity}`, { headers }),
+            fetch(
+              `/api/openai/analytics/logs?days=${analyticsDays}&page=${analyticsPage}&pageSize=${analyticsPageSize}`,
+              { headers }
+            ),
+          ]);
 
       if (sumRes.ok) {
         const data = await sumRes.json();
@@ -285,7 +292,7 @@ function OpenAIPage() {
         const data = await chartsRes.json();
         setAnalyticsCharts(data);
       }
-      if (logsRes.ok) {
+      if (logsRes?.ok) {
         const data = await logsRes.json();
         setAnalyticsLogs(data.records || []);
         setAnalyticsTotal(data.total || 0);
@@ -294,7 +301,7 @@ function OpenAIPage() {
       console.error('Failed to fetch analytics:', err);
       toast.error('获取分析数据失败');
     } finally {
-      setAnalyticsLoading(false);
+      if (!dashboardOnly) setAnalyticsLoading(false);
     }
   }, [analyticsDays, analyticsGranularity, analyticsPage, analyticsPageSize, getAuthHeaders]);
 
@@ -304,32 +311,45 @@ function OpenAIPage() {
     }
   }, [activeTab, fetchAnalytics]);
 
-  // 网关日志自动刷新（15 秒一次），页面隐藏或离开日志 Tab 时暂停。
+  // 网关日志与数据看板自动刷新（15 秒一次），页面隐藏或离开相关 Tab 时暂停。
   useEffect(() => {
-    if (!logsAutoRefresh || activeTab !== 'logs') return undefined;
+    if (!logsAutoRefresh || (activeTab !== 'analytics' && activeTab !== 'logs')) return undefined;
     const timer = window.setInterval(() => {
       if (document.hidden) return;
-      fetchAnalytics();
+      if (activeTab === 'analytics') {
+        fetchAnalytics({ dashboardOnly: true });
+      } else {
+        fetchAnalytics();
+      }
     }, 15000);
     return () => window.clearInterval(timer);
   }, [logsAutoRefresh, activeTab, fetchAnalytics]);
 
-  // 网关日志实时推送（SSE）：后端出现请求立即插入日志列表顶部。
+  // 网关实时推送（SSE）：后端出现请求立即插入日志列表顶部；数据看板则节流刷新汇总与图表。
   useEffect(() => {
-    if (activeTab !== 'logs') return undefined;
+    if (activeTab !== 'analytics' && activeTab !== 'logs') return undefined;
     let source = null;
+    let dashboardRefreshTimer = null;
     try {
       source = new EventSource('/api/openai/analytics/stream');
       source.addEventListener('log', event => {
         try {
           const log = JSON.parse(event.data);
-          setAnalyticsLogs(prev => {
-            if (!prev || prev.length === 0) return [log, ...prev];
-            const existing = new Set(prev.map(item => `${item.timestamp}:${item.model}:${item.clientIp ?? ''}:${item.latencyMs ?? ''}`));
-            const key = `${log.timestamp}:${log.model ?? ''}:${log.clientIp ?? ''}:${log.latencyMs ?? ''}`;
-            if (existing.has(key)) return prev;
-            return [log, ...prev].slice(0, Math.max(analyticsPageSize, 50));
-          });
+          if (activeTab === 'logs') {
+            setAnalyticsLogs(prev => {
+              if (!prev || prev.length === 0) return [log, ...prev];
+              const existing = new Set(prev.map(item => `${item.timestamp}:${item.model}:${item.clientIp ?? ''}:${item.latencyMs ?? ''}`));
+              const key = `${log.timestamp}:${log.model ?? ''}:${log.clientIp ?? ''}:${log.latencyMs ?? ''}`;
+              if (existing.has(key)) return prev;
+              return [log, ...prev].slice(0, analyticsPageSize);
+            });
+          } else {
+            if (dashboardRefreshTimer) return;
+            dashboardRefreshTimer = window.setTimeout(() => {
+              dashboardRefreshTimer = null;
+              fetchAnalytics({ dashboardOnly: true });
+            }, 800);
+          }
         } catch {
           // 忽略无法解析的事件
         }
@@ -339,8 +359,9 @@ function OpenAIPage() {
     }
     return () => {
       if (source) source.close();
+      if (dashboardRefreshTimer) window.clearTimeout(dashboardRefreshTimer);
     };
-  }, [activeTab, analyticsPageSize]);
+  }, [activeTab, analyticsPageSize, fetchAnalytics]);
 
   // 记住日志分页数量，下次进入自动沿用。
   useEffect(() => {
@@ -478,6 +499,62 @@ function OpenAIPage() {
     localStorage.removeItem('openai_endpoints_cache');
     loadEndpoints();
   }, [loadEndpoints]);
+
+  const endpointImportInputRef = useRef(null);
+  const [endpointImporting, setEndpointImporting] = useState(false);
+  const [endpointExporting, setEndpointExporting] = useState(false);
+
+  const exportEndpoints = async () => {
+    setEndpointExporting(true);
+    try {
+      const response = await fetch('/api/openai/export', { headers: getAuthHeaders() });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导出端点失败');
+      const list = Array.isArray(payload.endpoints) ? payload.endpoints : [];
+      if (list.length === 0) { toast.warning('暂无端点可导出'); return; }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `openai-endpoints-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${list.length} 个端点（包含 API Key，请注意保管）`);
+    } catch (error) {
+      toast.error(error.message || '导出端点失败');
+    } finally {
+      setEndpointExporting(false);
+    }
+  };
+
+  const importEndpointsFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setEndpointImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const list = Array.isArray(data) ? data : (data.endpoints || []);
+      if (list.length === 0) throw new Error('文件中没有端点数据');
+      if (!(await dialog.confirm(`确认导入 ${list.length} 个端点？已存在相同 baseUrl 的端点会自动跳过。`))) return;
+      const response = await fetch('/api/openai/import', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoints: list, overwrite: false }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导入端点失败');
+      await loadEndpoints(true);
+      toast.success(`导入完成：新增 ${payload.imported ?? 0} 个，跳过 ${payload.skipped ?? 0} 个`);
+    } catch (error) {
+      toast.error(error.message || '导入端点失败');
+    } finally {
+      setEndpointImporting(false);
+    }
+  };
 
   const loadGatewayKeys = useCallback(async () => {
     setGatewayKeysLoading(true);
@@ -3198,33 +3275,51 @@ const trendSeries = useMemo(() => {
               />
             )}
             {activeTab === 'endpoints' && (
-              <TabBarOverflowActions
-                items={[
-                  {
-                    key: 'health',
-                    label: '健康检测',
-                    icon: <Activity className={iconButtonIconClass} />,
-                    onClick: () => setHealthCheckModal(true),
-                    disabled: modelHealthBatchLoading,
-                    loading: modelHealthBatchLoading,
-                  },
-                  {
-                    key: 'refresh',
-                    label: '刷新列表',
-                    icon: <RefreshCw className={iconButtonIconClass} />,
-                    onClick: refreshAllEndpoints,
-                    disabled: endpointsRefreshing,
-                    loading: endpointsRefreshing,
-                  },
-                  {
-                    key: 'add',
-                    label: '新增端点',
-                    icon: <Plus className={iconButtonIconClass} />,
-                    onClick: openAddEndpointModal,
-                    variant: 'primary',
-                  },
-                ]}
-              />
+              <div className="flex shrink-0 items-center gap-2">
+                <Toolbar size="sm" aria-label="端点导入导出" className="shrink-0">
+                  <Toolbar.Button
+                    onClick={exportEndpoints}
+                    disabled={endpoints.length === 0 || endpointExporting}
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button
+                    onClick={() => endpointImportInputRef.current?.click()}
+                    disabled={endpointImporting}
+                    icon={<Download className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
+                <TabBarOverflowActions
+                  items={[
+                    {
+                      key: 'health',
+                      label: '健康检测',
+                      icon: <Activity className={iconButtonIconClass} />,
+                      onClick: () => setHealthCheckModal(true),
+                      disabled: modelHealthBatchLoading,
+                      loading: modelHealthBatchLoading,
+                    },
+                    {
+                      key: 'refresh',
+                      label: '刷新列表',
+                      icon: <RefreshCw className={iconButtonIconClass} />,
+                      onClick: refreshAllEndpoints,
+                      disabled: endpointsRefreshing,
+                      loading: endpointsRefreshing,
+                    },
+                    {
+                      key: 'add',
+                      label: '新增端点',
+                      icon: <Plus className={iconButtonIconClass} />,
+                      onClick: openAddEndpointModal,
+                      variant: 'primary',
+                    },
+                  ]}
+                />
+              </div>
             )}
           </div>
       </div>
@@ -3232,6 +3327,14 @@ const trendSeries = useMemo(() => {
       {/* ==================== 1. API 端点 Tab ==================== */}
       {activeTab === 'endpoints' && (
         <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+          <Input
+            ref={endpointImportInputRef}
+            type="file"
+            accept="application/json,.json"
+            aria-label="导入端点 JSON"
+            className="hidden"
+            onChange={importEndpointsFromFile}
+          />
           <div className="flex flex-col gap-2 rounded-lg border border-kumo-line bg-kumo-base p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
 <div className="flex min-w-0 items-center gap-2">
               <ClipboardText
@@ -3378,6 +3481,36 @@ const trendSeries = useMemo(() => {
                         <span className="truncate font-medium text-kumo-strong">
                           {endpoint.name || '未命名端点'}
                         </span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label="复制端点地址"
+                          title={endpoint.baseUrl}
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(endpoint.baseUrl)
+                              .then(() => toast.success('端点地址已复制'))
+                              .catch(() => toast.error('复制失败'));
+                          }}
+                        >
+                          端点
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label="复制 API Key"
+                          title="复制 API Key"
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(endpoint.apiKey || '')
+                              .then(() => toast.success('API Key 已复制'))
+                              .catch(() => toast.error('复制失败'));
+                          }}
+                        >
+                          密钥
+                        </Button>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                         <StatusBadge
                           tone={validStatus ? 'success' : invalidStatus ? 'danger' : 'neutral'}
                         >
@@ -3393,14 +3526,6 @@ const trendSeries = useMemo(() => {
                             {endpoint.headers.length} 请求头
                           </StatusBadge>
                         )}
-                        <span
-                          className="hidden truncate font-mono text-[10px] text-kumo-subtle sm:block"
-                          title={endpoint.baseUrl}
-                        >
-                          {endpoint.baseUrl}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
                         <Button
                           shape="square"
                           size="sm"

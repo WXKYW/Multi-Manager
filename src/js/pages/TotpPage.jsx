@@ -10,7 +10,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { LayerCard, Meter, SensitiveInput, Tabs } from '@cloudflare/kumo';
+import { LayerCard, Loader, Meter, SensitiveInput, Tabs, Toolbar } from '@cloudflare/kumo';
 import useStore, { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
@@ -1982,27 +1982,29 @@ function TotpPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0 last:pb-0">
-              <Button
-                size="sm"
-                shape="square"
-                onClick={async () => {
-                  const uris = await dialog.prompt({
-                    message: '请输入批量导入的 otpauth:// 链接列表 (每行一条)',
-                  });
-                  importUrisDirectly(uris || '');
-                }}
-                aria-label="批量导入 URI"
-                title="批量导入 URI"
-                icon={<Download className="w-3.5 h-3.5" />}
-              />
-              <Button
-                size="sm"
-                shape="square"
-                onClick={handleExportAccounts}
-                aria-label="批量导出备份"
-                title="批量导出备份"
-                icon={<Upload className="w-3.5 h-3.5" />}
-              />
+              <Toolbar size="sm" aria-label="批量导入导出" className="shrink-0">
+                <Toolbar.Button
+                  onClick={async () => {
+                    const uris = await dialog.prompt({
+                      message: '请输入批量导入的 otpauth:// 链接列表 (每行一条)',
+                    });
+                    importUrisDirectly(uris || '');
+                  }}
+                  aria-label="批量导入 URI"
+                  title="批量导入 URI"
+                  icon={<Download className="h-3.5 w-3.5" />}
+                >
+                  <span className="hidden sm:inline">导入</span>
+                </Toolbar.Button>
+                <Toolbar.Button
+                  onClick={handleExportAccounts}
+                  aria-label="批量导出备份"
+                  title="批量导出备份"
+                  icon={<Upload className="h-3.5 w-3.5" />}
+                >
+                  <span className="hidden sm:inline">导出</span>
+                </Toolbar.Button>
+              </Toolbar>
               <Button size="sm" onClick={refreshCodes} icon={<RotateCw className="w-3.5 h-3.5" />}>
                 手动刷新验证码
               </Button>

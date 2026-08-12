@@ -203,6 +203,13 @@ function workflowNodeKindLabel(node) {
   return '内联';
 }
 
+function workflowNodeKindVariant(node) {
+  if (node.type === 'start') return 'blue';
+  if (node.task_id) return 'purple';
+  if (node.type === 'task') return 'orange';
+  return 'teal';
+}
+
 function conditionLabel(value) {
   return CONDITION_ITEMS.find((item) => item.value === value)?.label || '成功后';
 }
@@ -457,7 +464,7 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
                 <span className="block truncate text-sm font-semibold text-kumo-strong">{node.name || node.id}</span>
                 <span className="mt-1 block truncate text-xs leading-5 text-kumo-subtle">{workflowNodeTypeLabel(node)}</span>
               </span>
-              <Badge variant="neutral">{workflowNodeKindLabel(node)}</Badge>
+              <Badge variant={workflowNodeKindVariant(node)}>{workflowNodeKindLabel(node)}</Badge>
             </span>
             <span className={`mt-auto flex min-w-0 items-center justify-between gap-2 ${compact ? 'pt-3' : 'pt-5'}`}>
               <Badge variant={statusBadgeVariant(status || (node.enabled === 0 ? 'skipped' : 'queued'))} appearance="dot">

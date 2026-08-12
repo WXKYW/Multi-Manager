@@ -7,7 +7,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Badge, Meter, Popover, Tabs } from '@cloudflare/kumo';
+import { Badge, Meter, Popover, Tabs, Toolbar } from '@cloudflare/kumo';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
@@ -34,6 +34,7 @@ import {
   Download,
   Folder,
   Globe,
+  Key,
   Plus,
   RefreshCw,
   Search,
@@ -1873,24 +1874,24 @@ function M365Page() {
       icon={<Cloud className="h-4 w-4" />}
       action={
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            shape="square"
-            variant="secondary"
-            title="导出租户"
-            aria-label="导出租户"
-            icon={<Upload className="h-3.5 w-3.5" />}
-            onClick={exportAccounts}
-          />
-          <Button
-            size="sm"
-            shape="square"
-            variant="secondary"
-            title="导入租户"
-            aria-label="导入租户"
-            icon={<Download className="h-3.5 w-3.5" />}
-            onClick={openImportAccounts}
-          />
+          <Toolbar size="sm" aria-label="导出导入租户" className="shrink-0">
+            <Toolbar.Button
+              title="导出租户"
+              aria-label="导出租户"
+              icon={<Upload className="h-3.5 w-3.5" />}
+              onClick={exportAccounts}
+            >
+              <span className="hidden sm:inline">导出</span>
+            </Toolbar.Button>
+            <Toolbar.Button
+              title="导入租户"
+              aria-label="导入租户"
+              icon={<Download className="h-3.5 w-3.5" />}
+              onClick={openImportAccounts}
+            >
+              <span className="hidden sm:inline">导入</span>
+            </Toolbar.Button>
+          </Toolbar>
           <Button
             size="sm"
             variant="primary"
@@ -2100,9 +2101,9 @@ function M365Page() {
               value={publicTab}
               onValueChange={setPublicTab}
               tabs={[
-                { value: 'pages', label: '公开页配置' },
-                { value: 'codes', label: '邀请码批次' },
-                { value: 'registrations', label: '注册记录' },
+                { value: 'pages', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />公开页配置</span> },
+                { value: 'codes', label: <span className="inline-flex items-center gap-1.5"><Key className="h-3.5 w-3.5" />邀请码批次</span> },
+                { value: 'registrations', label: <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" />注册记录</span> },
               ]}
               className="w-fit max-w-full"
               listClassName="w-fit max-w-full"

@@ -10,6 +10,7 @@ import { useConfirmPress } from '../../hooks/useConfirmPress.js';
 import { invalidateDashboardStats } from '../../modules/dashboardInvalidation.js';
 import useStore from '../../store.js';
 import { SectionCard } from '../ui/AppPrimitives.jsx';
+import { PublicPageBrandIcon } from '../public/PublicPageIconPicker.jsx';
 import {
   Copy,
   Edit,
@@ -367,6 +368,9 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand">
+                          <PublicPageBrandIcon pageKind="github" config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
+                        </span>
                         <span className="truncate text-sm font-bold text-kumo-strong">{page.title || page.slug}</span>
                         <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${page.public ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-line/30 text-kumo-subtle'}`}>
                           {page.public ? '公开' : '私有'}

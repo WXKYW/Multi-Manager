@@ -9,6 +9,7 @@ import {
   Tabs,
   Text,
   TimeseriesChart,
+  Toolbar,
 } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
@@ -54,6 +55,8 @@ import {
   Star,
   Trash,
   TrendingUp,
+  Upload,
+  Download,
   Users,
   X,
 } from '../components/Icons.jsx';
@@ -101,6 +104,39 @@ const rangeOptions = [
 
 const GITHUB_ACTIONS_TABLE_WIDTHS = [132, 220, 480, 132, 168, 124];
 const GITHUB_EVENTS_TABLE_WIDTHS = [420, 120, 140, 200];
+
+const SCOPE_BADGE_VARIANTS = {
+  'admin:org': 'red',
+  'admin:org_hook': 'red',
+  'admin:packages': 'red',
+  'admin:repo_hook': 'red',
+  'admin:gpg_key': 'purple',
+  'admin:public_key': 'purple',
+  'audit_log': 'red',
+  'delete_repo': 'red',
+  gist: 'teal',
+  notifications: 'teal',
+  project: 'orange',
+  'read:gpg_key': 'purple',
+  'read:org': 'orange',
+  'read:packages': 'orange',
+  'read:project': 'orange',
+  'read:public_key': 'purple',
+  'read:repo_hook': 'orange',
+  'read:user': 'green',
+  repo: 'blue',
+  'repo:status': 'blue',
+  repo_deployment: 'blue',
+  security_events: 'purple',
+  'user:email': 'green',
+  'user:follow': 'green',
+  workflow: 'purple',
+  'write:org': 'red',
+  'write:packages': 'orange',
+  'write:repo_hook': 'orange',
+};
+
+const scopeBadgeVariant = (scope) => SCOPE_BADGE_VARIANTS[String(scope || '')] || 'neutral';
 
 const statusTone = (status) => {
   const value = String(status || '').toLowerCase();
@@ -1640,7 +1676,7 @@ function PermissionChecks({ token }) {
       {scopes.length > 0 && (
         <div className="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-kumo-subtle">
           <span>Classic scopes</span>
-          {scopes.map((scope) => <Badge key={scope} variant="neutral">{scope}</Badge>)}
+          {scopes.map((scope) => <Badge key={scope} variant={scopeBadgeVariant(scope)}>{scope}</Badge>)}
         </div>
       )}
       {checks.length > 0 && (
@@ -1753,6 +1789,91 @@ function GitHubPage() {
       toast.error(error.message || '加载 GitHub 模块失败');
     }
   }, [api]);
+
+  const repoImportInputRef = useRef(null);
+  const [repoImporting, setRepoImporting] = useState(false);
+
+  const exportRepositories = () => {
+    if (repositories.length === 0) { toast.warning('暂无仓库可导出'); return; }
+    const payload = {
+      version: '1.0',
+      repositories: repositories.map((repo) => ({
+        owner: repo.owner,
+        name: repo.name,
+        tags: Array.isArray(repo.tags) ? repo.tags : [],
+        note: repo.note || '',
+        enabled: repo.enabled !== false,
+        notify_enabled: repo.notify_enabled !== false,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `github-repositories-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`已导出 ${payload.repositories.length} 个仓库`);
+  };
+
+  const importRepositoriesFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setRepoImporting(true);
+    try {
+      const data = JSON.parse(await file.text());
+      const list = Array.isArray(data) ? data : (data.repositories || []);
+      const normalized = list.map((item) => {
+        const rawFull = String(item.full_name || '').trim();
+        let owner = String(item.owner || '').trim();
+        let name = String(item.name || '').trim();
+        if (!owner && rawFull.includes('/')) {
+          [owner, name] = [rawFull.slice(0, rawFull.indexOf('/')), rawFull.slice(rawFull.indexOf('/') + 1)];
+        }
+        if (owner && !name && rawFull.includes('/')) {
+          name = rawFull.slice(rawFull.indexOf('/') + 1);
+        }
+        return { ...item, owner, name };
+      });
+      const valid = normalized.filter((item) => String(item.owner || '').trim() && String(item.name || '').trim());
+      if (valid.length === 0) throw new Error('文件中没有可导入的仓库（需要 owner 和 name）');
+      if (!(await dialog.confirm(`确认导入 ${valid.length} 个仓库？重复仓库由 GitHub 侧自动去重。`))) return;
+      const results = [];
+      // 分批提交（10 个/批），避免一次性并发几十个请求压垮后端与 GitHub 限流。
+      const CHUNK = 10;
+      for (let i = 0; i < valid.length; i += CHUNK) {
+        const chunk = valid.slice(i, i + CHUNK);
+        const chunkResults = await Promise.allSettled(chunk.map((item) => api('/api/github/repositories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            owner: String(item.owner || '').trim(),
+            name: String(item.name || '').trim(),
+            tags: Array.isArray(item.tags) ? item.tags : [],
+            note: item.note || '',
+            enabled: item.enabled !== false,
+            notify_enabled: item.notify_enabled !== false,
+          }),
+        })));
+        results.push(...chunkResults);
+      }
+      const imported = results.filter((result) => result.status === 'fulfilled').length;
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      if (failed > 0) {
+        toast.warning(`导入完成：成功 ${imported} 个，失败 ${failed} 个（已存在的仓库会跳过）`);
+      } else {
+        toast.success(`导入完成：成功 ${imported} 个`);
+      }
+      loadOverview();
+    } catch (error) {
+      toast.error(error.message || '导入仓库失败');
+    } finally {
+      setRepoImporting(false);
+    }
+  };
 
   const loadRepoDetails = useCallback(async (repoId = selectedRepo?.id) => {
     if (!repoId) return;
@@ -2297,7 +2418,37 @@ function GitHubPage() {
                   {collector?.running ? '后台采集中' : '采集器待命'}
                 </Badge>
               </div>
-              <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setRepoDialogOpen(true)}>添加仓库</Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <Input
+                  ref={repoImportInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  aria-label="导入仓库 JSON"
+                  className="hidden"
+                  onChange={importRepositoriesFromFile}
+                />
+                <Toolbar size="sm" aria-label="导出导入仓库" className="shrink-0">
+                  <Toolbar.Button
+                    onClick={exportRepositories}
+                    disabled={repositories.length === 0}
+                    aria-label="导出仓库列表"
+                    title="导出仓库列表"
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导出</span>
+                  </Toolbar.Button>
+                  <Toolbar.Button
+                    onClick={() => repoImportInputRef.current?.click()}
+                    disabled={repoImporting}
+                    aria-label="导入仓库列表"
+                    title="导入仓库列表"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                  >
+                    <span className="hidden sm:inline">导入</span>
+                  </Toolbar.Button>
+                </Toolbar>
+                <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setRepoDialogOpen(true)}>添加仓库</Button>
+              </div>
             </LayerCard.Secondary>
             <LayerCard.Primary className="p-0">
             {repositories.length === 0 ? (

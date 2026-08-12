@@ -1150,7 +1150,7 @@ function SettingsPage() {
 
       <div className={contentViewportClassName}>
       {activeTab === 'general' && (
-        <div className="grid min-h-0 items-start gap-4 px-px pt-px pr-px md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+        <div className="grid min-h-0 items-start gap-4 md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
           <div className="grid min-h-0 gap-4">
             <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
             <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
@@ -1188,7 +1188,7 @@ function SettingsPage() {
 
 
       {activeTab === 'modules' && (
-        <div className="min-h-0 overflow-auto px-px pt-px md:h-full">
+        <div className="min-h-0 overflow-auto md:h-full">
         <SectionCard
           className="flex min-h-0 md:h-full"
           headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
@@ -1256,7 +1256,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'security' && (
-        <div className="min-w-0 overflow-auto px-px pt-px [column-gap:1rem] xl:columns-2">
+        <div className="min-w-0 overflow-auto [column-gap:1rem] xl:columns-2">
           <SectionCard
             className={SECURITY_MASONRY_CARD_CLASS}
             title="管理员密码"
@@ -1652,7 +1652,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'database' && (
-        <div className="grid items-start gap-3 px-px pt-px pr-px xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
+        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
           <SectionCard
             className="flex h-full min-h-0 flex-1"
             title="数据库统计"
@@ -1694,7 +1694,7 @@ function SettingsPage() {
                 </div>
               </div>
             )}
-            <div className="min-h-0 flex-1 overflow-auto pr-px">
+            <div className="min-h-0 flex-1 overflow-auto">
               <Table layout="fixed">
                 <colgroup>
                   <col className="w-[28%]" />
@@ -1733,7 +1733,7 @@ function SettingsPage() {
             </div>
           </SectionCard>
 
-          <div className="grid content-start gap-3 px-px pt-px">
+          <div className="grid content-start gap-3">
             <SectionCard
               title="数据库导入导出"
               description="导出数据库，或预检后替换。"
@@ -1927,7 +1927,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'logs' && (
-        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden px-px pt-px pr-px">
+        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
           <SectionCard
             className="shrink-0"
             title="审计与保留"
@@ -2003,10 +2003,9 @@ function SettingsPage() {
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid min-h-0 items-start gap-3 overflow-auto px-px pt-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+        <div className="grid min-h-0 items-start gap-3 overflow-auto xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
           <SectionCard
             title="界面外观"
-            description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
             icon={<Sun className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
@@ -2036,7 +2035,6 @@ function SettingsPage() {
 
           <SectionCard
             title="自定义 CSS"
-            description="保存后写入用户设置"
             icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
             actions={
                 <>
@@ -2065,7 +2063,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'about' && (
-        <div className="grid items-start gap-4 overflow-auto px-px pt-px pr-px lg:grid-cols-1">
+        <div className="grid items-start gap-4 overflow-auto lg:grid-cols-1">
           <SectionCard
             title={<span className="app-brand-wordmark">API Monitor</span>}
             description={APP_VERSION}

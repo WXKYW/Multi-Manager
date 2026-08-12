@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/database"
 )
 
 func testServer(t *testing.T) *Server {
@@ -1630,5 +1631,109 @@ func TestOpenAIServerRouting(t *testing.T) {
 		if record.Route == "models" {
 			t.Fatalf("models request should not pollute analytics logs: %+v", analyticsPayload.Records)
 		}
+	}
+}
+
+func TestPublicPageFaviconResolver(t *testing.T) {
+	distDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("<!doctype html><div id=\"root\"></div>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handler := newTestServer(t, config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DistDir: distDir,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	// 通过公开路由触发 uptime schema 初始化，然后直插测试数据。
+	prime := httptest.NewRequest(http.MethodGet, "/api/uptime/public/status-pages/init-schema", nil)
+	handler.ServeHTTP(httptest.NewRecorder(), prime)
+
+	dbCfg := config.Config{Version: "test", Host: "127.0.0.1", Port: 0, DataDir: handler.cfg.DataDir, DBName: handler.cfg.DBName}
+	ctx := context.Background()
+	store := database.New(dbCfg)
+	db, err := store.Open(ctx)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO uptime_status_pages (slug, domain, title, public, cache_seconds, config_json)
+		VALUES ('fav-slug', 'fav.example.com', 'Fav Test', 1, 300, '{"publicIconId":"site-custom"}')`)
+	db.Close()
+	if err != nil {
+		t.Fatalf("insert uptime status page: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		path     string
+		wantCode int
+		wantLoc  string
+	}{
+		{
+			name:     "custom icon redirects to brand icon asset",
+			path:     "/public-page-favicon/uptime/fav-slug",
+			wantCode: http.StatusTemporaryRedirect,
+			wantLoc:  "/site-brand-icons/site-custom",
+		},
+		{
+			name:     "custom icon by domain probe",
+			path:     "/public-page-favicon/domain/fav.example.com",
+			wantCode: http.StatusTemporaryRedirect,
+			wantLoc:  "/site-brand-icons/site-custom",
+		},
+		{
+			name:     "missing page falls back to default logo",
+			path:     "/public-page-favicon/uptime/no-such-slug",
+			wantCode: http.StatusTemporaryRedirect,
+			wantLoc:  "/logo-default.svg",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			res := httptest.NewRecorder()
+			handler.ServeHTTP(res, req)
+			if res.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d; body=%s", res.Code, tc.wantCode, res.Body.String())
+			}
+			if loc := res.Header().Get("Location"); loc != tc.wantLoc {
+				t.Fatalf("location = %q, want %q", loc, tc.wantLoc)
+			}
+		})
+	}
+
+	// 未自定义图标的公开页直接返回默认 glyph（无额外跳转）。
+	db, err = store.Open(ctx)
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO uptime_status_pages (slug, title, public, cache_seconds, config_json)
+		VALUES ('plain-slug', 'Plain', 1, 300, '{}')`)
+	db.Close()
+	if err != nil {
+		t.Fatalf("insert plain uptime status page: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/public-page-favicon/uptime/plain-slug", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("glyph status = %d body=%s", res.Code, res.Body.String())
+	}
+	if ct := res.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Fatalf("glyph content type = %q, want image/svg+xml", ct)
+	}
+	if body := res.Body.String(); !strings.HasPrefix(body, "<svg") || !strings.Contains(body, "#f48120") {
+		t.Fatalf("unexpected glyph body: %q", body)
+	}
+
+	// 未知 kind 不应被解析端点吞掉，回落 SPA。
+	req = httptest.NewRequest(http.MethodGet, "/public-page-favicon/unknown/whatever", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "root") {
+		t.Fatalf("unknown kind should fall through to SPA, got %d body=%s", res.Code, res.Body.String())
 	}
 }

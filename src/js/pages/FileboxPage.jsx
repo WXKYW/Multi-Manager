@@ -15,7 +15,7 @@ import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { fileboxDirectURL, fileboxShareURL } from '../modules/fileboxLinks.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { formatDateTime, formatFileSize } from '../modules/utils.js';
-import { Clock, ExternalLink, FileText, FolderOpen, History, Lock, RefreshCw, Send, Settings, Trash, Upload, X } from '../components/Icons.jsx';
+import { Clock, ExternalLink, FileText, FolderOpen, History, Lock, RefreshCw, Send, Settings, Trash, Upload, Users, X } from '../components/Icons.jsx';
 import { SectionCard, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 
 const MarkdownEditor = lazy(() => import('../components/ui/MarkdownEditor.jsx'));
@@ -63,7 +63,7 @@ const PAGE_TABS = [
     value: 'void',
     label: (
       <span className="inline-flex items-center gap-1.5">
-        <Send className="h-3.5 w-3.5" />
+        <Users className="h-3.5 w-3.5" />
         虚空房间
       </span>
     ),

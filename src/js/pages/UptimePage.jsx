@@ -20,10 +20,11 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { ChartPalette, ClipboardText, Loader, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, Loader, Tabs, TimeseriesChart, Toolbar } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
 import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, ResponsiveSearchInput, SectionCard, StatusBadge, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
+import { PublicPageBrandIcon } from '../components/public/PublicPageIconPicker.jsx';
 import useStore from '../store.js';
 import {
   Activity,
@@ -1831,6 +1832,9 @@ function UptimePage() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-kumo-brand">
+                              <PublicPageBrandIcon pageKind="uptime" config={page.config} iconClassName="h-4 w-4" customIconClassName="h-4 w-4" />
+                            </span>
                             <span className="truncate text-sm font-bold text-kumo-strong">{page.title || page.slug}</span>
                             <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${page.public ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-line/30 text-kumo-subtle'}`}>
                               {page.public ? '公开' : '私有'}
@@ -2281,12 +2285,14 @@ function UptimePage() {
                   className="hidden"
                   onChange={previewUptimeImportFile}
                 />
-                <Button size="sm" variant="secondary" onClick={exportUptimeConfig} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
-                  导出当前配置
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Download className="w-3.5 h-3.5" />}>
-                  选择配置文件
-                </Button>
+                <Toolbar size="sm" aria-label="导出导入 Uptime 配置" className="shrink-0">
+                    <Toolbar.Button onClick={exportUptimeConfig} loading={uptimeMetaLoading} aria-label="导出当前配置" icon={<Upload className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导出</span>
+                    </Toolbar.Button>
+                    <Toolbar.Button onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} aria-label="导入配置文件" icon={<Download className="h-3.5 w-3.5" />}>
+                      <span className="hidden sm:inline">导入</span>
+                    </Toolbar.Button>
+                  </Toolbar>
               </>
             )}
             bodyPadding="lg"

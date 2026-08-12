@@ -16,16 +16,16 @@ import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
-import { CheckDouble, FileText, Plus, Star } from '../components/Icons.jsx';
+import { CheckDouble, FileText, Folder, Grid, Plus, Settings, Star } from '../components/Icons.jsx';
 import { AlertTriangle } from '../components/IconsCore.jsx';
 import { iconButtonIconClass } from '../components/ui/AppPrimitives.jsx';
 
 const API = '/api/prompts';
 const TABS = [
-  { value: 'workspace', label: '工作区' },
-  { value: 'collections', label: '集合' },
-  { value: 'published', label: '已发布' },
-  { value: 'settings', label: '设置' },
+  { value: 'workspace', label: <span className="inline-flex items-center gap-1.5"><Grid className="h-3.5 w-3.5" />工作区</span> },
+  { value: 'collections', label: <span className="inline-flex items-center gap-1.5"><Folder className="h-3.5 w-3.5" />集合</span> },
+  { value: 'published', label: <span className="inline-flex items-center gap-1.5"><Star className="h-3.5 w-3.5" />已发布</span> },
+  { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />设置</span> },
 ];
 
 async function apiFetch(path, options = {}) {

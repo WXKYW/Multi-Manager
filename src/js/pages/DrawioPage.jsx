@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Button, Empty, LayerCard, Popover, Tabs } from '@cloudflare/kumo';
+import { Badge, Button, Empty, LayerCard, Popover, Tabs, Toolbar } from '@cloudflare/kumo';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
 import DrawioFrame from '../components/drawio/DrawioFrame.jsx';
@@ -13,11 +13,14 @@ import { toast } from '../modules/toast.js';
 import {
   ChevronDown,
   ChevronUp,
+  Compass,
   Copy,
   Download,
+  Grid,
   Image,
   Plus,
   Save,
+  Settings,
   Upload,
 } from '../components/Icons.jsx';
 import { AlertTriangle } from '../components/IconsCore.jsx';
@@ -30,9 +33,9 @@ import {
 
 const API = '/api/drawio';
 const TABS = [
-  { value: 'editor', label: '主界面' },
-  { value: 'library', label: '图库' },
-  { value: 'settings', label: '设置' },
+  { value: 'editor', label: <span className="inline-flex items-center gap-1.5"><Compass className="h-3.5 w-3.5" />主界面</span> },
+  { value: 'library', label: <span className="inline-flex items-center gap-1.5"><Grid className="h-3.5 w-3.5" />图库</span> },
+  { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />设置</span> },
 ];
 
 async function apiFetch(path, options = {}) {
@@ -696,24 +699,24 @@ export default function DrawioPage() {
         新建
       </Button>
       <div className="flex items-center gap-1">
-        <Button
-          size="sm"
-          variant="secondary"
-          shape="square"
-          icon={<Download className={iconButtonIconClass} />}
-          aria-label="导入图表"
-          title="导入图表"
-          onClick={() => fileRef.current?.click()}
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          shape="square"
-          icon={<Upload className={iconButtonIconClass} />}
-          aria-label="导出图表"
-          title="导出图表"
-          onClick={() => exportDocument(settings?.default_export_format || 'drawio')}
-        />
+        <Toolbar size="sm" aria-label="导入导出图表" className="shrink-0">
+          <Toolbar.Button
+            aria-label="导入图表"
+            title="导入图表"
+            onClick={() => fileRef.current?.click()}
+            icon={<Download className="h-3.5 w-3.5" />}
+          >
+            <span className="hidden sm:inline">导入</span>
+          </Toolbar.Button>
+          <Toolbar.Button
+            aria-label="导出图表"
+            title="导出图表"
+            onClick={() => exportDocument(settings?.default_export_format || 'drawio')}
+            icon={<Upload className="h-3.5 w-3.5" />}
+          >
+            <span className="hidden sm:inline">导出</span>
+          </Toolbar.Button>
+        </Toolbar>
       </div>
       <Popover>
         <Popover.Trigger

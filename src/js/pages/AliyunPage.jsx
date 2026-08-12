@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Tabs } from '@cloudflare/kumo';
+import { Tabs, Toolbar } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import useTableResize from '../composables/useTableResize.js';
 import { dialog } from '../modules/dialog.js';
@@ -13,7 +13,7 @@ import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { AppTable, DataTableFrame, EmptyState, StatusBadge, PageStack, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
-import { Cloud, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash } from '../components/Icons.jsx';
+import { Cloud, Download, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash, Upload } from '../components/Icons.jsx';
 
 const emptyAccountForm = {
   name: '',
@@ -147,6 +147,56 @@ function AliyunPage() {
       toast.error('加载阿里云账号失败');
     }
   }, [getAuthHeaders, selectedAccountId]);
+
+  const accountImportInputRef = useRef(null);
+  const [accountImporting, setAccountImporting] = useState(false);
+
+  const exportAccounts = async () => {
+    if (accounts.length === 0) { toast.warning('暂无账号可导出'); return; }
+    try {
+      const response = await fetch('/api/aliyun/accounts/export', { headers: getAuthHeaders() });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导出账号失败');
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `aliyun-accounts-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`已导出 ${payload.accounts?.length || 0} 个账号（含 AccessKey Secret，请注意保管）`);
+    } catch (error) {
+      toast.error(error.message || '导出账号失败');
+    }
+  };
+
+  const importAccountsFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setAccountImporting(true);
+    try {
+      const data = JSON.parse(await file.text());
+      const list = Array.isArray(data) ? data : (data.accounts || []);
+      if (list.length === 0) throw new Error('文件中没有账号数据');
+      if (!(await dialog.confirm(`确认导入 ${list.length} 个账号？已存在相同 AccessKey ID 的账号会自动跳过。`))) return;
+      const response = await fetch('/api/aliyun/accounts/import', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accounts: list, overwrite: false }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success !== true) throw new Error(payload.error || '导入账号失败');
+      await loadAccounts();
+      toast.success(`导入完成：新增 ${payload.imported ?? 0} 个，跳过 ${payload.skipped ?? 0} 个`);
+    } catch (error) {
+      toast.error(error.message || '导入账号失败');
+    } finally {
+      setAccountImporting(false);
+    }
+  };
 
   const loadDnsData = useCallback(async (accountId) => {
     setLoadingData(true);
@@ -375,7 +425,27 @@ function AliyunPage() {
       title="阿里云账号"
       description="Secret 保存后不回显"
       icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
-      action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>}
+      action={(
+        <div className="flex shrink-0 items-center gap-2">
+          <Input
+            ref={accountImportInputRef}
+            type="file"
+            accept=".json,application/json"
+            aria-label="导入阿里云账号 JSON"
+            className="hidden"
+            onChange={importAccountsFromFile}
+          />
+          <Toolbar size="sm" aria-label="导出导入账号" className="shrink-0">
+            <Toolbar.Button onClick={exportAccounts} disabled={accounts.length === 0} aria-label="导出账号" title="导出账号（含 AccessKey Secret）" icon={<Upload className="h-3.5 w-3.5" />}>
+              <span className="hidden sm:inline">导出</span>
+            </Toolbar.Button>
+            <Toolbar.Button onClick={() => accountImportInputRef.current?.click()} disabled={accountImporting} aria-label="导入账号" title="导入账号" icon={<Download className="h-3.5 w-3.5" />}>
+              <span className="hidden sm:inline">导入</span>
+            </Toolbar.Button>
+          </Toolbar>
+          <Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>
+        </div>
+      )}
       bodyPadding="none"
     >
       <DataTableFrame variant="embedded" density="compact">

@@ -2,6 +2,9 @@
 @import 'tailwindcss';
 @import '@cloudflare/kumo/styles/tailwind';
 
+/* 手动切换主题时 dark: 变体跟随 html.dark class，而非系统 prefers-color-scheme */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @font-face {
   font-family: 'Chakra Petch API Monitor';
   src: url('/fonts/chakra-petch-api-monitor-600.woff2') format('woff2');
