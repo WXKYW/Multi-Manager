@@ -35,7 +35,12 @@ mod windows_impl {
     use win_native_media::encoder::EncodedSample;
     use win_native_media::{CaptureTarget, VideoConfig};
     use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
-    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::Foundation::{GlobalFree, POINT, RECT};
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+        IsClipboardFormatAvailable, OpenClipboard, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
     use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     use windows_sys::Win32::UI::Input::Pointer::{
@@ -51,11 +56,13 @@ mod windows_impl {
     use crate::OutboundQueues;
 
     const TARGET_FPS: u32 = 60;
-    const KEYFRAME_INTERVAL: u32 = 60;
+    const KEYFRAME_INTERVAL_SECONDS: u32 = 2;
     const ENCODED_QUEUE_DEPTH: usize = 1;
     const RTP_CLOCK_RATE: u128 = 90_000;
     const RTP_PACKET_MTU: usize = 1_200;
     const RTP_HEADER_SIZE: usize = 12;
+    // `CF_UNICODETEXT` is not exported by windows-sys; 13 is the stable format id.
+    const CF_UNICODETEXT: u32 = 13;
     const PEER_DISCONNECT_GRACE: Duration = Duration::from_secs(5);
     const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -364,6 +371,8 @@ mod windows_impl {
                     let frame_track = video_track.clone();
                     let frame_force_keyframe = force_keyframe.clone();
                     let frame_worker = worker.clone();
+                    let watcher_channel = channel.clone();
+                    let watcher_stop = stop.clone();
                     channel.on_open(Box::new(move || {
                         let stop = frame_stop.clone();
                         let started = frame_started.clone();
@@ -373,6 +382,7 @@ mod windows_impl {
                         let track = frame_track.clone();
                         let force_keyframe = frame_force_keyframe.clone();
                         let worker = frame_worker.clone();
+                        spawn_clipboard_watcher(watcher_channel.clone(), watcher_stop.clone());
                         Box::pin(async move {
                             emit_signal(&outbound, &session_id, None, Some("connected")).await;
                             if !started.swap(true, Ordering::SeqCst) {
@@ -651,6 +661,14 @@ mod windows_impl {
         ) -> Result<(), String>;
 
         fn force_keyframe(&self);
+
+        /// Switch the target bitrate without tearing the encoder session down.
+        /// The default implementation refuses so the capture loop can fall back
+        /// to a full re-init (cheap for the software MFT; NVENC overrides this
+        /// with a dynamic reconfigure to keep the stream uninterrupted).
+        fn set_bitrate(&mut self, _bitrate: u32) -> Result<(), String> {
+            Err("bitrate change requires encoder re-init".to_string())
+        }
     }
 
     /// Media Foundation H.264 encoder adapted to the [`DesktopEncoder`] trait.
@@ -871,6 +889,12 @@ mod windows_impl {
             // atomic flag is consumed by the next `encode`.
             NVENC_FORCE_IDR.store(true, Ordering::Release);
         }
+
+        fn set_bitrate(&mut self, bitrate: u32) -> Result<(), String> {
+            self.encoder
+                .reconfigure_bitrate(bitrate)
+                .map_err(|err| format!("NVENC reconfigure bitrate: {err:?}"))
+        }
     }
 
     fn capture_and_encode(
@@ -940,11 +964,9 @@ mod windows_impl {
             // content rather than the full desktop.
             let (encode_width, encode_height) = scaled_encode_size(frame.width, frame.height);
 
-            if encoder.is_none()
-                || encoded_size != (encode_width, encode_height)
-                || encoded_profile != desired_profile
-            {
-                let config = video_config(encode_width, encode_height, desired_profile);
+            // A builder shared by the size-change path and the software-MFT
+            // bitrate-change path below.
+            let build_encoder = |config: VideoConfig| -> Result<Box<dyn DesktopEncoder>, String> {
                 // Prefer NVENC (GPU, zero CPU encode cost, video-processor
                 // scaling), then fall back to the software Media Foundation MFT.
                 // NVENC loads nvEncodeAPI64.dll at runtime, so machines without
@@ -955,29 +977,51 @@ mod windows_impl {
                 // and ~50 MiB per session, crashing WGC after a few), which is
                 // why the hardware MFT was originally disabled. Software MFT is
                 // leak-free and still fine at the downscaled 1080p encode size.
-                let fresh: Box<dyn DesktopEncoder> =
-                    match NvencH264Encoder::new(session.device(), config, frame.width, frame.height)
-                    {
-                        Ok(nvenc) => Box::new(nvenc),
-                        Err(_) => {
-                            let mut mft = MfH264Encoder::new_with_input_size(
-                                session.device(),
-                                config,
-                                frame.width,
-                                frame.height,
-                            )
-                            .map_err(|err| {
-                                format!("create Media Foundation H.264 encoder: {err}")
-                            })?;
-                            // Idle desktops produce identical frames; skip
-                            // encoding them (heartbeat keyframe every so often)
-                            // to cut CPU and heap churn on the software path.
-                            mft.set_static_skip(true);
-                            Box::new(MftH264EncoderAdapter(mft))
-                        }
-                    };
-                encoder = Some(fresh);
+                match NvencH264Encoder::new(session.device(), config, frame.width, frame.height) {
+                    Ok(nvenc) => Ok(Box::new(nvenc)),
+                    Err(_) => {
+                        let mut mft = MfH264Encoder::new_with_input_size(
+                            session.device(),
+                            config,
+                            frame.width,
+                            frame.height,
+                        )
+                        .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?;
+                        // Idle desktops produce identical frames; skip
+                        // encoding them (heartbeat keyframe every so often)
+                        // to cut CPU and heap churn on the software path.
+                        mft.set_static_skip(true);
+                        Ok(Box::new(MftH264EncoderAdapter(mft)))
+                    }
+                }
+            };
+
+            if encoder.is_none() || encoded_size != (encode_width, encode_height) {
+                // Rebuild only when the *resolution* changes. Profile switches
+                // (fps/bitrate adaptation) must never tear the encoder down:
+                // a session re-init stalls the stream for hundreds of
+                // milliseconds, which is the exact jitter the low-latency path
+                // exists to avoid.
+                let config = video_config(encode_width, encode_height, desired_profile);
+                encoder = Some(build_encoder(config)?);
                 encoded_size = (encode_width, encode_height);
+                encoded_profile = desired_profile;
+            } else if encoded_profile != desired_profile {
+                // fps is handled purely by the capture-side frame sampling
+                // (`should_encode_next_frame`); only the bitrate needs the
+                // encoder. NVENC applies it dynamically; the software MFT
+                // has no reconfigure, so fall back to a cheap re-init.
+                let applied = desired_profile.bitrate == encoded_profile.bitrate
+                    || encoder
+                        .as_mut()
+                        .expect("encoder initialized")
+                        .set_bitrate(desired_profile.bitrate)
+                        .is_ok();
+                if !applied {
+                    let config = video_config(encode_width, encode_height, desired_profile);
+                    encoded_size = (encode_width, encode_height);
+                    encoder = Some(build_encoder(config)?);
+                }
                 encoded_profile = desired_profile;
             }
 
@@ -1052,7 +1096,10 @@ mod windows_impl {
             height,
             fps: profile.fps.clamp(30, TARGET_FPS),
             bitrate: profile.bitrate.clamp(3_000_000, native_bitrate),
-            keyframe_interval: profile.fps.clamp(30, KEYFRAME_INTERVAL),
+            // One IDR every couple of seconds keeps periodic keyframe bursts
+            // off the wire (PLI requests still force an immediate IDR), which
+            // stabilizes the frame cadence on constrained uplinks.
+            keyframe_interval: profile.fps.clamp(30, TARGET_FPS) * KEYFRAME_INTERVAL_SECONDS,
         }
     }
 
@@ -1136,6 +1183,15 @@ mod windows_impl {
                 *current = StreamProfile { fps, bitrate };
             }
             return true;
+        }
+        if value.get("type").and_then(Value::as_str) == Some("clipboard-set") {
+            let pushed = value
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty() && text.len() <= 1_048_576)
+                .map(write_clipboard_text)
+                .unwrap_or(false);
+            return pushed;
         }
         handle_input(value, enigo, geometry, touch_contact)
     }
@@ -1398,6 +1454,118 @@ mod windows_impl {
         }
     }
 
+    /// Read the current Windows clipboard as UTF-16 text. Returns `None` when
+    /// the clipboard is held by another process or holds no text.
+    fn read_clipboard_text() -> Option<String> {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return None;
+            }
+            let result = (|| {
+                if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+                    return None;
+                }
+                let handle = GetClipboardData(CF_UNICODETEXT);
+                if handle.is_null() {
+                    return None;
+                }
+                let ptr = GlobalLock(handle);
+                if ptr.is_null() {
+                    return None;
+                }
+                let size = GlobalSize(handle);
+                let text = if size >= 2 {
+                    let units = size / 2;
+                    let slice = std::slice::from_raw_parts(ptr as *const u16, units);
+                    let len = slice.iter().position(|&unit| unit == 0).unwrap_or(units);
+                    Some(String::from_utf16_lossy(&slice[..len]))
+                } else {
+                    None
+                };
+                GlobalUnlock(handle);
+                text
+            })();
+            CloseClipboard();
+            result
+        }
+    }
+
+    /// Replace the Windows clipboard with the given text. Returns `false`
+    /// when another process holds the clipboard.
+    fn write_clipboard_text(text: &str) -> bool {
+        unsafe {
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return false;
+            }
+            let result = (|| {
+                if EmptyClipboard() == 0 {
+                    return false;
+                }
+                let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+                let handle = GlobalAlloc(GMEM_MOVEABLE, utf16.len() * 2);
+                if handle.is_null() {
+                    return false;
+                }
+                let ptr = GlobalLock(handle);
+                if ptr.is_null() {
+                    GlobalFree(handle);
+                    return false;
+                }
+                std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr as *mut u16, utf16.len());
+                GlobalUnlock(handle);
+                // `SetClipboardData` takes ownership of the handle on success.
+                if SetClipboardData(CF_UNICODETEXT, handle).is_null() {
+                    GlobalFree(handle);
+                    return false;
+                }
+                true
+            })();
+            CloseClipboard();
+            result
+        }
+    }
+
+    /// Watch the clipboard sequence counter and push text changes to the peer
+    /// over the control channel. Runs until `stop` is set; the loop suppresses
+    /// echoes of text this side just wrote (`last_sent` dedup).
+    fn spawn_clipboard_watcher(channel: Arc<RTCDataChannel>, stop: Arc<AtomicBool>) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(500));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut last_sequence = unsafe { GetClipboardSequenceNumber() };
+            let mut last_sent: Option<String> = None;
+            loop {
+                interval.tick().await;
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let sequence = unsafe { GetClipboardSequenceNumber() };
+                if sequence == last_sequence {
+                    continue;
+                }
+                last_sequence = sequence;
+                let read = tokio::task::spawn_blocking(read_clipboard_text)
+                    .await
+                    .unwrap_or(None);
+                let Some(text) = read else { continue };
+                if text.is_empty() || last_sent.as_deref() == Some(text.as_str()) {
+                    continue;
+                }
+                last_sent = Some(text.clone());
+                // A closed data channel makes the send fail; treat that as the
+                // session ending and stop watching (the peer teardown also
+                // sets `stop`).
+                if channel
+                    .send_text(json!({"type": "clipboard", "text": text}).to_string())
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
+
     fn release_active_touch(
         active_contact: &Arc<Mutex<Option<ActiveTouchContact>>>,
         enigo: &Arc<Mutex<Option<Enigo>>>,
@@ -1502,7 +1670,8 @@ mod windows_impl {
             );
             assert_eq!(config.fps, 30);
             assert_eq!(config.bitrate, 28_000_000);
-            assert_eq!(config.keyframe_interval, 30);
+            // One IDR every two seconds at the clamped 30 fps floor: 60 frames.
+            assert_eq!(config.keyframe_interval, 60);
         }
 
         #[test]

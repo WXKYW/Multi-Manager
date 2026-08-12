@@ -189,9 +189,17 @@ impl Session<NeedsInit> {
             rsvd2: unsafe { std::mem::zeroed() },
         };
 
+        // Snapshot the init params for the reconfigure API. The pointer fields
+        // inside the snapshot are re-pointed at owned copies by `Encoder`, so
+        // the caller's `NVencPresetConfig` may be dropped once `init_encoder`
+        // returns without leaving dangling references behind.
+        let init_snapshot = unsafe { std::ptr::read(&raw_init_params) };
+        let init_config = unsafe { std::ptr::read(raw_init_params.encode_config) };
         self.encoder.init_encoder(raw_init_params)?;
         Ok(Encoder {
             encoder: self.encoder,
+            init_snapshot,
+            init_config: Box::new(init_config),
             marker: PhantomData,
         })
     }

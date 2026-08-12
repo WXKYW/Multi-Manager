@@ -9,7 +9,7 @@ use crate::{
             Guid, NVencCapsParam, NVencCreateBitstreamBuffer, NVencCreateInputBuffer,
             NVencInitializeParams, NVencLockBitStream, NVencLockInputBuffer, NVencMapInputResource,
             NVencOpenEncodeSessionExParams, NVencPicParams, NVencPresetConfig,
-            NVencRegisterResource,
+            NVencReconfigureParams, NVencRegisterResource,
         },
     },
 };
@@ -52,7 +52,7 @@ pub struct NVencFunctionList {
     pub nvenc_open_encode_session_ex: NvencOpenEncodeSessionEx,
     pub nvenc_register_resource: NvencRegisterResource,
     pub nvenc_unregister_resource: NvencUnRegisterResource,
-    nvenc_reconfigure_encoder: NvencReconfigureEncoder,
+    pub nvenc_reconfigure_encoder: NvencReconfigureEncoder,
     rsvd1: *mut c_void,
     nvenc_create_mv_buffer: NvencCreateMVBuffer,
     nvenc_destory_mv_buffer: NvencDestoryMVBuffer,
@@ -202,7 +202,12 @@ type NvencRegisterResource = stdcall!(
 );
 type NvencUnRegisterResource =
     stdcall!(fn(encoder: *mut c_void, registered_res: *mut c_void) -> NVencResult);
-type NvencReconfigureEncoder = stdcall!(fn(encoder: *mut c_void) -> NVencResult);
+type NvencReconfigureEncoder = stdcall!(
+    fn(
+        encoder: *mut c_void,
+        reconfigure_params: *mut NVencReconfigureParams,
+    ) -> NVencResult
+);
 
 type NvencCreateMVBuffer = stdcall!(fn(encoder: *mut c_void) -> NVencResult);
 type NvencDestoryMVBuffer = stdcall!(fn(encoder: *mut c_void) -> NVencResult);

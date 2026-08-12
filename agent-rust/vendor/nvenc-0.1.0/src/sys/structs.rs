@@ -193,7 +193,7 @@ pub struct NVencRcParams {
     pub rate_control_mode: NVencParamsRcMode,
     const_qp: NVencQP,
     pub average_bit_rate: u32,
-    max_bit_rate: u32,
+    pub max_bit_rate: u32,
     vbv_buffer_size: u32,
     vbv_initial_delay: u32,
     // TODO: bit fields
@@ -550,11 +550,11 @@ pub const NV_ENC_INITIALIZE_PARAMS_VER: u32 = struct_version(7) | (1 << 31);
 
 #[repr(C)]
 pub struct NVencReconfigureParams {
-    version: u32,
-    rsvd: u32,
-    re_init_encode_params: NVencInitializeParams,
-    bitflags: u32,
-    rsvd2: u32,
+    pub version: u32,
+    pub rsvd: u32,
+    pub re_init_encode_params: NVencInitializeParams,
+    pub bitflags: u32,
+    pub rsvd2: u32,
 }
 
 pub const NV_ENC_RECONFIGURE_PARAMS_VER: u32 = struct_version(2) | (1 << 31);

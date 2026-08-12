@@ -24,13 +24,23 @@ use crate::sys::{
     structs::{
         NV_ENC_CONFIG_VER, NV_ENC_CREATE_BITSTREAM_BUFFER_VER, NV_ENC_LOCK_BITSTREAM_VER,
         NV_ENC_MAP_INPUT_RESOURCE_VER, NV_ENC_PIC_PARAMS_VER, NV_ENC_PRESET_CONFIG_VER,
-        NV_ENC_REGISTER_RESOURCE_VER, NVencCreateBitstreamBuffer, NVencInitializeParams,
-        NVencLockBitStream, NVencPicParams, NVencPresetConfig,
+        NV_ENC_RECONFIGURE_PARAMS_VER, NV_ENC_REGISTER_RESOURCE_VER, NVencCreateBitstreamBuffer,
+        NVencInitializeParams, NVencLockBitStream, NVencPicParams, NVencPresetConfig,
+        NVencReconfigureParams,
     },
 };
+use crate::sys::structs::NVencConfig;
 
 pub struct Encoder {
     pub(crate) encoder: Arc<EncoderInternal>,
+    /// Snapshot of the initialization parameters so `reconfigure_bitrate` can
+    /// build a valid `NV_ENC_RECONFIGURE_PARAMS` without re-negotiating the
+    /// session (resolution/profile/GOP stay pinned to the original values).
+    pub(crate) init_snapshot: NVencInitializeParams,
+    /// Owned copy of the encode config referenced by `init_snapshot`. The
+    /// caller may drop its own `NVencConfig` right after `init_encoder`, so
+    /// reconfigure must not dereference the pointer inside the snapshot.
+    pub(crate) init_config: Box<NVencConfig>,
     pub(crate) marker: PhantomData<*mut ()>,
 }
 
@@ -136,6 +146,39 @@ impl Encoder {
     /// Ends the encoder session
     pub fn end_encode(&self) -> Result<(), NVencError> {
         self.encoder.end_encode()
+    }
+
+    /// Dynamically adjusts the average bitrate of a running encoder session
+    /// without tearing it down. NVENC applies the new rate control target on
+    /// the next encoded frames, which avoids the stall of a full re-init when
+    /// the stream profile adapts to network conditions.
+    pub fn reconfigure_bitrate(&self, average_bitrate: u32) -> Result<(), NVencError> {
+        // Copy the owned config out of the box; the caller's original struct
+        // may already be dropped and the snapshot pointer into it is not
+        // dereferenced here.
+        let mut config = unsafe { std::ptr::read(&*self.init_config) };
+        config.rc_params.average_bit_rate = average_bitrate;
+        let mut re_init = unsafe { std::ptr::read(&self.init_snapshot) };
+        re_init.encode_config = &raw mut config;
+        let mut params = NVencReconfigureParams {
+            version: NV_ENC_RECONFIGURE_PARAMS_VER,
+            rsvd: 0,
+            re_init_encode_params: re_init,
+            bitflags: 0,
+            rsvd2: 0,
+        };
+        // SAFETY: `params` is fully initialized and `config` stays alive for
+        // the duration of the call; the function pointer is loaded from the
+        // driver's NVENC function table and the SDK copies the config during
+        // the call (it does not retain the pointer afterwards).
+        unsafe {
+            (self.encoder.function_list.nvenc_reconfigure_encoder)(
+                self.encoder.encoder.as_ptr(),
+                &raw mut params,
+            )
+        }
+        .into_error()?;
+        Ok(())
     }
 
     /// Creates a bitstream bfufer that can be used for output storage
