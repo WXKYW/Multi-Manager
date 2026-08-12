@@ -1451,6 +1451,25 @@ fn normalized_agent_arch() -> String {
     }
 }
 
+// upgrade_result_file_path 后台自更新脚本写入结果文件的固定路径。
+fn upgrade_result_file_path() -> PathBuf {
+    if cfg!(target_os = "windows") {
+        std::env::temp_dir().join("api-monitor-agent-upgrade-result.json")
+    } else {
+        PathBuf::from("/tmp/api-monitor-agent-upgrade-result.json")
+    }
+}
+
+// take_upgrade_status_file 读取自更新结果文件（脚本下载/替换成功或失败后写入），
+// 读后删除，返回 {state, version|error} 供主循环上报面板。
+fn take_upgrade_status_file() -> Option<serde_json::Value> {
+    let path = upgrade_result_file_path();
+    let raw = fs::read_to_string(&path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let _ = fs::remove_file(&path);
+    Some(value)
+}
+
 fn schedule_self_update(download_url: &str) -> Result<(), String> {
     let exe_path =
         std::env::current_exe().map_err(|e| format!("获取当前 Agent 路径失败: {}", e))?;
