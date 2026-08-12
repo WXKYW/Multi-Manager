@@ -79,15 +79,32 @@ jobs:
       - name: Three-side governance check
         run: npm run governance:check
 
+      - name: Install drawio assets
+        run: npm run drawio:install
+
+      - name: Resolve frontend version
+        id: fe-version
+        run: echo "version=dev-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
       - name: Build Frontend Validation
         run: npm run build
         env:
           VITE_USE_CDN: false
+          VITE_APP_VERSION: ${{ steps.fe-version.outputs.version }}
 
       - name: Check build output
         run: |
           ls -la dist/
           test -f dist/index.html
+          test -d dist/vendor/drawio
+
+      # 供 build-docker 复用，避免两个平台各自重跑 npm ci / drawio / vite build
+      - name: Upload frontend dist artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-dist
+          path: dist/
+          retention-days: 1
 
   # ==========================================
   # 阶段 1.5: Go 后端 CI 校验
@@ -224,7 +241,7 @@ jobs:
     # Dockerfile builds the frontend and Go backend inside the image. The only
     # upstream artifacts needed here are the prebuilt Agent binaries, so start
     # image builds as soon as Agent builds complete and keep CI as a publish gate.
-    needs: build-agent
+    needs: [build-agent, ci-frontend]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -252,6 +269,19 @@ jobs:
 
       - name: List downloaded agents
         run: ls -lh agent-rust/
+
+      # 复用 ci-frontend 构建的 dist（平台无关），跳过 Docker 内 npm ci / drawio / build
+      - name: Download prebuilt frontend dist
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frontend-dist
+          path: frontend-dist
+
+      - name: Verify prebuilt frontend dist
+        run: |
+          ls -lh frontend-dist/ | head -20
+          test -f frontend-dist/index.html
+          test -d frontend-dist/vendor/drawio
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -304,6 +334,7 @@ jobs:
           build-args: |
             NODE_ENV=production
             USE_PREBUILT_AGENT=true
+            USE_PREBUILT_FRONTEND=true
             APP_VERSION=${{ steps.app-version.outputs.version }}
 
       - name: Export digest

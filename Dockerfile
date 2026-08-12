@@ -5,13 +5,16 @@
 
 # 阶段 1: 构建前端 (Frontend Builder) - 始终在构建主机平台运行
 FROM --platform=$BUILDPLATFORM node:20-slim AS frontend-builder
-ARG APP_VERSION=dev-local
+# CI 中复用 ci-frontend 构建好的 dist，跳过依赖安装与构建（本地构建保持原流程）
+ARG USE_PREBUILT_FRONTEND=false
 # 安装构建工具
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+RUN if [ "$USE_PREBUILT_FRONTEND" != "true" ]; then \
+        apt-get update && apt-get install -y --no-install-recommends \
+            python3 \
+            make \
+            g++ \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 WORKDIR /app
 
@@ -24,18 +27,28 @@ RUN npm config set registry https://registry.npmjs.org
 # 2. 直接安装所有依赖 (确保 vite 可用)
 # 注意：不使用 --only=production，确保安装 devDependencies
 # 添加 --ignore-scripts 以绕过部分依赖包内置的 pnpm 强制检查 (如 only-allow)
-RUN npm ci --legacy-peer-deps --ignore-scripts
+RUN if [ "$USE_PREBUILT_FRONTEND" != "true" ]; then \
+        npm ci --legacy-peer-deps --ignore-scripts; \
+    fi
 
-# 3. 复制源码
+# 3. 复制源码（含 CI 下载的 frontend-dist 目录）
 COPY . .
 
-# 4. 执行构建
+# 4. 执行构建或复用现成 dist
 # 显式设置 PATH (虽然 npm run 通常不需要，但以防万一)
 # 禁用 CDN 模式，所有依赖打包到本地
+# 注意：APP_VERSION 声明必须紧贴此处——若放在阶段开头，每次构建值变化
+# 会导致本阶段所有层（apt-get/npm ci 等）的缓存键失效，前端链 100% miss
+ARG APP_VERSION=dev-local
 ENV PATH=/app/node_modules/.bin:$PATH \
     VITE_USE_CDN=false \
     VITE_APP_VERSION=${APP_VERSION}
-RUN npm run drawio:install && npm run build
+RUN if [ "$USE_PREBUILT_FRONTEND" = "true" ]; then \
+        mkdir -p /app/dist && cp -r /app/frontend-dist/. /app/dist/; \
+    else \
+        npm run drawio:install && npm run build; \
+    fi && \
+    test -f /app/dist/index.html && test -d /app/dist/assets
 
 # 阶段 2: 构建 Go 后端 (Go Backend Builder)
 FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine3.24 AS go-builder
