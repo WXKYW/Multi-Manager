@@ -862,7 +862,7 @@ function DashboardPage({ onNavigate } = {}) {
       },
       {
         key: 'traffic',
-        name: '订阅分发流量',
+        name: '订阅流量',
         unit: '',
         color: ChartPalette.categorical(2, isDarkMode),
         pick: (point) => Number(point.traffic) || 0,
@@ -935,7 +935,7 @@ function DashboardPage({ onNavigate } = {}) {
     return {
       aria: {
         enabled: true,
-        label: { description: '最近 7 天系统 API 调用 / 词元 / 订阅分发流量趋势' },
+        label: { description: '最近 7 天系统 API 调用 / 词元 / 订阅流量趋势' },
       },
       backgroundColor: 'transparent',
       grid: { left: 8, right: 16, top: 28, bottom: 4, containLabel: true },
@@ -967,7 +967,7 @@ function DashboardPage({ onNavigate } = {}) {
     : '暂无系统 API 调用记录';
   const hasApiTrendCalls = apiTrendSeries.some((series) => series.data.length >= 2 && series.total > 0);
   const apiTrendStatusText = apiTrendTotal > 0
-    ? '最近 7 天系统 API 调用 / 词元 / 订阅分发流量趋势'
+    ? '最近 7 天系统 API 调用 / 词元 / 订阅流量趋势'
     : '最近 7 天暂无系统 API 调用记录';
 
   const hostCpuUsage = clampPercent(stats.host?.cpu?.usage);
