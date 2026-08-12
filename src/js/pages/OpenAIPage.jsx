@@ -677,9 +677,11 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
     [ordered, hiddenSeries]
   );
 
+  // 图表实例只在挂载时初始化一次；labels/系列的更新全部走 setOption，
+  // 否则 15 秒自动刷新带来的新数组引用会触发 dispose+重建，造成闪烁与交互状态丢失。
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || !labels || labels.length === 0) return;
+    if (!el) return;
     const chart = echarts.init(el);
     chartRef.current = chart;
     const observer = new ResizeObserver(() => chart.resize());
@@ -689,7 +691,7 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
       chart.dispose();
       chartRef.current = null;
     };
-  }, [labels]);
+  }, []);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -732,7 +734,9 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
           areaStyle: { opacity: 0 },
         })),
       },
-      { notMerge: false }
+      // replaceMerge：隐藏/恢复系列时按 name 精确替换，避免默认 merge 模式下
+      //「新 series 数组变短 → 按 index 合并」导致被隐藏的旧系列残留、颜色错位。
+      { replaceMerge: ['series'] }
     );
   }, [labels, visibleSeries, isDarkMode]);
 
