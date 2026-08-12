@@ -221,6 +221,7 @@ export function getModuleIcon(moduleId) {
 
 const THEME_STORAGE_KEY = 'app_theme_mode';
 const LEGACY_THEME_STORAGE_KEY = 'app_theme';
+const UI_FONT_STORAGE_KEY = 'app_ui_font';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed';
 const DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY = 'app_dashboard_footer_visible';
 const DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY = 'app_dashboard_footer_record_number';
@@ -728,6 +729,11 @@ const useStore = create((set, get) => ({
     if (persist && get().isAuthenticated) {
       scheduleAppearanceSettingsSave({ uiFont: normalized });
     }
+    try {
+      localStorage.setItem(UI_FONT_STORAGE_KEY, normalized);
+    } catch (error) {
+      console.error('Failed to persist ui font:', error);
+    }
     set({ uiFont: normalized });
   },
 
@@ -753,6 +759,7 @@ const useStore = create((set, get) => ({
     try {
       localStorage.setItem(THEME_STORAGE_KEY, normalized.themeMode);
       localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+      localStorage.setItem(UI_FONT_STORAGE_KEY, normalized.uiFont);
       localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(normalized.sidebarCollapsed));
       localStorage.setItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY, String(normalized.dashboardFooterVisible));
       localStorage.setItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY, normalized.dashboardFooterRecordNumber);

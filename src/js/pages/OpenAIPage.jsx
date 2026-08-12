@@ -611,7 +611,6 @@ function TrendBarChart({
     const axisColor = kumoHex('--color-kumo-contrast');
     const gridColor = kumoHex('--color-kumo-line');
     chart.setOption({
-      animation: false,
       grid: { left: 8, right: 12, top: 10, bottom: 0, containLabel: true },
       tooltip: {
         trigger: 'axis',
@@ -708,7 +707,6 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
     const gridColor = kumoHex('--color-kumo-line');
     chart.setOption(
       {
-        animation: false,
         grid: { left: 8, right: 12, top: 8, bottom: 0, containLabel: true },
         tooltip: {
           trigger: 'axis',

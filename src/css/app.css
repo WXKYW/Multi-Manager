@@ -64,6 +64,15 @@ body {
   touch-action: manipulation;
 }
 
+/* 全站统一主字体：预置等宽元素（pre/code/kbd/samp）跟随 --font-sans，
+   仅品牌 logo 使用独立字体；显式等宽栈全部收敛到 var(--font-sans)。 */
+pre,
+code,
+kbd,
+samp {
+  font-family: var(--font-sans);
+}
+
 :root[data-mode='dark'] body {
   background: var(--app-main-bg);
 }
@@ -1646,7 +1655,7 @@ th > button[aria-label='Resize column'] > span {
 .app-code-editor-status {
   justify-content: flex-end;
   border-top: 1px solid var(--color-kumo-fill);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-sans);
 }
 
 .app-markdown-editor {
@@ -1716,7 +1725,7 @@ th > button[aria-label='Resize column'] > span {
   --crepe-color-inline-area: var(--color-kumo-recessed);
   --crepe-font-title: ui-sans-serif, system-ui, sans-serif;
   --crepe-font-default: ui-sans-serif, system-ui, sans-serif;
-  --crepe-font-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --crepe-font-code: var(--font-sans);
   min-height: 100%;
   flex: 1;
   background: var(--color-kumo-base);
@@ -1785,7 +1794,7 @@ th > button[aria-label='Resize column'] > span {
 .app-markdown-visual-editor .ProseMirror code {
   border-radius: 4px;
   background: var(--color-kumo-recessed);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-sans);
 }
 
 .app-markdown-visual-editor .ProseMirror pre { overflow: auto; padding: 12px 14px; }
@@ -1893,7 +1902,7 @@ th > button[aria-label='Resize column'] > span {
   border-radius: 4px;
   background: var(--color-kumo-recessed);
   padding: 0.12em 0.35em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-sans);
   font-size: 0.9em;
 }
 
@@ -1904,7 +1913,7 @@ th > button[aria-label='Resize column'] > span {
   border-radius: 6px;
   background: color-mix(in oklab, var(--color-kumo-recessed) 78%, var(--color-kumo-base));
   padding: 0.08em 0.45em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-sans);
   font-size: 0.92em;
   line-height: 1.45;
   color: var(--text-color-kumo-strong);
