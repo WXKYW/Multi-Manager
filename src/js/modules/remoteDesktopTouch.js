@@ -96,19 +96,21 @@ export function nextRemoteDesktopProfile({
 }) {
   if (loss > 5 || rtt > 140 || bufferMs > 100 || droppedFps > 4) {
     return {
-      profile: { fps: 30, bitrate: Math.min(4_000_000, nativeBitrate) },
+      profile: { fps: 30, bitrate: Math.min(6_000_000, nativeBitrate) },
       healthyIntervals: 0,
     };
   }
   if (loss > 2 || rtt > 80 || bufferMs > 40 || droppedFps > 1) {
     return {
-      profile: { fps: 30, bitrate: Math.min(6_000_000, nativeBitrate) },
+      profile: { fps: 30, bitrate: Math.min(8_000_000, nativeBitrate) },
       healthyIntervals: 0,
     };
   }
   const nextHealthy = healthyIntervals + 1;
   return {
-    profile: nextHealthy >= 4 ? initialRemoteDesktopProfile(coarsePointer) : current,
+    // Three healthy 2s intervals (6s) before restoring the full profile, so
+    // recovery from a degraded link is quick without oscillating.
+    profile: nextHealthy >= 3 ? initialRemoteDesktopProfile(coarsePointer) : current,
     healthyIntervals: nextHealthy,
   };
 }

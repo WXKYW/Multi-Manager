@@ -41,7 +41,9 @@ async function apiRequest(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.success === false) {
-    throw new Error(payload.error || `请求失败 (${response.status})`);
+    const error = new Error(payload.error || `请求失败 (${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return payload.data ?? payload;
 }
@@ -92,6 +94,9 @@ export default function RemoteDesktopPage() {
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const [controlEnabled, setControlEnabled] = useState(true);
   const [touchInputMode, setTouchInputMode] = useState('trackpad');
+  const [clipboardSync, setClipboardSync] = useState(true);
+  const clipboardSyncRef = useRef(true);
+  clipboardSyncRef.current = clipboardSync;
   const [controlAcknowledged, setControlAcknowledged] = useState(false);
   const [stats, setStats] = useState({
     rtt: 0,
@@ -140,6 +145,9 @@ export default function RemoteDesktopPage() {
   const viewTransformRef = useRef(viewTransform);
   const remoteInputRef = useRef(null);
   const remoteInputValueRef = useRef('');
+  const lastSentClipboardRef = useRef('');
+  const lastReceivedClipboardRef = useRef('');
+  const skipAutoReconnectRef = useRef(false);
 
   const sendControl = useCallback((payload, { reliable = false } = {}) => {
     const highFrequency = payload.type === 'pointer'
@@ -280,22 +288,24 @@ export default function RemoteDesktopPage() {
 
   // Retry a failed P2P attempt after a short backoff. Under a global proxy /
   // TUN the first hole-punch often fails while later attempts (after ICE has
-  // gathered more candidates) succeed. Stop after a few tries to avoid a loop.
+  // gathered more candidates) succeed. Keep retrying (with capped attempts)
+  // so transient link changes do not dead-end the session.
   const scheduleAutoReconnect = useCallback(() => {
     if (stoppedRef.current) return;
-    if (autoReconnectRef.current >= 3) return;
+    if (autoReconnectRef.current >= 8) return;
     autoReconnectRef.current += 1;
     const attempt = autoReconnectRef.current;
     window.setTimeout(() => {
       if (stoppedRef.current || attempt !== autoReconnectRef.current) return;
       connect();
-    }, 800 * attempt);
+    }, 500 * attempt);
   }, [connect]);
 
   const connect = useCallback(async () => {
     await closeSession();
     const generation = connectionGenerationRef.current;
     stoppedRef.current = false;
+    skipAutoReconnectRef.current = false;
     setState('initializing');
     setError('');
     setControlAcknowledged(false);
@@ -356,6 +366,16 @@ export default function RemoteDesktopPage() {
           try {
             const meta = JSON.parse(event.data);
             if (meta.type === 'input-ack') setControlAcknowledged(true);
+            if (meta.type === 'clipboard') {
+              const text = String(meta.text || '');
+              lastReceivedClipboardRef.current = text;
+              lastSentClipboardRef.current = text;
+              // 自动同步关闭时不覆盖本地剪贴板（保护本地图片/富文本内容）；
+              // 「剪贴板」按钮的本地->远程方向始终可用。
+              if (clipboardSyncRef.current) {
+                navigator.clipboard?.writeText?.(text).catch(() => {});
+              }
+            }
             if (meta.type === 'pointer-position' && Number(meta.sequence || 0) >= lastPointerAckRef.current) {
               lastPointerAckRef.current = Number(meta.sequence || 0);
               const position = {
@@ -393,6 +413,11 @@ export default function RemoteDesktopPage() {
       if (generation === connectionGenerationRef.current) {
         setState('error');
         setError(err.message || '远程桌面初始化失败');
+        // 4xx 表示请求本身被拒绝（Agent 离线 / 不支持等），重试不会改变
+        // 结果；网络类错误仍在可恢复范围内，保留自动重连。
+        if (err.status === 400 || err.status === 409) {
+          skipAutoReconnectRef.current = true;
+        }
       }
     }
   }, [bindChannel, closeSession, pollSignals, postSignal, serverId]);
@@ -620,6 +645,66 @@ export default function RemoteDesktopPage() {
   const sendTrackpadButton = (action, button = 0) => (
     sendControl(trackpadButtonMessage(action, button), { reliable: true })
   );
+
+  // M4: 任何失败终态（Agent 端显式报错、通道关闭、ICE 失败）都会通过 state
+  // 变化触发自动重连；成功路径不会反复触发，手动关闭由 stoppedRef 阻断。
+  // 每次 connect() 重置 autoReconnectRef，所以多数失败都能按退避序列收敛。
+  // 确定性请求错误（Agent 离线 / 能力不足等 4xx）由 skipAutoReconnectRef
+  // 标记后跳过重试，避免对必然失败的请求做无意义洪泛。
+  useEffect(() => {
+    if ((state === 'closed' || state === 'error' || state === 'failed') && !skipAutoReconnectRef.current) {
+      scheduleAutoReconnect();
+    }
+  }, [state, scheduleAutoReconnect]);
+
+  const sendLocalClipboard = async () => {
+    if (!navigator.clipboard?.readText) {
+      setError('浏览器无法读取剪贴板（需要 HTTPS 或 localhost）');
+      return;
+    }
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        setError('本地剪贴板为空');
+        return;
+      }
+      const sent = sendControl({ type: 'clipboard-set', text }, { reliable: true });
+      if (!sent) {
+        setError('控制通道未建立，剪贴板未发送');
+        return;
+      }
+      lastSentClipboardRef.current = text;
+      setError('');
+    } catch {
+      setError('读取本地剪贴板失败');
+    }
+  };
+
+  // S1: 本地复制/剪切后自动把剪贴板文本推到远程（DataChannel 直连，不过服务器）。
+  useEffect(() => {
+    if (!navigator.clipboard?.readText || !clipboardSync) return undefined;
+    const syncLocalCopy = () => {
+      window.setTimeout(async () => {
+        if (stoppedRef.current) return;
+        try {
+          const text = await navigator.clipboard.readText();
+          if (!text
+            || text === lastSentClipboardRef.current
+            || text === lastReceivedClipboardRef.current) return;
+          const sent = sendControl({ type: 'clipboard-set', text }, { reliable: true });
+          if (sent) lastSentClipboardRef.current = text;
+        } catch {
+          // 剪贴板权限被拒时静默（按钮路径会给出明确报错）。
+        }
+      }, 0);
+    };
+    document.addEventListener('copy', syncLocalCopy);
+    document.addEventListener('cut', syncLocalCopy);
+    return () => {
+      document.removeEventListener('copy', syncLocalCopy);
+      document.removeEventListener('cut', syncLocalCopy);
+    };
+  }, [clipboardSync, sendControl]);
 
   const sendTouchContact = (position, action) => {
     if (!position) return false;
@@ -968,6 +1053,14 @@ export default function RemoteDesktopPage() {
             {controlEnabled ? (controlAcknowledged ? '控制通道正常' : '控制已开启') : '仅观看'}
           </Button>
           <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
+          <Button size="sm" variant="secondary" onClick={sendLocalClipboard}>剪贴板</Button>
+          <Button
+            size="sm"
+            variant={clipboardSync ? 'primary' : 'secondary'}
+            onClick={() => setClipboardSync(value => !value)}
+          >
+            {clipboardSync ? '自动' : '手动'}
+          </Button>
           <Button
             size="sm"
             variant="secondary"
@@ -1062,6 +1155,14 @@ export default function RemoteDesktopPage() {
                   {controlEnabled ? '控制开启' : '仅观看'}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
+                <Button size="sm" variant="secondary" onClick={sendLocalClipboard}>剪贴板</Button>
+                <Button
+                  size="sm"
+                  variant={clipboardSync ? 'primary' : 'secondary'}
+                  onClick={() => setClipboardSync(value => !value)}
+                >
+                  {clipboardSync ? '自动' : '手动'}
+                </Button>
                 <Button size="sm" variant="secondary" onClick={() => setTouchInputMode(mode => mode === 'trackpad' ? 'direct' : 'trackpad')}>
                   {touchInputMode === 'trackpad' ? '触控板' : '直接触摸'}
                 </Button>
