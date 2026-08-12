@@ -1,6 +1,6 @@
 {
   "name": "api-monitor",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Multi-api monitoring dashboard",
   "scripts": {
     "dev": "concurrently \"npm run backend-go:dev\" \"vite\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
