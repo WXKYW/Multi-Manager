@@ -375,6 +375,17 @@ func New(cfg config.Config) *Service {
 						}()
 					}
 				}
+			case "agent:upgrade_status":
+				// Agent 自更新结果上报（后台 updater 下载/替换成功或失败）。
+				// 写入连接元数据，供批量升级等流程中的重连检测提前判定成败，
+				// 避免 Agent 下载失败时只能干等验证超时。
+				var upgradeStatus map[string]interface{}
+				if err := json.Unmarshal(data, &upgradeStatus); err == nil {
+					if conn, exists := registry.Get(serverID); exists {
+						conn.SetMetadata("upgrade_status", upgradeStatus)
+					}
+					applog.Info(context.Background(), "serveragent", "agent self-upgrade status report", "server_id", serverID, "status", string(data))
+				}
 			case "agent:task_result":
 				// Agent 任务结果上报
 				var result struct {

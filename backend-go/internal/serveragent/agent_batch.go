@@ -103,10 +103,10 @@ func NewAgentBatchManager() *AgentBatchManager {
 
 func (m *AgentBatchManager) Create(kind AgentBatchKind, protocol string, forceSSH bool, fallbackSSH bool, concurrency int, servers []serverIdentity) *AgentBatch {
 	if concurrency <= 0 {
-		concurrency = 4
+		concurrency = 16
 	}
-	if concurrency > 10 {
-		concurrency = 10
+	if concurrency > 16 {
+		concurrency = 16
 	}
 	if protocol != "http" && protocol != "https" {
 		protocol = "https"
@@ -250,7 +250,7 @@ func (s *Service) handleAgentBatchStart(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	proto, host := resolveInstallOriginWithBaseURL(r, req.BaseURL)
+	proto, host := s.resolveInstallOrigin(r.Context(), db, r, req.BaseURL)
 	servers, err := loadServerIdentities(r.Context(), db, req.ServerIDs)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -370,6 +370,7 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 
 	if agentOnline && !forceSSH {
 		item.appendLog("Agent 在线，发送自升级任务")
+		oldVersion := fmt.Sprint(conn.GetMetadata()["version"])
 		downloadURL := s.agentUpgradeDownloadURL(context.Background(), db, conn, origin)
 		task := s.taskRegistry.Create(item.ServerID, "agent_upgrade", downloadURL)
 		if !s.sendUpgradeTaskWithID(conn, downloadURL, task.ID) {
@@ -390,7 +391,7 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 		default:
 			item.appendLog("未收到自升级调度结果，继续等待 Agent 重连")
 		}
-		if selfUpdateFailure == "" && s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout) {
+		if selfUpdateFailure == "" && s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout, oldVersion) {
 			item.succeed("Agent 已重新上线")
 			return
 		}
@@ -451,7 +452,7 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 
 	item.setStatus(AgentBatchVerifying, "")
 	item.appendLog("安装脚本执行成功，等待 Agent 连接")
-	if s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout) {
+	if s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout, "") {
 		item.succeed("Agent 已上线")
 		return
 	}
@@ -498,16 +499,51 @@ func (s *Service) renderAgentInstallScript(ctx context.Context, db *sql.DB, serv
 }
 
 func (s *Service) waitForAgentReconnect(serverID string, afterConnectedAtMs int64, timeout time.Duration) bool {
-	return s.waitForAgentReconnectWithLog(nil, serverID, afterConnectedAtMs, timeout)
+	return s.waitForAgentReconnectWithLog(nil, serverID, afterConnectedAtMs, timeout, "")
 }
 
-func (s *Service) waitForAgentReconnectWithLog(item *AgentBatchItem, serverID string, afterConnectedAtMs int64, timeout time.Duration) bool {
+// waitForAgentReconnectWithLog 等待 Agent 升级/安装后重新上线。
+// expectedVersion 为升级前的 Agent 版本（可为空，空则跳过版本对比）：
+//   - Agent 通过 agent:upgrade_status 上报自更新 failed 时立即失败，并记录具体原因，
+//     避免 Agent 下载失败时只能干等验证超时；
+//   - 上报 succeeded 时记录日志，继续等待重连；
+//   - 重连成功后对比版本，明确日志"版本已从 X 更新到 Y"。
+func (s *Service) waitForAgentReconnectWithLog(item *AgentBatchItem, serverID string, afterConnectedAtMs int64, timeout time.Duration, expectedVersion string) bool {
 	deadline := time.Now().Add(timeout)
 	lastLog := time.Time{}
 	for {
 		if conn, exists := s.registry.Get(serverID); exists {
+			// Agent 自更新结果上报优先判定：失败立即返回，成功继续等待重连
+			if rawStatus, ok := conn.GetMetadata()["upgrade_status"].(map[string]interface{}); ok {
+				switch state, _ := rawStatus["state"].(string); state {
+				case "failed":
+					reason, _ := rawStatus["error"].(string)
+					if reason == "" {
+						reason = "未知错误，详见 Agent 升级日志"
+					}
+					if item != nil {
+						item.appendLog("Agent 自更新失败: " + reason)
+					}
+					return false
+				case "succeeded":
+					if item != nil {
+						item.appendLog("Agent 已确认更新完成，等待重连")
+					}
+				}
+			}
+
 			connectedAt := conn.AuthenticatedAt.UnixNano() / int64(time.Millisecond)
 			if connectedAt > afterConnectedAtMs {
+				newVersion := fmt.Sprint(conn.GetMetadata()["version"])
+				if item != nil {
+					if expectedVersion != "" && newVersion != "" && newVersion != expectedVersion {
+						item.appendLog("Agent 已重新上线，版本从 " + expectedVersion + " 更新到 " + newVersion)
+					} else if expectedVersion != "" {
+						item.appendLog("Agent 已重新上线（版本未变化: " + newVersion + "）")
+					} else {
+						item.appendLog("Agent 已重新上线")
+					}
+				}
 				return true
 			}
 		}

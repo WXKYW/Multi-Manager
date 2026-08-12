@@ -552,11 +552,14 @@ async fn run_client(
                             let mut host_timer = tokio::time::interval(Duration::from_millis(
                                 cfg.host_info_interval,
                             ));
+                            let mut upgrade_timer = tokio::time::interval(Duration::from_secs(2));
 
                             // Prevent tick stacking
                             state_timer
                                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                             host_timer
+                                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                            upgrade_timer
                                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                             state_timer.tick().await;
                             host_timer.tick().await;
@@ -581,6 +584,14 @@ async fn run_client(
                                         let host_info = collector_loop.lock().await.collect_host_info(VERSION).await;
                                         if auth_tx.send_normal(format_event(EVENT_AGENT_HOST_INFO, &host_info)).await.is_err() {
                                             break;
+                                        }
+                                    }
+                                    _ = upgrade_timer.tick() => {
+                                        // 后台自更新脚本完成后会写结果文件，读取并上报给面板
+                                        if let Some(status) = take_upgrade_status_file() {
+                                            if auth_tx.send_normal(format_event(EVENT_AGENT_UPGRADE_STATUS, &status)).await.is_err() {
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -1623,13 +1634,25 @@ $TempAgentPath = {temp_agent}
 $DownloadUrl = {download_url}
 $LaunchVbs = {launch_vbs}
 $AgentPid = {agent_pid}
+$ResultPath = Join-Path $env:TEMP "api-monitor-agent-upgrade-result.json"
+
+function Write-UpgradeResult([string]$state, [string]$detail) {{
+    $payload = @{{ state = $state; error = $detail }}
+    if ($state -eq "succeeded") {{
+        Remove-Item $payload.error -ErrorAction SilentlyContinue
+        $payload = @{{ state = $state; version = $detail }}
+    }}
+    try {{
+        Set-Content -Path $ResultPath -Value ($payload | ConvertTo-Json -Compress) -Encoding UTF8 -ErrorAction SilentlyContinue
+    }} catch {{}}
+}}
 
 try {{
     if (Test-Path $TempAgentPath) {{
         Remove-Item -Path $TempAgentPath -Force -ErrorAction SilentlyContinue
     }}
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempAgentPath -UseBasicParsing
-    & $TempAgentPath --version | Out-Host
+    $newVersion = (& $TempAgentPath --version 2>&1 | Select-Object -Last 1)
 
     Start-Sleep -Seconds 2
     $running = Get-Process -Id $AgentPid -ErrorAction SilentlyContinue
@@ -1668,8 +1691,10 @@ try {{
     }} else {{
         Start-Process -FilePath $AgentPath -ArgumentList "-b" -WindowStyle Hidden
     }}
+    Write-UpgradeResult "succeeded" "$newVersion"
     Write-Host "API Monitor Agent self-update completed"
 }} catch {{
+    Write-UpgradeResult "failed" $_.Exception.Message
     Write-Host "API Monitor Agent self-update failed: $_"
     exit 1
 }} finally {{
@@ -1721,6 +1746,7 @@ fn schedule_self_update_unix(
         r#"#!/bin/sh
 set -eu
 LOG="/tmp/api-monitor-agent-upgrade.log"
+RESULT_FILE="/tmp/api-monitor-agent-upgrade-result.json"
 exec >>"$LOG" 2>&1
 echo "API Monitor Agent self-update started at $(date -Is)"
 AGENT_PATH={agent_path}
@@ -1732,24 +1758,29 @@ cleanup() {{
 }}
 trap cleanup EXIT
 
+write_result_failed() {{
+    msg="$1"
+    printf '{{"state":"failed","error":"%s"}}' "$msg" > "$RESULT_FILE" 2>/dev/null || true
+}}
+
 if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL"
+    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1 }}
 elif command -v wget >/dev/null 2>&1; then
-    wget -O "$TMP_AGENT" "$DOWNLOAD_URL"
+    wget -O "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1 }}
 else
-    echo "Error: curl or wget is required for self-update"
+    write_result_failed "curl 与 wget 均不可用"
     exit 1
 fi
 
 chmod +x "$TMP_AGENT"
-"$TMP_AGENT" --version
+NEW_VERSION="$("$TMP_AGENT" --version 2>/dev/null | tail -n 1 || true)"
 
 if [ "$(id -u)" -eq 0 ]; then
     SUDO=""
 elif command -v sudo >/dev/null 2>&1; then
     SUDO="sudo"
 else
-    echo "Error: self-update needs root or sudo to replace $AGENT_PATH"
+    write_result_failed "自更新需要 root 或 sudo 权限"
     exit 1
 fi
 
@@ -1764,6 +1795,8 @@ fi
 
 sleep 1
 $SUDO install -m 0755 "$TMP_AGENT" "$AGENT_PATH"
+
+printf '{{"state":"succeeded","version":"%s"}}' "$NEW_VERSION" > "$RESULT_FILE" 2>/dev/null || true
 
 if [ "$HAS_SYSTEMD_SERVICE" = "1" ]; then
     $SUDO systemctl daemon-reload || true

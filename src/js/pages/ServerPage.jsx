@@ -5046,7 +5046,7 @@ function ServerPage() {
           serverIds: selectedBatchServers,
           force_ssh: batchAgentForceSsh,
           base_url: getAgentPublicBaseApiUrl(),
-          concurrency: 4,
+          concurrency: 16,
         }),
       });
       const payload = await response.json();
@@ -5189,7 +5189,7 @@ function ServerPage() {
 
     appendUpgradeLogEvents([
       { key: 'targets', line: `目标 Agent: ${targetServers.length} 台。` },
-      { key: `options:${upgradeFallbackSsh}`, line: `服务端批任务并发限制: 4。${upgradeFallbackSsh ? 'SSH 保底已开启。' : 'SSH 保底未开启。'}` },
+      { key: `options:${upgradeFallbackSsh}`, line: `服务端批任务并发限制: 16。${upgradeFallbackSsh ? 'SSH 保底已开启。' : 'SSH 保底未开启。'}` },
     ]);
 
     try {
@@ -5201,7 +5201,7 @@ function ServerPage() {
           force_ssh: false,
           fallback_ssh: upgradeFallbackSsh,
           base_url: getAgentPublicBaseApiUrl(),
-          concurrency: 4,
+          concurrency: 16,
         }),
       });
       const payload = await response.json();

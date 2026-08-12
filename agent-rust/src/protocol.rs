@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub const EVENT_AGENT_CONNECT: &str = "agent:connect";
 pub const EVENT_AGENT_HOST_INFO: &str = "agent:host_info";
 pub const EVENT_AGENT_STATE: &str = "agent:state";
+pub const EVENT_AGENT_UPGRADE_STATUS: &str = "agent:upgrade_status";
 pub const EVENT_AGENT_TASK_RESULT: &str = "agent:task_result";
 pub const EVENT_DASHBOARD_AUTH_OK: &str = "dashboard:auth_ok";
 pub const EVENT_DASHBOARD_AUTH_FAIL: &str = "dashboard:auth_fail";
