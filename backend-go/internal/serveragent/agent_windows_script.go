@@ -34,7 +34,7 @@ func (s *Service) getWindowsAgentInstallScript(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proto, serverURL := resolveInstallOrigin(r)
+	proto, serverURL := s.resolveInstallOrigin(r.Context(), db, r, "")
 	serverBaseURL := fmt.Sprintf("%s://%s", proto, serverURL)
 	agentDownloadBaseURL := s.resolveAgentDownloadBaseURL(r.Context(), db, serverBaseURL)
 	installScriptURL := fmt.Sprintf("%s/api/server/agent/install/win/%s/%s?protocol=%s&base_url=%s", serverBaseURL, accountID, agentKey, proto, url.QueryEscape(serverBaseURL))

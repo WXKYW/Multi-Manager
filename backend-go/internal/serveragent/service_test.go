@@ -475,7 +475,8 @@ func TestResolveInstallOriginPrefersPublicBaseURL(t *testing.T) {
 	req.Header.Set("X-Forwarded-Host", "internal.local:8080")
 	req.Header.Set("X-Forwarded-Proto", "http")
 
-	proto, host := resolveInstallOrigin(req)
+	service := &Service{}
+	proto, host := service.resolveInstallOrigin(context.Background(), nil, req, "")
 	if proto != "https" || host != "panel.example.com" {
 		t.Fatalf("origin = %s://%s, want https://panel.example.com", proto, host)
 	}

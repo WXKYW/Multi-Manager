@@ -32,7 +32,7 @@ func (s *Service) getAgentInstallCommand(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	proto, serverURL := resolveInstallOrigin(r)
+	proto, serverURL := s.resolveInstallOrigin(r.Context(), db, r, "")
 	baseURL := fmt.Sprintf("%s://%s", proto, serverURL)
 	installScriptURL := appendInstallProtocol(fmt.Sprintf("%s/api/server/agent/install/linux/%s/%s", baseURL, accountID, agentKey), proto)
 	winInstallURL := appendInstallProtocol(fmt.Sprintf("%s/api/server/agent/install/win/%s/%s", baseURL, accountID, agentKey), proto)
