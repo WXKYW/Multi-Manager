@@ -15,7 +15,8 @@ import (
 // bindManagedNodeSubscribers replaces the node bootstrap credential with the
 // complete, currently entitled subscriber set. Subscription IDs are used as
 // sing-box user names so per-user counters can be attributed without exposing
-// the public download token.
+// the public download token. The original bootstrap credential is preserved
+// ahead of the subscriber users so the node page client URI stays valid.
 func bindManagedNodeSubscribers(ctx context.Context, db *sql.DB, nodeID, protocol, raw string) (string, int, error) {
 	credentials, err := subscriptionledger.ActiveCredentialsForNode(ctx, db, nodeID, protocol, time.Now().UTC())
 	if err != nil {
@@ -33,21 +34,33 @@ func bindManagedNodeSubscribers(ctx context.Context, db *sql.DB, nodeID, protoco
 	if !ok {
 		return "", 0, errors.New("managed node inbound is invalid")
 	}
-	users := make([]interface{}, 0, len(credentials))
+	// 保留节点 bootstrap 凭据（节点创建时生成、client_uri 使用的 uuid/密码），
+	// 使其与订阅凭据同时有效；订阅用户追加在其后用于流量归属统计。
+	bootstrapUsers, _ := inbound["users"].([]interface{})
+	users := make([]interface{}, 0, len(credentials)+len(bootstrapUsers))
+	for _, bootstrap := range bootstrapUsers {
+		if m, ok := bootstrap.(map[string]interface{}); ok {
+			users = append(users, m)
+		}
+	}
 	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	subscriberCount := 0
 	for _, credential := range credentials {
 		switch protocol {
 		case "vless-reality":
 			if credential.VLESSUUID != "" {
 				users = append(users, map[string]interface{}{"name": credential.SubscriptionID, "uuid": credential.VLESSUUID, "flow": "xtls-rprx-vision"})
+				subscriberCount++
 			}
 		case "vless-ws-tunnel", "vless":
 			if credential.VLESSUUID != "" {
 				users = append(users, map[string]interface{}{"name": credential.SubscriptionID, "uuid": credential.VLESSUUID})
+				subscriberCount++
 			}
 		case "hysteria2", "hy2":
 			if credential.Hysteria2Password != "" {
 				users = append(users, map[string]interface{}{"name": credential.SubscriptionID, "password": credential.Hysteria2Password})
+				subscriberCount++
 			}
 		case "socks", "http":
 			// Plaintext proxy inbounds authenticate by username/password.
@@ -56,6 +69,7 @@ func bindManagedNodeSubscribers(ctx context.Context, db *sql.DB, nodeID, protoco
 			// per subscription without adding new columns.
 			if credential.VLESSUUID != "" && credential.Hysteria2Password != "" {
 				users = append(users, map[string]interface{}{"username": credential.VLESSUUID, "password": credential.Hysteria2Password})
+				subscriberCount++
 			}
 		default:
 			return "", 0, fmt.Errorf("unsupported managed node protocol %q", protocol)
@@ -86,5 +100,5 @@ func bindManagedNodeSubscribers(ctx context.Context, db *sql.DB, nodeID, protoco
 	if err != nil {
 		return "", 0, fmt.Errorf("encode managed node config: %w", err)
 	}
-	return string(encoded), len(users), nil
+	return string(encoded), subscriberCount, nil
 }

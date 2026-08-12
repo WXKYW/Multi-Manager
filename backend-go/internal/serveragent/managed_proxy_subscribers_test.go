@@ -55,7 +55,16 @@ func TestBindManagedNodeSubscribersWritesOnlyActiveVLESSUsers(t *testing.T) {
 	}
 	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
 	users := inbound["users"].([]interface{})
-	user := users[0].(map[string]interface{})
+	if len(users) != 2 {
+		t.Fatalf("expected bootstrap + active subscriber, got %d users: %#v", len(users), users)
+	}
+	// users[0] 保留节点 bootstrap 凭据（节点页 client_uri 仍可用）
+	bootstrap := users[0].(map[string]interface{})
+	if bootstrap["uuid"] != "bootstrap" {
+		t.Fatalf("bootstrap credential not preserved: %#v", bootstrap)
+	}
+	// 订阅用户追加在后
+	user := users[1].(map[string]interface{})
 	if user["name"] != "active" || user["uuid"] != "11111111-1111-4111-8111-111111111111" || user["flow"] != "xtls-rprx-vision" {
 		t.Fatalf("unexpected users: %#v", users)
 	}
@@ -79,7 +88,14 @@ func TestBindManagedNodeSubscribersWritesVLESSWebSocketUsersWithoutRealityFlow(t
 	}
 	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
 	users := inbound["users"].([]interface{})
-	user := users[0].(map[string]interface{})
+	if len(users) != 2 {
+		t.Fatalf("expected bootstrap + active subscriber, got %d users: %#v", len(users), users)
+	}
+	// bootstrap 凭据原样保留（含 flow 字段），订阅用户追加在后
+	if users[0].(map[string]interface{})["uuid"] != "bootstrap" {
+		t.Fatalf("bootstrap credential not preserved: %#v", users[0])
+	}
+	user := users[1].(map[string]interface{})
 	if user["name"] != "active" || user["uuid"] != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("unexpected users: %#v", users)
 	}
@@ -98,7 +114,10 @@ func TestBindManagedNodeSubscribersWritesHY2Passwords(t *testing.T) {
 	var root map[string]interface{}
 	_ = json.Unmarshal([]byte(encoded), &root)
 	users := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
-	if users[0].(map[string]interface{})["password"] != "pass-a" {
+	if len(users) != 2 || users[0].(map[string]interface{})["password"] != "bootstrap" {
+		t.Fatalf("bootstrap not preserved: %#v", users)
+	}
+	if users[1].(map[string]interface{})["password"] != "pass-a" {
 		t.Fatalf("unexpected users: %#v", users)
 	}
 }
@@ -127,7 +146,10 @@ func TestBindManagedNodeSubscribersWritesSOCKSUsers(t *testing.T) {
 	var root map[string]interface{}
 	_ = json.Unmarshal([]byte(encoded), &root)
 	bound := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
-	user := bound[0].(map[string]interface{})
+	if len(bound) != 2 || bound[0].(map[string]interface{})["username"] != "bootstrap" {
+		t.Fatalf("bootstrap not preserved: %#v", bound)
+	}
+	user := bound[1].(map[string]interface{})
 	if user["username"] != "11111111-1111-4111-8111-111111111111" || user["password"] != "pass-a" {
 		t.Fatalf("unexpected socks users: %#v", bound)
 	}
@@ -148,7 +170,10 @@ func TestBindManagedNodeSubscribersWritesHTTPUsers(t *testing.T) {
 	var root map[string]interface{}
 	_ = json.Unmarshal([]byte(encoded), &root)
 	bound := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
-	user := bound[0].(map[string]interface{})
+	if len(bound) != 2 || bound[0].(map[string]interface{})["username"] != "bootstrap" {
+		t.Fatalf("bootstrap not preserved: %#v", bound)
+	}
+	user := bound[1].(map[string]interface{})
 	if user["username"] != "11111111-1111-4111-8111-111111111111" || user["password"] != "pass-a" {
 		t.Fatalf("unexpected http users: %#v", bound)
 	}
