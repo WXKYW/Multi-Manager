@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 )
@@ -648,17 +649,39 @@ func TestDatabaseMaintenanceActions(t *testing.T) {
 	if vacuumRes.Code != http.StatusOK {
 		t.Fatalf("vacuum status = %d body=%s", vacuumRes.Code, vacuumRes.Body.String())
 	}
-	var vacuumPayload struct {
-		Success bool `json:"success"`
-		Data    struct {
-			BeforeSizeMB string `json:"beforeSizeMB"`
-			AfterSizeMB  string `json:"afterSizeMB"`
-			SavedMB      string `json:"savedMB"`
-		} `json:"data"`
-	}
-	mustDecodeSettings(t, vacuumRes, &vacuumPayload)
-	if !vacuumPayload.Success || vacuumPayload.Data.BeforeSizeMB == "" || vacuumPayload.Data.AfterSizeMB == "" || vacuumPayload.Data.SavedMB == "" {
-		t.Fatalf("unexpected vacuum payload: %#v", vacuumPayload)
+
+	// vacuum 异步执行：轮询状态直至任务结束，避免后台 goroutine 持有临时
+	// 数据库文件导致 TempDir 清理失败。
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		statusRes := performSettingsRequest(service, http.MethodGet, "/api/settings/vacuum-database", "")
+		if statusRes.Code != http.StatusOK {
+			t.Fatalf("vacuum status query = %d body=%s", statusRes.Code, statusRes.Body.String())
+		}
+		var statusPayload struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Running      bool   `json:"running"`
+				Error        string `json:"error"`
+				BeforeSizeMB string `json:"beforeSizeMB"`
+				AfterSizeMB  string `json:"afterSizeMB"`
+				SavedMB      string `json:"savedMB"`
+			} `json:"data"`
+		}
+		mustDecodeSettings(t, statusRes, &statusPayload)
+		if !statusPayload.Data.Running {
+			if statusPayload.Data.Error != "" {
+				t.Fatalf("vacuum failed: %s", statusPayload.Data.Error)
+			}
+			if statusPayload.Data.BeforeSizeMB == "" || statusPayload.Data.AfterSizeMB == "" || statusPayload.Data.SavedMB == "" {
+				t.Fatalf("unexpected vacuum payload: %#v", statusPayload)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("vacuum did not complete within 10s")
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
