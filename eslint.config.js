@@ -152,6 +152,11 @@ module.exports = [
     files: ['src/js/**/*.js', 'src/js/**/*.jsx'],
     plugins: {
       'react-hooks': require('eslint-plugin-react-hooks'),
+      react: require('eslint-plugin-react'),
+    },
+    rules: {
+      // 检查 JSX 中引用的未定义组件（<Toolbar/>、<Upload/> 等未导入时报错），防止漏导入变量
+      'react/jsx-no-undef': 'error',
     },
     languageOptions: {
       sourceType: 'module', // 前端使用 ESM

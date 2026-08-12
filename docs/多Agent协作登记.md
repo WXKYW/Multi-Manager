@@ -12,7 +12,8 @@
 
 | 状态 | 日期 | 任务名 | Agent/窗口 | 文件域 | 分支 | 验证命令 |
 |---|---|---|---|---|---|---|
-|  |  |  |  |  |  |  |
+| done | 2026-08-12 | 一级 tab 图标补充 | opencode 主窗口 | ApiDocsPage/DrawioPage/M365Page/OraclePage/PromptLibraryPage/SubscriptionPage 的顶部 Tabs label | dev | npm run lint |
+| done | 2026-08-12 | R2 目录树/级联删除/zip 下载 | opencode 主窗口 | src/js/pages/DnsPage.jsx、backend-go/internal/cloudflare/service.go、manifest/manifest.go、server/server.go、system/route_contracts.go、route_descriptions.go | dev | npm run lint、go test ./internal/cloudflare/ ./internal/manifest/ ./internal/system/、npm run governance:check |
 
 ## 已登记过的任务
 
@@ -20,4 +21,9 @@
 
 | 日期 | 任务摘要 | 结果 |
 |---|---|---|
-|  |  |  |
+| 2026-08-12 | 六个页面一级 tab 补图标（24 个 tab） | 完成，lint 通过 |
+| 2026-08-12 | R2 多级目录树 + 目录缓存 + 文件夹级联删除/zip 下载 + 修复单文件下载路由 | 完成，前端 lint/governance 通过，后端单测与路由治理通过 |
+
+| done | 2026-08-12 | Anthropic /v1/messages 兼容层 | opencode 主窗口 | openai/service.go、manifest/manifest.go、server/server.go | dev | go test ./internal/openai/、npm run governance:check、node tools/backend-route-inventory.mjs |
+
+| 2026-08-12 | Anthropic /v1/messages 兼容层（请求/响应转换、模型映射、流式 SSE） | 完成：非流式/流式/工具调用端到端通过，audit:fast 全绿 |

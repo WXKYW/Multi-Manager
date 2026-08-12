@@ -2,7 +2,7 @@
 
 最后更新：2026-06-09
 
-本文档是 API Monitor 前端 UI 的硬约束。当前项目以 `@cloudflare/kumo` 2.7.0 为唯一设计系统基线。
+本文档是 API Monitor 前端 UI 的硬约束。当前项目以 `@cloudflare/kumo` 2.10.0 为唯一设计系统基线。
 
 ## 总规则
 
