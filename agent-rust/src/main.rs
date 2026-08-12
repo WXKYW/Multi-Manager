@@ -651,6 +651,17 @@ async fn run_client(
                             let manager = remote_desktop_clone.clone();
                             manager.stop(&payload.session_id).await;
                         }
+                    } else if event == EVENT_DASHBOARD_SERVER_ACTION {
+                        // 服务器动作（重启/关机等），由面板 /api/server/action 下发
+                        if let Some(action) = data.get("action").and_then(|v| v.as_str()) {
+                            let action = action.to_string();
+                            tokio::spawn(async move {
+                                match handle_server_action(&action).await {
+                                    Ok(msg) => println!("[Action] {}: {}", action, msg),
+                                    Err(err) => eprintln!("[Action] {} 执行失败: {}", action, err),
+                                }
+                            });
+                        }
                     } else if event == EVENT_DASHBOARD_TASK {
                         if let Ok(task) = serde_json::from_value::<TaskPayload>(data) {
                             let tx_task = tx_clone.clone();
@@ -1248,6 +1259,34 @@ async fn run_client(
 
 // Helpers
 
+// handle_server_action 处理面板下发的服务器动作（reboot/restart/shutdown）。
+async fn handle_server_action(action: &str) -> Result<String, String> {
+    let command: &str = match action {
+        "reboot" | "restart" => {
+            if cfg!(target_os = "windows") {
+                "shutdown /r /t 0"
+            } else {
+                "shutdown -r now"
+            }
+        }
+        "shutdown" => {
+            if cfg!(target_os = "windows") {
+                "shutdown /s /t 0"
+            } else {
+                "shutdown -h now"
+            }
+        }
+        other => return Err(format!("不支持的动作: {}", other)),
+    };
+    // Linux 下 Agent 可能非 root：先直接执行，失败再尝试 sudo
+    let result = execute_command(command, 15).await;
+    if result.is_err() && !cfg!(target_os = "windows") {
+        execute_command(&format!("sudo {}", command), 15).await
+    } else {
+        result
+    }
+}
+
 async fn execute_command(command: &str, timeout_secs: u64) -> Result<String, String> {
     if command.is_empty() {
         return Err("命令不能为空".to_string());
@@ -1639,7 +1678,10 @@ fn schedule_self_update_windows(
         .ok_or_else(|| "无法获取 Agent 安装目录".to_string())?;
     let script_path =
         std::env::temp_dir().join(format!("api-monitor-agent-upgrade-{}.ps1", timestamp_ms));
-    let temp_agent = install_dir.join("api-monitor-agent.exe.download");
+    // 注意：下载临时文件名必须以 .exe 结尾。PowerShell 5.1 无法直接运行
+    // 非 .exe 后缀的文件（如 .download），`& $TempAgentPath --version` 会报
+    // "Cannot run a document in the middle of a pipeline"，导致自更新中止。
+    let temp_agent = install_dir.join("api-monitor-agent.new.exe");
     let launch_vbs = install_dir.join("launch.vbs");
     let agent_pid = std::process::id();
 

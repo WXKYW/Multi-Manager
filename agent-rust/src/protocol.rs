@@ -10,6 +10,7 @@ pub const EVENT_DASHBOARD_AUTH_OK: &str = "dashboard:auth_ok";
 pub const EVENT_DASHBOARD_AUTH_FAIL: &str = "dashboard:auth_fail";
 pub const EVENT_DASHBOARD_AUTH_ERROR: &str = "dashboard:auth_error";
 pub const EVENT_DASHBOARD_TASK: &str = "dashboard:task";
+pub const EVENT_DASHBOARD_SERVER_ACTION: &str = "server:action";
 pub const EVENT_DASHBOARD_PTY_INPUT: &str = "dashboard:pty_input";
 pub const EVENT_DASHBOARD_PTY_RESIZE: &str = "dashboard:pty_resize";
 pub const EVENT_DASHBOARD_PTY_STOP: &str = "dashboard:pty_stop";
