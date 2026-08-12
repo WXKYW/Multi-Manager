@@ -136,7 +136,7 @@ func anthropicToOpenAI(body map[string]interface{}) (map[string]interface{}, err
 							argsBytes = []byte("{}")
 						}
 						toolCalls = append(toolCalls, map[string]interface{}{
-							"id": id,
+							"id":   id,
 							"type": "function",
 							"function": map[string]interface{}{
 								"name":      name,
@@ -259,7 +259,7 @@ func anthropicToOpenAI(body map[string]interface{}) (map[string]interface{}, err
 			if choice["type"] == "tool" {
 				if name, ok := choice["name"].(string); ok {
 					out["tool_choice"] = map[string]interface{}{
-						"type": "function",
+						"type":     "function",
 						"function": map[string]interface{}{"name": name},
 					}
 				}
@@ -447,7 +447,6 @@ func (s *Service) relayChatOpenAI(ctx context.Context, r *http.Request, bodyByte
 		sessionKey:     sessionKey,
 		clientIP:       clientIP,
 		requestStarted: requestStarted,
-		viaProxy:       viaProxy,
 	})
 	if res.lastErr != nil && res.resp == nil {
 		return res.statusCode, nil, res.lastErr
@@ -468,7 +467,7 @@ func (s *Service) relayChatOpenAI(ctx context.Context, r *http.Request, bodyByte
 	if res.firstWritten && len(res.firstChunk) > 0 {
 		res.resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(res.firstChunk), res.resp.Body))
 	}
-	s.RecordAnalytics(ctx, route, selected.ID, model, res.resp.StatusCode, time.Since(res.startTime).Milliseconds(), res.ttfbMs, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, res.egressIP)
+	s.RecordAnalytics(ctx, route, selected.ID, model, res.resp.StatusCode, time.Since(res.startTime).Milliseconds(), res.ttfbMs, 0, 0, 0, 0, boolToInt(stream), boolToInt(res.lastProxy != ""), clientIP, res.egressIP)
 	return res.resp.StatusCode, res.resp, nil
 }
 func (s *Service) proxyAnthropicMessages(w http.ResponseWriter, r *http.Request) {
@@ -622,7 +621,7 @@ func anthropicError(w http.ResponseWriter, status int, errType, message string) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"type":    "error",
+		"type": "error",
 		"error": map[string]interface{}{
 			"type":    errType,
 			"message": message,
@@ -639,8 +638,8 @@ type anthropicSSETransformer struct {
 	model            string
 	messageID        string
 	blockIndex       int
-	textBlockIndex   int          // 文本块的 Anthropic index（-1 表示未开始）
-	toolIndexToBlock map[int]int  // OpenAI tool index → Anthropic block index
+	textBlockIndex   int         // 文本块的 Anthropic index（-1 表示未开始）
+	toolIndexToBlock map[int]int // OpenAI tool index → Anthropic block index
 	inputJSONs       map[int]*strings.Builder
 	started          bool
 	finished         bool
@@ -677,7 +676,7 @@ func (t *anthropicSSETransformer) consume(chunk []byte) [][]byte {
 			Delta struct {
 				Content   string `json:"content"`
 				ToolCalls []struct {
-					Index    int `json:"index"`
+					Index    int    `json:"index"`
 					ID       string `json:"id"`
 					Function struct {
 						Name      string `json:"name"`
@@ -732,7 +731,7 @@ func (t *anthropicSSETransformer) consume(chunk []byte) [][]byte {
 			t.textBlockIndex = t.blockIndex
 			t.blockIndex++
 			events = append(events, t.sse("content_block_start", map[string]interface{}{
-				"type": "content_block_start",
+				"type":  "content_block_start",
 				"index": t.textBlockIndex,
 				"content_block": map[string]interface{}{
 					"type": "text",
@@ -741,7 +740,7 @@ func (t *anthropicSSETransformer) consume(chunk []byte) [][]byte {
 			}))
 		}
 		events = append(events, t.sse("content_block_delta", map[string]interface{}{
-			"type": "content_block_delta",
+			"type":  "content_block_delta",
 			"index": t.textBlockIndex,
 			"delta": map[string]interface{}{
 				"type": "text_delta",
@@ -758,12 +757,12 @@ func (t *anthropicSSETransformer) consume(chunk []byte) [][]byte {
 			t.blockIndex++
 			t.toolIndexToBlock[tc.Index] = blockIdx
 			events = append(events, t.sse("content_block_start", map[string]interface{}{
-				"type": "content_block_start",
+				"type":  "content_block_start",
 				"index": blockIdx,
 				"content_block": map[string]interface{}{
-					"type": "tool_use",
-					"id":   tc.ID,
-					"name": tc.Function.Name,
+					"type":  "tool_use",
+					"id":    tc.ID,
+					"name":  tc.Function.Name,
 					"input": map[string]interface{}{},
 				},
 			}))
@@ -777,7 +776,7 @@ func (t *anthropicSSETransformer) consume(chunk []byte) [][]byte {
 			}
 			t.inputJSONs[tc.Index].WriteString(tc.Function.Arguments)
 			events = append(events, t.sse("content_block_delta", map[string]interface{}{
-				"type": "content_block_delta",
+				"type":  "content_block_delta",
 				"index": blockIdx,
 				"delta": map[string]interface{}{
 					"type":         "input_json_delta",

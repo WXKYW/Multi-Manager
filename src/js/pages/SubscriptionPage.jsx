@@ -1988,13 +1988,13 @@ function SubscriptionPage() {
                             render={<Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" icon={<Copy className="h-3.5 w-3.5" />} />}
                           />
                           <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="min-w-44">
-                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(link, '默认订阅链接已复制')}>
+                            <DropdownMenu.Item onClick={() => copyText(link, '默认订阅链接已复制')}>
                               Mihomo / Clash（YAML）
                             </DropdownMenu.Item>
-                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(subscriptionURL(publicBase, sub, 'raw'), 'Raw 订阅链接已复制')}>
+                            <DropdownMenu.Item onClick={() => copyText(subscriptionURL(publicBase, sub, 'raw'), 'Raw 订阅链接已复制')}>
                               通用节点链接（Raw）
                             </DropdownMenu.Item>
-                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(subscriptionURL(publicBase, sub, 'base64'), 'Base64 订阅链接已复制')}>
+                            <DropdownMenu.Item onClick={() => copyText(subscriptionURL(publicBase, sub, 'base64'), 'Base64 订阅链接已复制')}>
                               v2rayN / NekoBox（Base64）
                             </DropdownMenu.Item>
                           </DropdownMenu.Content>
@@ -2299,7 +2299,7 @@ function SubscriptionPage() {
                     title={item.last_error ? `${item.last_error}；${item.address}:${item.port}（点击复制）` : `${item.address}:${item.port}（点击复制）`}
                     onClick={() => copyText(`${item.address}:${item.port}`, `已复制 ${item.name} 的地址`)}
                   >
-                    <Badge variant={item.is_default ? 'blue' : 'secondary'} className="gap-1.5 !text-xs">
+                    <Badge variant="secondary" className="gap-1.5 !text-xs">
                       <span className={`font-semibold ${item.enabled === false ? 'text-kumo-subtle' : ''}`}>{item.name}</span>
                       <Copy className="h-3 w-3 shrink-0 text-kumo-subtle" />
                       {item.last_status === 'healthy' && <Badge variant="success" appearance="dot">{item.last_latency_ms > 0 ? `${item.last_latency_ms}ms` : '正常'}</Badge>}
@@ -2622,11 +2622,10 @@ function SubscriptionPage() {
 							{preferredAddresses.length === 0 ? (
 								<div className="p-6 text-center text-xs text-kumo-subtle">暂无优选地址，请先添加</div>
 							) : [...preferredAddresses].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || String(a.created_at || '').localeCompare(String(b.created_at || ''))).map((item) => (
-								<div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 ${item.is_default ? 'bg-kumo-recessed/60' : 'hover:bg-kumo-recessed/40'}`}>
+<div key={item.id} className={`flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 ${item.is_default ? 'bg-kumo-recessed/60' : 'hover:bg-kumo-recessed/40'}`}>
 									<div className="min-w-0 flex-1">
 										<div className="flex min-w-0 items-center gap-1.5">
 											<span className={`truncate text-xs font-semibold ${item.enabled === false ? 'text-kumo-subtle' : 'text-kumo-strong'}`}>{item.name}</span>
-											{item.is_default && <Badge variant="blue">默认</Badge>}
 										</div>
 										<div className="truncate font-mono text-[11px] text-kumo-subtle">{item.address}:{item.port}</div>
 									</div>

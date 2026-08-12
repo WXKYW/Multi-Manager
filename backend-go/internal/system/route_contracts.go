@@ -207,14 +207,15 @@ func init() {
 
 	// ===== OpenAI 网关 =====
 	routeRequestContracts["/api/openai/endpoints"] = obj([]string{"name", "baseUrl", "apiKey"}, map[string]prop{
-		"name":       {t: "string", req: true},
-		"baseUrl":    {t: "string", req: true, d: "OpenAI 兼容地址，如 https://api.example.com/v1"},
-		"apiKey":     {t: "string", req: true},
-		"headers":    {t: "array", d: "自定义请求头 [{name,value}]"},
-		"proxyPool":  {t: "array", d: "代理池"},
-		"autoSwitch": {t: "boolean", d: "失败自动切换"},
-		"protocol":   {t: "string", d: "连接协议 auto/http1/h2，默认 auto（HTTP/2 优先）"},
-		"skipVerify": {t: "boolean"},
+		"name":         {t: "string", req: true},
+		"baseUrl":      {t: "string", req: true, d: "OpenAI 兼容地址，如 https://api.example.com/v1"},
+		"apiKey":       {t: "string", req: true},
+		"headers":      {t: "array", d: "自定义请求头 [{name,value}]"},
+		"proxyPool":    {t: "array", d: "代理池"},
+		"proxyBatches": {t: "array", d: "按文件导入的代理批次 [{id,name,createdAt,proxies:[...]}]"},
+		"autoSwitch":   {t: "boolean", d: "失败自动切换"},
+		"protocol":     {t: "string", d: "连接协议 auto/http1/h2，默认 auto（HTTP/2 优先）"},
+		"skipVerify":   {t: "boolean"},
 	})
 	routeRequestContracts["/api/openai/endpoints/{id}"] = routeRequestContracts["/api/openai/endpoints"]
 	routeRequestContracts["/api/openai/sessions"] = obj(nil, map[string]prop{
@@ -353,9 +354,9 @@ func init() {
 		"days": {t: "integer", d: "压缩多少天前的历史"},
 	})
 	routeRequestContracts["/api/github/public-pages"] = obj([]string{"title", "slug"}, map[string]prop{
-		"title":       {t: "string", req: true},
-		"slug":        {t: "string", req: true},
-		"description": {t: "string"},
+		"title":        {t: "string", req: true},
+		"slug":         {t: "string", req: true},
+		"description":  {t: "string"},
 		"repositories": {t: "array", d: "公开仓库 ID 列表"},
 	})
 	routeRequestContracts["/api/github/public-pages/{id}"] = routeRequestContracts["/api/github/public-pages"]
@@ -426,10 +427,10 @@ func init() {
 	})
 	routeRequestContracts["/api/server/check-all"] = noBody
 	routeRequestContracts["/api/server/status-pages"] = obj([]string{"title", "slug"}, map[string]prop{
-		"title":         {t: "string", req: true},
-		"slug":          {t: "string", req: true},
-		"description":   {t: "string"},
-		"serverIds":     {t: "array"},
+		"title":          {t: "string", req: true},
+		"slug":           {t: "string", req: true},
+		"description":    {t: "string"},
+		"serverIds":      {t: "array"},
 		"includeSnippet": {t: "boolean"},
 	})
 	routeRequestContracts["/api/server/status-pages/{id}"] = routeRequestContracts["/api/server/status-pages"]
@@ -564,12 +565,12 @@ func init() {
 
 	// ===== 提示词库 prompts =====
 	routeRequestContracts["/api/prompts/entries"] = obj([]string{"title"}, map[string]prop{
-		"title":       {t: "string", req: true},
-		"content":     {t: "string"},
-		"description": {t: "string"},
-		"tags":        {t: "array"},
+		"title":        {t: "string", req: true},
+		"content":      {t: "string"},
+		"description":  {t: "string"},
+		"tags":         {t: "array"},
 		"collectionId": {t: "string"},
-		"isPublic":    {t: "boolean"},
+		"isPublic":     {t: "boolean"},
 	})
 	routeRequestContracts["/api/prompts/entries/{id}"] = routeRequestContracts["/api/prompts/entries"]
 	routeRequestContracts["/api/prompts/entries/{id}/draft"] = obj(nil, map[string]prop{
@@ -605,8 +606,8 @@ func init() {
 		"tags":    {t: "array"},
 	})
 	routeRequestContracts["/api/drawio/documents/{id}/draft"] = obj(nil, map[string]prop{
-		"content":     {t: "string"},
-		"title":       {t: "string"},
+		"content":       {t: "string"},
+		"title":         {t: "string"},
 		"thumbnailPath": {t: "string"},
 	})
 	routeRequestContracts["/api/drawio/documents/{id}/clone"] = noBody
@@ -627,16 +628,16 @@ func init() {
 
 	// ===== 文件柜 filebox =====
 	routeRequestContracts["/api/filebox/share"] = obj([]string{"fileId"}, map[string]prop{
-		"fileId":   {t: "string", req: true},
+		"fileId":           {t: "string", req: true},
 		"burnAfterReading": {t: "boolean", d: "阅后即焚"},
-		"expiresAt": {t: "string", d: "过期时间"},
+		"expiresAt":        {t: "string", d: "过期时间"},
 	})
 	routeRequestContracts["/api/filebox/settings"] = obj(nil, map[string]prop{
 		"publicUploadEnabled": {t: "boolean"},
 		"maxSizeMb":           {t: "integer"},
 	})
 	routeRequestContracts["/api/filebox/void/rooms"] = obj([]string{"name"}, map[string]prop{
-		"name":   {t: "string", req: true},
+		"name":    {t: "string", req: true},
 		"expires": {t: "integer", d: "有效期秒"},
 	})
 	routeRequestContracts["/api/filebox/void/rooms/{roomId}"] = obj(nil, map[string]prop{
@@ -833,10 +834,10 @@ func init() {
 
 	// ===== 系统设置 settings =====
 	routeRequestContracts["/api/settings"] = obj(nil, map[string]prop{
-		"siteName":   {t: "string"},
-		"themeMode":  {t: "string"},
-		"pageWidth":  {t: "string", e: []string{"standard", "wide", "full"}},
-		"uiFont":     {t: "string", e: []string{"default", "serif", "lxgw-wenkai-screen"}},
+		"siteName":  {t: "string"},
+		"themeMode": {t: "string"},
+		"pageWidth": {t: "string", e: []string{"standard", "wide", "full"}},
+		"uiFont":    {t: "string", e: []string{"default", "serif", "lxgw-wenkai-screen"}},
 	})
 	routeRequestContracts["/api/settings/site-brand/icons"] = obj([]string{"name"}, map[string]prop{
 		"name":     {t: "string", req: true},
@@ -880,12 +881,12 @@ func init() {
 	})
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes/{routeId}"] = routeRequestContracts["/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes"]
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/zones/{zoneId}/purge"] = obj(nil, map[string]prop{
-		"files":   {t: "array", d: "文件 URL 列表"},
+		"files":    {t: "array", d: "文件 URL 列表"},
 		"cacheAll": {t: "boolean"},
 	})
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/zones/{zoneId}/ssl"] = obj(nil, map[string]prop{
-		"ssl":     {t: "string", e: []string{"off", "flexible", "full", "strict"}},
-		"minTls":  {t: "string"},
+		"ssl":    {t: "string", e: []string{"off", "flexible", "full", "strict"}},
+		"minTls": {t: "string"},
 	})
 	routeRequestContracts["/api/cloudflare/accounts/{accountId}/zones/{zoneId}/switch"] = obj(nil, map[string]prop{
 		"switchZoneId": {t: "string"},
@@ -896,8 +897,8 @@ func init() {
 
 	// ===== M365 / Fly.io / GitHub 公开页 =====
 	routeRequestContracts["/api/m365/public/register"] = obj([]string{"email"}, map[string]prop{
-		"email":   {t: "string", req: true},
-		"name":    {t: "string"},
+		"email":      {t: "string", req: true},
+		"name":       {t: "string"},
 		"inviteCode": {t: "string"},
 	})
 	routeRequestContracts["/api/m365/public/invites/{code}"] = noBody

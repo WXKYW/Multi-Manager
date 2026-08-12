@@ -54,6 +54,8 @@ const ENDPOINT_PROTOCOL_OPTIONS = [
   { value: 'http1', label: 'HTTP/1.1' },
   { value: 'h2', label: 'HTTP/2' },
 ];
+// 大代理池（文件批量导入可达数千条）在表单/管理弹窗中只预览前 N 条，避免渲染卡顿。
+const PROXY_PREVIEW_LIMIT = 120;
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
   DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
@@ -109,6 +111,7 @@ import {
   LogList,
   Globe,
   Sliders,
+  ChevronDown,
 } from '../components/Icons.jsx';
 
 // 从 Kumo CSS 变量读取主题色，供 ECharts 等需要真实颜色值的场景使用。
@@ -1065,6 +1068,7 @@ const trendSeries = useMemo(() => {
       notes: '',
       headers: [],
       proxyPool: [],
+      proxyBatches: [],
       autoSwitch: false,
       proxyEnabled: false,
       forceProxy: false,
@@ -1083,6 +1087,7 @@ const trendSeries = useMemo(() => {
       notes: endpoint.notes || '',
       headers: Array.isArray(endpoint.headers) ? endpoint.headers : [],
       proxyPool: Array.isArray(endpoint.proxyPool) ? endpoint.proxyPool : [],
+      proxyBatches: Array.isArray(endpoint.proxyBatches) ? endpoint.proxyBatches : [],
       autoSwitch: Boolean(endpoint.autoSwitch),
       proxyEnabled: Boolean(endpoint.proxyEnabled),
       forceProxy: Boolean(endpoint.forceProxy),
@@ -1123,16 +1128,14 @@ const trendSeries = useMemo(() => {
   // proxyManagerOpen 控制「出口代理池」独立管理弹窗。
   const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
 
-  const appendProxyPoolEntries = entries => {
-    const cleaned = (Array.isArray(entries) ? entries : [])
-      .map(entry => String(entry || '').trim())
-      .filter(Boolean);
-    if (cleaned.length === 0) return;
-    setEndpointForm(current => ({
-      ...current,
-      proxyPool: Array.from(new Set([...(current.proxyPool || []), ...cleaned])),
-    }));
-  };
+  // manualProxyEntries：池中不属于任何导入批次的代理（手动添加），
+  // 携带真实池下标，供管理弹窗内编辑与删除。
+  const manualProxyEntries = useMemo(() => {
+    const batchUrls = new Set((endpointForm.proxyBatches || []).flatMap(batch => batch.proxies || []));
+    return (endpointForm.proxyPool || [])
+      .map((proxy, index) => ({ proxy, index }))
+      .filter(({ proxy }) => !batchUrls.has(proxy));
+  }, [endpointForm.proxyPool, endpointForm.proxyBatches]);
 
   const saveProxyBatch = () => {
     const lines = proxyBatchText
@@ -1143,10 +1146,168 @@ const trendSeries = useMemo(() => {
       toast.warning('请粘贴至少一个代理地址');
       return;
     }
-    appendProxyPoolEntries(lines);
+    const added = addProxyBatch(`批量添加 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`, lines);
+    if (added === 0) {
+      toast.info('粘贴的代理已全部属于其他批次，无需重复添加');
+      return;
+    }
     setProxyBatchText('');
     setProxyBatchOpen(false);
-    toast.success(`已批量添加 ${lines.length} 个代理`);
+    toast.success(`已批量添加 ${added} 个代理`);
+  };
+
+  // addProxyBatch 把一批代理（文件/订阅/批量粘贴）登记为一个「批次」：
+  //   a) 池中尚不存在 → 新增并入池；
+  //   b) 已在池中但无任何批次归属（历史导入/手动加入的同 URL）→ 一并记入本批次；
+  //   c) 已属于其他批次 → 跳过，避免两个批次拥有同一 URL 导致删除互相牵连。
+  // 这样旧数据（批次功能上线前导入的池）重新导入同一来源即可获得批次管理能力。
+  // 返回本次归入批次的条数（0 表示无新增）。
+  const addProxyBatch = (batchName, urls) => {
+    const list = (Array.isArray(urls) ? urls : []).filter(Boolean);
+    if (list.length === 0) return 0;
+    const pool = endpointForm.proxyPool || [];
+    const poolSet = new Set(pool);
+    const owned = new Set((endpointForm.proxyBatches || []).flatMap(batch => batch.proxies || []));
+    const fresh = list.filter(proxy => !poolSet.has(proxy));
+    const newlyOwned = list.filter(proxy => poolSet.has(proxy) && !owned.has(proxy));
+    const batchProxies = [...fresh, ...newlyOwned];
+    if (batchProxies.length === 0) return 0;
+    const batchId = `pb_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: [...pool, ...fresh],
+      proxyBatches: [
+        ...(current.proxyBatches || []),
+        {
+          id: batchId,
+          name: batchName,
+          createdAt: new Date().toISOString(),
+          proxies: batchProxies,
+        },
+      ],
+    }));
+    return batchProxies.length;
+  };
+
+  // 文件导入：读取本地代理列表文件（.txt，每行一个代理），交给后端解析清洗后，
+  // 以文件为单位建立一个「批次」追加到池，便于之后按文件批量删除/管理。
+  const proxyFileInputRef = useRef(null);
+  const importProxyFile = file => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async e => {
+      const text = String(e.target?.result || '');
+      if (!text.trim()) {
+        toast.warning('文件内容为空');
+        return;
+      }
+      const rawLineCount = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).length;
+      if (proxyImportLoading) return;
+      setProxyImportLoading(true);
+      try {
+        const response = await fetch('/api/openai/proxies/import-list', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        const list = Array.isArray(data.proxies) ? data.proxies : [];
+        if (list.length === 0) {
+          toast.info('文件中没有找到可导入的代理（支持 http(s)://、socks5://、host:port）');
+          return;
+        }
+        const batchName = file.name || '代理列表';
+        const added = addProxyBatch(batchName, list);
+        if (added === 0) {
+          toast.info(`文件中的 ${list.length} 个代理已全部属于其他批次，无需重复导入`);
+          return;
+        }
+        const skipped = rawLineCount - list.length;
+        toast.success(
+          `已导入批次「${batchName}」${added} 条${skipped > 0 ? `（跳过 ${skipped} 行无效/重复）` : ''}`,
+        );
+      } catch (err) {
+        toast.error(err.message || '文件导入失败');
+      } finally {
+        setProxyImportLoading(false);
+        if (proxyFileInputRef.current) proxyFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // 批次管理：展开预览 / 删除整批 / 移出单条。
+  const [expandedBatchId, setExpandedBatchId] = useState(null);
+  const [manualProxyExpanded, setManualProxyExpanded] = useState(false);
+  // proxyRuntimeStates：代理池各出口的运行时禁用状态（冷却 / 429 冻结），
+  // 用于在管理弹窗里把被禁用的代理标红。key 为代理 URL。
+  const [proxyRuntimeStates, setProxyRuntimeStates] = useState({});
+  useEffect(() => {
+    if (!proxyManagerOpen || !editingEndpoint?.id) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/openai/endpoints/${editingEndpoint.id}/proxy-state`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !Array.isArray(data.proxies)) return;
+        if (!cancelled) {
+          const map = {};
+          data.proxies.forEach(item => {
+            map[item.proxy] = item;
+          });
+          setProxyRuntimeStates(map);
+        }
+      } catch {
+        // 状态加载失败不阻断弹窗使用。
+      }
+    };
+    load();
+    const timer = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [proxyManagerOpen, editingEndpoint?.id]);
+  // disabledProxyUntil 返回某代理的禁用信息：{label, disableUntil} 或 null（可用）。
+  const disabledProxyUntil = proxy => {
+    const item = proxyRuntimeStates[proxy];
+    if (!item) return null;
+    if (item.rateLimitedUntil && new Date(item.rateLimitedUntil).getTime() > Date.now()) {
+      return { label: `429 冻结至 ${formatDateTime(item.rateLimitedUntil)}`, until: item.rateLimitedUntil };
+    }
+    if (item.cooldownUntil && new Date(item.cooldownUntil).getTime() > Date.now()) {
+      return { label: `连接失败冷却至 ${formatDateTime(item.cooldownUntil)}`, until: item.cooldownUntil };
+    }
+    return null;
+  };
+  const removeProxyBatch = batch => {
+    if (!confirmPress(`proxy-batch:${batch.id}`, `移除文件批次「${batch.name}」及其全部 ${batch.proxies.length} 条代理？`)) return;
+    const members = new Set(batch.proxies || []);
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: (current.proxyPool || []).filter(proxy => !members.has(proxy)),
+      proxyBatches: (current.proxyBatches || []).filter(item => item.id !== batch.id),
+    }));
+    toast.success(`已移除批次「${batch.name}」的 ${batch.proxies.length} 条代理`);
+  };
+  const removeProxyFromBatch = (batch, proxy) => {
+    setEndpointForm(current => {
+      const batches = (current.proxyBatches || [])
+        .map(item =>
+          item.id === batch.id
+            ? { ...item, proxies: (item.proxies || []).filter(p => p !== proxy) }
+            : item,
+        )
+        .filter(item => item.id !== batch.id || (item.proxies || []).length > 0);
+      return {
+        ...current,
+        proxyPool: (current.proxyPool || []).filter(item => item !== proxy),
+        proxyBatches: batches,
+      };
+    });
   };
 
   // resolveSubscriptionProxies 通过后端拉取并解析订阅链接中的 socks/http 节点。
@@ -1171,13 +1332,17 @@ const trendSeries = useMemo(() => {
         toast.info(data.message || '订阅内容中没有找到 socks/http 节点');
         return;
       }
-      const existing = new Set(endpointForm.proxyPool || []);
-      const added = list.filter(item => !existing.has(item.proxy) && item.proxy).length;
-      appendProxyPoolEntries(list.map(item => item.proxy).filter(Boolean));
+      let batchName = url;
+      try {
+        batchName = `订阅 ${new URL(url).hostname}`;
+      } catch {
+        // URL 解析失败时退化为完整链接。
+      }
+      const added = addProxyBatch(batchName, list.map(item => item.proxy).filter(Boolean));
       if (added === 0) {
-        toast.info('订阅链接中的代理均已导入，无需重复添加');
+        toast.info('订阅链接中的代理已全部属于其他批次，无需重复导入');
       } else {
-        toast.success(`已从订阅链接解析并导入 ${added} 个代理`);
+        toast.success(`已从订阅链接导入 ${added} 个代理`);
       }
       setSubscriptionUrl('');
       setSubscriptionUrlOpen(false);
@@ -4729,24 +4894,34 @@ const trendSeries = useMemo(() => {
                   <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2">
                     {endpointForm.proxyPool?.length > 0 ? (
                       <div className="flex flex-wrap items-center gap-1.5">
-                        {endpointForm.proxyPool.map((proxy, index) => {
-                          const entry = parseProxyEntry(proxy);
-                          return (
-                            <span
-                              key={index}
-                              className="max-w-40"
-                              title={entry.full}
-                            >
-                              <Badge
-                                variant="outline"
-                                className="w-fit gap-1 font-mono !text-[11px] font-medium"
-                              >
-                                <span className="truncate">{entry.label || entry.host || '空代理'}</span>
-                                {entry.ip && <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">{entry.ip}</span>}
-                              </Badge>
+                        {(endpointForm.proxyBatches || []).map(batch => (
+                          <Badge
+                            key={batch.id}
+                            variant="outline"
+                            className="w-fit gap-1 !text-[11px] font-medium"
+                            title={`${batch.name}\n${batch.proxies?.length || 0} 条`}
+                          >
+                            <span className="max-w-40 truncate">{batch.name}</span>
+                            <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">
+                              {batch.proxies?.length || 0} 条
                             </span>
-                          );
-                        })}
+                          </Badge>
+                        ))}
+                        {manualProxyEntries.length > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="w-fit gap-1 !text-[11px] font-medium"
+                            title="手动添加/粘贴/订阅导入的代理"
+                          >
+                            <span>手动</span>
+                            <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">
+                              {manualProxyEntries.length} 条
+                            </span>
+                          </Badge>
+                        )}
+                        <span className="text-[11px] text-kumo-subtle">
+                          共 {endpointForm.proxyPool.length} 条
+                        </span>
                       </div>
                     ) : (
                       <span className="text-xs text-kumo-subtle">
@@ -4847,6 +5022,22 @@ const trendSeries = useMemo(() => {
               <Button
                 size="xs"
                 variant="outline"
+                onClick={() => proxyFileInputRef.current?.click()}
+                disabled={proxyImportLoading}
+                icon={proxyImportLoading ? <Loader size="sm" /> : <ArrowDown className="h-3.5 w-3.5" />}
+              >
+                {proxyImportLoading ? '解析中...' : '导入文件'}
+              </Button>
+              <input
+                ref={proxyFileInputRef}
+                type="file"
+                accept=".txt,.list,.conf,.csv,text/plain"
+                className="hidden"
+                onChange={e => importProxyFile(e.target.files?.[0])}
+              />
+              <Button
+                size="xs"
+                variant="outline"
                 onClick={() => setSubscriptionUrlOpen(current => !current)}
                 icon={<Globe className="h-3.5 w-3.5" />}
               >
@@ -4929,11 +5120,104 @@ const trendSeries = useMemo(() => {
             )}
 
             <div className="space-y-2">
-              {(endpointForm.proxyPool || []).map((proxy, index) => {
+              {(endpointForm.proxyBatches || []).length > 0 && (
+                <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-2">
+                  <div className="px-1 pt-0.5 text-xs font-semibold text-kumo-strong">
+                    导入批次
+                  </div>
+                  {(endpointForm.proxyBatches || []).map(batch => {
+                    const expanded = expandedBatchId === batch.id;
+                    return (
+                      <div key={batch.id} className="overflow-hidden rounded-md border border-kumo-line bg-kumo-base">
+                        <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+                          <Button
+                            shape="square"
+                            size="sm"
+                            variant="ghost"
+                            aria-label={expanded ? '收起' : '展开'}
+                            onClick={() => setExpandedBatchId(expanded ? null : batch.id)}
+                            icon={<ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xs font-semibold text-kumo-strong">{batch.name}</div>
+                            <div className="truncate font-mono text-[11px] text-kumo-subtle">
+                              {batch.proxies?.length || 0} 条 · {formatDateTime(batch.createdAt)}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            shape="square"
+                            variant="secondary-destructive"
+                            aria-label={`移除批次 ${batch.name}`}
+                            onClick={() => removeProxyBatch(batch)}
+                            icon={<Trash className="h-3.5 w-3.5" />}
+                          />
+                        </div>
+                        {expanded && (
+                          <div className="space-y-1.5 border-t border-kumo-line p-2">
+                            {(batch.proxies || []).slice(0, PROXY_PREVIEW_LIMIT).map(proxy => {
+                            const disabled = disabledProxyUntil(proxy);
+                            return (
+                              <div key={proxy} className="flex min-w-0 items-center gap-2">
+                                <span
+                                  className={`min-w-0 flex-1 truncate rounded border px-2 py-1 font-mono text-[11px] ${
+                                    disabled
+                                      ? 'border-kumo-danger/50 bg-kumo-danger/10 text-kumo-danger'
+                                      : 'border-kumo-line bg-kumo-recessed/25 text-kumo-subtle'
+                                  }`}
+                                  title={disabled ? `${proxy}\n${disabled.label}` : proxy}
+                                >
+                                  {proxy}
+                                </span>
+                                <Button
+                                  shape="square"
+                                  size="sm"
+                                  variant="secondary-destructive"
+                                  aria-label="移出此条"
+                                  onClick={() => removeProxyFromBatch(batch, proxy)}
+                                  title="移出此条"
+                                  icon={<X className="h-3 w-3" />}
+                                />
+                              </div>
+                            );
+                          })}
+                            {(batch.proxies || []).length > PROXY_PREVIEW_LIMIT && (
+                              <p className="px-1 text-[11px] text-kumo-subtle">
+                                仅预览前 {PROXY_PREVIEW_LIMIT} 条，共 {batch.proxies.length} 条
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              {manualProxyEntries.length > 0 && (
+                <div className="flex items-center gap-2 px-1 pt-1">
+                  <span className="text-xs font-semibold text-kumo-strong">
+                    手动 / 未分组代理（{manualProxyEntries.length}）
+                  </span>
+                  <Button
+                    shape="square"
+                    size="xs"
+                    variant="ghost"
+                    aria-label={manualProxyExpanded ? '收起手动代理' : '展开手动代理'}
+                    onClick={() => setManualProxyExpanded(current => !current)}
+                    icon={<ChevronDown className={`h-3.5 w-3.5 transition-transform ${manualProxyExpanded ? 'rotate-180' : ''}`} />}
+                  />
+                </div>
+              )}
+              {manualProxyExpanded &&
+                manualProxyEntries.slice(0, PROXY_PREVIEW_LIMIT).map(({ proxy, index }) => {
                 const entry = parseProxyEntry(proxy);
                 const editing = editingProxyIndex === index;
+                const disabled = disabledProxyUntil(proxy);
                 return (
-                  <div key={index} className="flex min-w-0 items-center gap-2">
+                  <div key={`m-${index}`} className="flex min-w-0 items-center gap-2">
                     {editing ? (
                       <Input
                         size="sm"
@@ -4952,23 +5236,27 @@ const trendSeries = useMemo(() => {
                       />
                     ) : (
                       <div
-                        className="min-w-0 flex-1 cursor-pointer rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2"
+                        className={`min-w-0 flex-1 cursor-pointer rounded-md border px-3 py-2 ${
+                          disabled
+                            ? 'border-kumo-danger/50 bg-kumo-danger/10'
+                            : 'border-kumo-line bg-kumo-recessed/25'
+                        }`}
                         onClick={() => setEditingProxyIndex(index)}
-                        title={`${entry.full}\n\n点击可编辑完整代理地址`}
+                        title={`${entry.full}${disabled ? `\n\n${disabled.label}` : ''}\n点击可编辑完整代理地址`}
                       >
                         {entry.label ? (
                           <div className="flex min-w-0 items-baseline gap-1.5">
-                            <span className="truncate text-sm font-semibold text-kumo-strong">
+                            <span className={`truncate text-sm font-semibold ${disabled ? 'text-kumo-danger' : 'text-kumo-strong'}`}>
                               {entry.label}
                             </span>
                             {entry.host && entry.host !== entry.label && (
-                              <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
+                              <span className={`shrink-0 font-mono text-[11px] ${disabled ? 'text-kumo-danger/80' : 'text-kumo-subtle'}`}>
                                 {entry.host}
                               </span>
                             )}
                           </div>
                         ) : (
-                          <div className="truncate text-sm text-kumo-subtle">空代理（点击编辑）</div>
+                          <div className={`truncate text-sm ${disabled ? 'text-kumo-danger' : 'text-kumo-subtle'}`}>空代理（点击编辑）</div>
                         )}
                       </div>
                     )}
@@ -4995,8 +5283,13 @@ const trendSeries = useMemo(() => {
               })}
               {!endpointForm.proxyPool?.length && (
                 <div className="rounded-md border border-dashed border-kumo-line py-8 text-center text-xs text-kumo-subtle">
-                  暂无代理。点击上方「添加代理」或「订阅链接导入」开始配置。
+                  暂无代理。点击上方「添加代理」「导入文件」或「订阅链接导入」开始配置。
                 </div>
+              )}
+              {manualProxyEntries.length > PROXY_PREVIEW_LIMIT && (
+                <p className="text-xs text-kumo-subtle">
+                  仅预览前 {PROXY_PREVIEW_LIMIT} 条，共 {manualProxyEntries.length} 条（保存后全部生效）。
+                </p>
               )}
             </div>
           </div>

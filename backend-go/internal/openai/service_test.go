@@ -2,6 +2,7 @@ package openai
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -68,6 +69,10 @@ func TestNormalizeProtocol(t *testing.T) {
 
 func TestEffectiveProxyAttempts(t *testing.T) {
 	pool := []string{"http://p1:8080", "http://p2:8080"}
+	bigPool := make([]string, 0, proxyAttemptCap+5)
+	for i := 1; i <= proxyAttemptCap+5; i++ {
+		bigPool = append(bigPool, fmt.Sprintf("http://p%d:8080", i))
+	}
 	testCases := []struct {
 		name     string
 		ep       Endpoint
@@ -77,6 +82,11 @@ func TestEffectiveProxyAttempts(t *testing.T) {
 			name:     "auto switch with pool",
 			ep:       Endpoint{AutoSwitch: true, ProxyEnabled: true, ProxyPool: pool},
 			expected: 2,
+		},
+		{
+			name:     "huge pool capped",
+			ep:       Endpoint{AutoSwitch: true, ProxyEnabled: true, ProxyPool: bigPool},
+			expected: proxyAttemptCap,
 		},
 		{
 			name:     "proxy disabled",
@@ -1543,6 +1553,166 @@ func TestProxy429BannedAfterThreshold(t *testing.T) {
 	}
 	if proxyRateLimited(state, proxy1URL, until.Add(time.Second)) {
 		t.Fatal("proxyRateLimited should release after expiry")
+	}
+}
+
+func TestEndpointProxyBatchesRoundTrip(t *testing.T) {
+	// 批次（文件导入）随端点创建/更新持久化，列表接口原样返回；脏批次（空 ID/名称/代理）被清洗。
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+	payload := `{
+		"name": "batch demo",
+		"baseUrl": "https://example.com/v1",
+		"apiKey": "k",
+		"skipVerify": true,
+		"proxyPool": ["http://a:1@1.2.3.4:3128", "http://b:2@5.6.7.8:3128"],
+		"proxyBatches": [
+			{"id": "pb_1", "name": "all.txt", "createdAt": "2026-08-12T00:00:00Z", "proxies": ["http://a:1@1.2.3.4:3128", "http://a:1@1.2.3.4:3128", "  http://c:3@9.9.9.9:3128  "]},
+			{"id": "", "name": "no-id", "proxies": ["http://x:1@1.1.1.1:3128"]},
+			{"id": "pb_3", "name": "empty", "proxies": ["  ", ""]}
+		]
+	}`
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("POST", "/api/openai/endpoints", strings.NewReader(payload))
+	service.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", w.Code, w.Body.String())
+	}
+	var createRes struct {
+		Endpoint Endpoint `json:"endpoint"`
+	}
+	mustDecode(t, w.Body.String(), &createRes)
+	if len(createRes.Endpoint.ProxyBatches) != 1 {
+		t.Fatalf("expected 1 cleaned batch, got %+v", createRes.Endpoint.ProxyBatches)
+	}
+	batch := createRes.Endpoint.ProxyBatches[0]
+	if batch.ID != "pb_1" || batch.Name != "all.txt" || len(batch.Proxies) != 2 {
+		t.Fatalf("unexpected batch: %+v", batch)
+	}
+	if len(createRes.Endpoint.ProxyPool) != 3 {
+		t.Fatalf("expected 3 cleaned pool entries, got %v", createRes.Endpoint.ProxyPool)
+	}
+
+	// 列表接口返回同一批次数据。
+	w2 := httptest.NewRecorder()
+	r2, _ := http.NewRequest("GET", "/api/openai/endpoints", nil)
+	service.ServeHTTP(w2, r2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", w2.Code, w2.Body.String())
+	}
+	var list []Endpoint
+	mustDecode(t, w2.Body.String(), &list)
+	var found *Endpoint
+	for i := range list {
+		if list[i].ID == createRes.Endpoint.ID {
+			found = &list[i]
+			break
+		}
+	}
+	if found == nil || len(found.ProxyBatches) != 1 || found.ProxyBatches[0].ID != "pb_1" {
+		t.Fatalf("listed endpoint batches mismatch: %+v", found)
+	}
+
+	// 局部更新（提交 proxyPool 但不提交 proxyBatches）应保留存量批次，不清空。
+	updatePayload := `{"proxyPool": ["http://a:1@1.2.3.4:3128", "http://b:2@5.6.7.8:3128", "http://d:4@1.1.1.1:3128"]}`
+	w3 := httptest.NewRecorder()
+	r3, _ := http.NewRequest("PUT", "/api/openai/endpoints/"+createRes.Endpoint.ID, strings.NewReader(updatePayload))
+	service.ServeHTTP(w3, r3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("update status = %d body=%s", w3.Code, w3.Body.String())
+	}
+	w4 := httptest.NewRecorder()
+	r4, _ := http.NewRequest("GET", "/api/openai/endpoints", nil)
+	service.ServeHTTP(w4, r4)
+	var list2 []Endpoint
+	mustDecode(t, w4.Body.String(), &list2)
+	for i := range list2 {
+		if list2[i].ID == createRes.Endpoint.ID {
+			if len(list2[i].ProxyBatches) != 1 || list2[i].ProxyBatches[0].ID != "pb_1" {
+				t.Fatalf("partial update must keep batches, got %+v", list2[i].ProxyBatches)
+			}
+			if len(list2[i].ProxyPool) != 3 || list2[i].ProxyPool[2] != "http://d:4@1.1.1.1:3128" {
+				t.Fatalf("partial update must apply new pool, got %v", list2[i].ProxyPool)
+			}
+		}
+	}
+}
+
+func TestAllProxiesFrozenFallsBackToDirect(t *testing.T) {
+	// 全部出口被 429 冻结时：不再硬选冻结代理（老行为），回退直连兜底；
+	// 直连请求不累计 429，且调用日志按实际出口标记（viaProxy=false）。
+	rate429Handler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+	}
+	service, endpointID, proxy1URL, proxy2URL := setupTwoProxyEndpoint(t, rate429Handler, rate429Handler)
+
+	service.proxyMu.Lock()
+	state, ok := service.proxyStateByEndpoint[endpointID]
+	if !ok {
+		state = newEndpointProxyState()
+		service.proxyStateByEndpoint[endpointID] = state
+	}
+	state.rateLimited[proxy1URL] = time.Now().Add(proxy429BanDuration)
+	state.rateLimited[proxy2URL] = time.Now().Add(proxy429BanDuration)
+	service.proxyMu.Unlock()
+
+	w := chatRequest(t, service, endpointID, false, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("all-frozen request failed: %d %s", w.Code, w.Body.String())
+	}
+
+	// 直连兜底：冻结代理不再被选中，429 计数保持 0。
+	service.proxyMu.Lock()
+	count := state.rate429[proxy1URL]
+	service.proxyMu.Unlock()
+	if count != 0 {
+		t.Fatalf("direct fallback must not count 429 against proxies, got %d", count)
+	}
+
+	// 调用日志按实际出口记录：直连回退不应标「代」。
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var viaProxy int
+	err = db.QueryRow(`SELECT via_proxy FROM openai_gateway_analytics ORDER BY id DESC LIMIT 1`).Scan(&viaProxy)
+	if err != nil {
+		t.Fatalf("read analytics: %v", err)
+	}
+	if viaProxy != 0 {
+		t.Fatalf("direct fallback request must be recorded as via_proxy=0, got %d", viaProxy)
+	}
+}
+
+func TestImportProxyListRoute(t *testing.T) {
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+	text := strings.Join([]string{
+		"http://user:pass@1.2.3.4:3128",
+		"http://user:pass@1.2.3.4:3128", // 重复
+		"socks5://5.6.7.8:1080",
+		"vmess://not-a-proxy-uri",
+		"纯文本垃圾行",
+		"",
+	}, "\n")
+	payload, _ := json.Marshal(map[string]string{"text": text})
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("POST", "/api/openai/proxies/import-list", bytes.NewReader(payload))
+	service.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var res struct {
+		Success bool     `json:"success"`
+		Total   int      `json:"total"`
+		Proxies []string `json:"proxies"`
+	}
+	mustDecode(t, w.Body.String(), &res)
+	if !res.Success || res.Total != 2 {
+		t.Fatalf("expected 2 valid proxies, got %+v", res)
+	}
+	if len(res.Proxies) != 2 || res.Proxies[0] != "http://user:pass@1.2.3.4:3128" || res.Proxies[1] != "socks5://5.6.7.8:1080" {
+		t.Fatalf("unexpected proxy list: %v", res.Proxies)
 	}
 }
 
