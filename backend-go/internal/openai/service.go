@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -175,6 +176,11 @@ type endpointProxyState struct {
 	// lastTTFB 记录每个代理最近一次请求的首字耗时（毫秒），用于择优选择延迟最低的代理。
 	// 尚未产生记录的代理按 cursor 轮询，保证首次使用可测出延迟。
 	lastTTFB map[string]int64
+	// rate429 记录每个代理累计的上游 429 次数；达到 proxy429BanThreshold 后
+	// 触发 rateLimited 禁用（IP 级限流时该出口已被上游限死，继续选择只会反复 429）。
+	rate429 map[string]int
+	// rateLimited 记录因累计 429 被临时禁用的代理及解禁时间；到期自动释放回池。
+	rateLimited map[string]time.Time
 }
 
 // sessionBinding 是某会话在某出口 IP（代理）上的粘性绑定。
@@ -551,6 +557,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Responses proxy (OpenAI Responses API)
 	if method == http.MethodPost && (path == "/v1/responses" || path == "/responses") {
 		s.proxyResponses(w, r)
+		return
+	}
+
+	// Anthropic Messages proxy (Anthropic Messages API)
+	if method == http.MethodPost && (path == "/v1/messages" || path == "/messages") {
+		s.proxyAnthropicMessages(w, r)
 		return
 	}
 
@@ -1167,6 +1179,15 @@ const (
 	proxyCooldownShift = 5
 )
 
+// proxy429BanThreshold 是同一代理累计 429 次数的阈值；达到后禁用 proxy429BanDuration。
+// opencode.ai/zen 按出口 IP 限流：连续 429 说明该 IP 已被上游限死，
+// 若仍把它留在候选池内，重试循环会反复打到同一个 IP，白白消耗尝试次数。
+// 禁用到期后自动释放回池（时间判断，无需主动清理）。
+const (
+	proxy429BanThreshold = 3
+	proxy429BanDuration  = 30 * time.Minute
+)
+
 // sessionProxyRequestLimit 是同一会话在同一个出口 IP 上的请求数上限：
 // 达到上限后主动轮换到下一个代理。opencode 等上游按出口 IP 限额时，
 // 提前轮换可避免被限额后再重试（限额前主动换 IP）。
@@ -1298,6 +1319,8 @@ func newEndpointProxyState() *endpointProxyState {
 		failures:        make(map[string]int),
 		sessionBindings: make(map[string]*sessionBinding),
 		lastTTFB:        make(map[string]int64),
+		rate429:         make(map[string]int),
+		rateLimited:     make(map[string]time.Time),
 	}
 }
 
@@ -1331,16 +1354,18 @@ func (s *Service) clientForEndpoint(endpointID string, pool []string, proxyEnabl
 		state.cursor = 0
 	}
 
-	// 会话粘性：绑定代理仍在池内、未冷却、计数未达上限时直接复用，
+	// 会话粘性：绑定代理仍在池内、未冷却、未处于 429 禁用期、计数未达上限时直接复用，
 	// 保持同一会话的出口 IP 稳定（配额感知轮换的前提）。
 	if sessionKey != "" {
 		if binding, bound := state.sessionBindings[sessionKey]; bound {
 			bindingOK := false
 			if until, cooled := state.cooldown[binding.proxy]; !cooled || now.After(until) {
-				if binding.count < sessionProxyRequestLimit {
-					if _, inPool := poolIndex(binding.proxy, cleaned); inPool {
-						binding.count++
-						bindingOK = true
+				if !proxyRateLimited(state, binding.proxy, now) {
+					if binding.count < sessionProxyRequestLimit {
+						if _, inPool := poolIndex(binding.proxy, cleaned); inPool {
+							binding.count++
+							bindingOK = true
+						}
 					}
 				}
 			}
@@ -1354,15 +1379,18 @@ func (s *Service) clientForEndpoint(endpointID string, pool []string, proxyEnabl
 				}
 				return client, selectedProxy, nil
 			}
-			// 绑定失效（冷却/计数满/移出池）：解除并走择优换新出口。
+			// 绑定失效（冷却/429 禁用/计数满/移出池）：解除并走择优换新出口。
 			delete(state.sessionBindings, sessionKey)
 		}
 	}
 
-	// 可用代理：未在冷却中的代理集合。
+	// 可用代理：未在冷却中、且未处于 429 禁用期的代理集合。
 	candidates := []proxyCandidate{}
 	for i := range cleaned {
 		if until, cooled := state.cooldown[cleaned[i]]; cooled && !now.After(until) {
+			continue
+		}
+		if proxyRateLimited(state, cleaned[i], now) {
 			continue
 		}
 		ttfb, known := state.lastTTFB[cleaned[i]]
@@ -1374,8 +1402,18 @@ func (s *Service) clientForEndpoint(endpointID string, pool []string, proxyEnabl
 	selectedIdx := -1
 	switch {
 	case len(candidates) == 0:
-		// 全部冷却：退化为 cursor 轮询，先满足请求再说。
-		selectedIdx = state.cursor % len(cleaned)
+		// 全部冷却/禁用：退化为 cursor 轮询，先满足请求再说
+		// （跳过 429 禁用中的代理，避免反复打同一个被限死的 IP）。
+		for i := 0; i < len(cleaned); i++ {
+			idx := (state.cursor + i) % len(cleaned)
+			if !proxyRateLimited(state, cleaned[idx], now) {
+				selectedIdx = idx
+				break
+			}
+		}
+		if selectedIdx == -1 {
+			selectedIdx = state.cursor % len(cleaned)
+		}
 	case len(candidates) == 1:
 		selectedIdx = candidates[0].idx
 	default:
@@ -1480,11 +1518,14 @@ func (s *Service) auxClientForPool(endpointID string, pool []string) (*http.Clie
 		if ok && state.cooldown[candidate] != (time.Time{}) && !now.After(state.cooldown[candidate]) {
 			continue
 		}
+		if ok && proxyRateLimited(state, candidate, now) {
+			continue
+		}
 		selectedProxy = candidate
 		break
 	}
 	if selectedProxy == "" {
-		// 全部冷却：退化为池内第一个，先满足请求再说。
+		// 全部冷却/禁用：退化为池内第一个，先满足请求再说。
 		selectedProxy = cleaned[0]
 	}
 	s.proxyMu.Unlock()
@@ -1594,6 +1635,34 @@ func (s *Service) markProxySuccess(endpointID, proxy string) {
 	}
 	delete(state.failures, proxy)
 	delete(state.cooldown, proxy)
+}
+
+// markProxy429 记录代理的一次上游 429。与 markProxyFailed 的区别：
+// 429 是上游按出口 IP 的限流，单次不惩罚代理（避免上游故障污染整个池）；
+// 但同一代理累计 proxy429BanThreshold 次 429 说明该 IP 已被上游限死，
+// 继续把它留在候选池只会让重试反复打同一个 IP，故临时禁用 proxy429BanDuration，
+// 到期自动释放回池。成功转发不解除禁用；触发禁用时清零累计计数（重新累计下一轮）。
+func (s *Service) markProxy429(endpointID, proxy string) {
+	if proxy == "" {
+		return
+	}
+	s.proxyMu.Lock()
+	defer s.proxyMu.Unlock()
+	state, ok := s.proxyStateByEndpoint[endpointID]
+	if !ok {
+		return
+	}
+	state.rate429[proxy]++
+	if state.rate429[proxy] >= proxy429BanThreshold {
+		state.rateLimited[proxy] = time.Now().Add(proxy429BanDuration)
+		delete(state.rate429, proxy)
+	}
+}
+
+// proxyRateLimited 判断代理是否处于 429 累计触发的禁用期（禁用中不可被选中）。
+func proxyRateLimited(state *endpointProxyState, proxy string, now time.Time) bool {
+	until, banned := state.rateLimited[proxy]
+	return banned && now.Before(until)
 }
 
 // normalizeProxyURL 校验并规范化代理 URL：
@@ -3202,6 +3271,324 @@ func (s *Service) selectEndpointForModel(ctx context.Context, db *sql.DB, model,
 	return selected, selectedModel, found
 }
 
+// relayLoopParams 描述一次上游转发重试循环的输入。chat.completions / responses /
+// messages 三个转发入口共用同一重试语义：代理择优 → 限流/5xx 自动切换 → 首字超时
+// 轮换 → 429 累计熔断。正文改写、响应写回与 token 统计等差异留在调用方。
+type relayLoopParams struct {
+	route          string // 统计与日志路由名
+	ctx            context.Context
+	db             *sql.DB
+	selected       Endpoint
+	model          string
+	fullURL        string
+	body           []byte
+	stream         bool
+	sessionKey     string
+	clientIP       string
+	requestStarted time.Time
+	viaProxy       int
+}
+
+// relayLoopResult relayLoop 的结果。resp 非 nil 表示已拿到上游响应，调用方直接消费
+// 正文；resp 为 nil 时 lastErr 携带失败原因，statusCode 为应回给客户端的状态码
+// （500=构建请求失败，502=代理重试耗尽/配置错误）。cancel 为成功路径最近一次尝试的
+// context 取消函数，调用方在读完正文（或关闭 resp.Body）后调用以释放 attempt context。
+type relayLoopResult struct {
+	resp         *http.Response
+	statusCode   int
+	lastErr      error
+	firstChunk   []byte
+	firstWritten bool
+	ttfbMs       int64
+	lastProxy    string
+	attempt      int
+	egressIP     string // 请求实际从哪个出口/代理发出（随循环内选中的代理更新）
+	startTime    time.Time
+	cancel       context.CancelFunc
+}
+
+// relayLoop 执行带代理择优与重试的上游转发循环（三个转发入口共用）。语义与
+// 说明见调用方注释：上游限流/5xx 不是代理的错，只切换出口重试不冷却代理；
+// 但 429 会累计计数，达到阈值后临时禁用该代理（IP 级限流下继续选择只会反复 429）。
+func (s *Service) relayLoop(p relayLoopParams) *relayLoopResult {
+	res := &relayLoopResult{
+		statusCode: http.StatusBadGateway,
+		egressIP:   s.egressOutbound(),
+		startTime:  time.Now(),
+	}
+	ctx := p.ctx
+	selected := p.selected
+	stream := p.stream
+
+	// 代理池选择 + 限流自动切换：最多尝试 len(pool) 个代理。
+	// 代理开关未开启或池为空时只尝试一次（重试只是对同一链路的重复请求，
+	// 首字超时重发反而放大慢响应，见 effectiveProxyAttempts）。
+	maxProxyAttempts := effectiveProxyAttempts(selected)
+
+	var resp *http.Response
+	var lastErr error
+	var attempt int
+	// lastProxy 保存最终成功使用的代理（用于 TTFB 择优记录与日志）。
+	lastProxy := ""
+	// firstChunk 保存流式首字等待阶段读到的首个数据块；无切换机会时首字在循环内读取。
+	var firstChunk []byte
+	var ttfbMs int64
+	firstWritten := false
+
+	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
+		attemptCtx, cancel := context.WithCancel(ctx)
+		res.cancel = cancel
+		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, p.sessionKey, selected.Protocol)
+		if clientErr != nil {
+			cancel()
+			lastErr = clientErr
+			s.recordRelayError(RelayErrorRecord{
+				Route: p.route, Kind: "config",
+				Endpoint: selected.Name, EndpointID: selected.ID,
+				Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+				ClientIP: p.clientIP, Attempts: attempt + 1,
+				ElapsedMs: time.Since(res.startTime).Milliseconds(),
+				Error:     clientErr.Error(),
+			})
+			break
+		}
+		if currentProxy != "" {
+			lastProxy = currentProxy
+			res.egressIP = proxyEndpointAddr(currentProxy)
+		}
+
+		httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, p.fullURL, bytes.NewReader(p.body))
+		if err != nil {
+			cancel()
+			res.statusCode = http.StatusInternalServerError
+			res.lastErr = err
+			res.attempt = attempt
+			s.recordRelayError(RelayErrorRecord{
+				Route: p.route, Kind: "gateway",
+				Endpoint: selected.Name, EndpointID: selected.ID,
+				Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+				ClientIP: p.clientIP, Attempts: attempt + 1,
+				ElapsedMs: time.Since(p.requestStarted).Milliseconds(),
+				Error:     "build upstream request failed: " + err.Error(),
+			})
+			s.RecordAnalytics(ctx, p.route, selected.ID, p.model, http.StatusInternalServerError, time.Since(p.requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), p.viaProxy, p.clientIP, res.egressIP)
+			return res
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+selected.APIKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+		if stream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		} else {
+			httpReq.Header.Set("Accept", "application/json")
+		}
+		applyCustomHeaders(httpReq, selected.Headers)
+
+		resp, lastErr = client.Do(httpReq)
+		if lastErr != nil {
+			// 连接失败（例如该代理不可用）：标记失败，若有池则切下一个继续。
+			s.markProxyFailed(selected.ID, currentProxy)
+			s.recordRelayError(RelayErrorRecord{
+				Route: p.route, Kind: "dial",
+				Endpoint: selected.Name, EndpointID: selected.ID,
+				Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+				ClientIP: p.clientIP, Attempts: attempt + 1,
+				ElapsedMs: time.Since(res.startTime).Milliseconds(),
+				Error:     lastErr.Error(),
+			})
+			cancel()
+			if attempt+1 < maxProxyAttempts {
+				continue
+			}
+			break
+		}
+
+		// 非流式：读取正文判断限流或 5xx，失败时在循环内重试。
+		// 上游限流/5xx 不是代理的错：只切换出口重试，不惩罚代理（不冷却），
+		// 避免上游故障污染整个代理池。但限流（429）会累计计数，
+		// 达到阈值后临时禁用该代理（IP 级限流下继续选择只会反复 429）。
+		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
+			bodyBytesRead, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			cancel()
+			if readErr != nil || isRetryableUpstreamResponse(resp, bodyBytesRead) {
+				if isRateLimitResponse(resp, bodyBytesRead) {
+					s.markProxy429(selected.ID, currentProxy)
+				}
+				s.clearSessionBinding(selected.ID, p.sessionKey)
+				s.recordRelayError(RelayErrorRecord{
+					Route: p.route, Kind: "upstream",
+					Endpoint: selected.Name, EndpointID: selected.ID,
+					Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+					ClientIP: p.clientIP, Attempts: attempt + 1,
+					ElapsedMs:  time.Since(res.startTime).Milliseconds(),
+					StatusCode: resp.StatusCode,
+					Upstream:   truncateForLog(string(bodyBytesRead), relayErrorBodyLimit),
+					Error:      "retryable upstream response",
+				})
+				continue
+			}
+			// 不是限流：重建带正文的响应继续处理。
+			resp.Body = io.NopCloser(bytes.NewReader(bodyBytesRead))
+			break
+		}
+
+		// 流式：仅按状态码判断，限流或 5xx 时切换代理重试一次（同样不惩罚代理，
+		// 但限流会累计计数，达到阈值后禁用该代理）。
+		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRetryableUpstreamResponse(resp, nil) {
+			if isRateLimitResponse(resp, nil) {
+				s.markProxy429(selected.ID, currentProxy)
+			}
+			resp.Body.Close()
+			cancel()
+			s.clearSessionBinding(selected.ID, p.sessionKey)
+			s.recordRelayError(RelayErrorRecord{
+				Route: p.route, Kind: "upstream",
+				Endpoint: selected.Name, EndpointID: selected.ID,
+				Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+				ClientIP: p.clientIP, Attempts: attempt + 1,
+				ElapsedMs:  time.Since(res.startTime).Milliseconds(),
+				StatusCode: resp.StatusCode,
+				Error:      "retryable upstream response",
+			})
+			continue
+		}
+
+		if stream {
+			// 首字等待：若还有可切换的代理，则带超时等待首个字节，
+			// 超时或上游提前断流时标记该代理失败并切换下一个。
+			waitForFirst := selected.AutoSwitch && attempt+1 < maxProxyAttempts
+			if waitForFirst {
+				type readRes struct {
+					n   int
+					err error
+				}
+				ch := make(chan readRes, 1)
+				tmp := make([]byte, 4096)
+				go func() {
+					n, err := resp.Body.Read(tmp)
+					ch <- readRes{n, err}
+				}()
+				var r readRes
+				select {
+				case r = <-ch:
+				case <-time.After(firstTokenTimeout):
+					cancel()
+					resp.Body.Close()
+					s.markProxyFailed(selected.ID, currentProxy)
+					s.recordRelayError(RelayErrorRecord{
+						Route: p.route, Kind: "timeout",
+						Endpoint: selected.Name, EndpointID: selected.ID,
+						Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+						ClientIP: p.clientIP, Attempts: attempt + 1,
+						ElapsedMs: time.Since(res.startTime).Milliseconds(),
+						Error:     fmt.Sprintf("no first byte within %s", firstTokenTimeout),
+					})
+					if attempt+1 < maxProxyAttempts {
+						continue
+					}
+					lastErr = fmt.Errorf("上游首字超时（超过 %s）", firstTokenTimeout)
+					break
+				}
+				if r.n > 0 {
+					firstChunk = append([]byte(nil), tmp[:r.n]...)
+					firstWritten = true
+					ttfbMs = time.Since(res.startTime).Milliseconds()
+					break
+				}
+				cancel()
+				resp.Body.Close()
+				s.markProxyFailed(selected.ID, currentProxy)
+				if attempt+1 < maxProxyAttempts {
+					continue
+				}
+				if lastErr == nil {
+					lastErr = r.err
+					if lastErr == nil {
+						lastErr = io.EOF
+					}
+					s.recordRelayError(RelayErrorRecord{
+						Route: p.route, Kind: "stream_closed",
+						Endpoint: selected.Name, EndpointID: selected.ID,
+						Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+						ClientIP: p.clientIP, Attempts: attempt + 1,
+						ElapsedMs: time.Since(res.startTime).Milliseconds(),
+						Error:     "upstream closed stream before first byte: " + lastErr.Error(),
+					})
+				}
+				break
+			}
+
+			// 无切换机会：直接阻塞读首块，读取结果留给下方流式循环继续消费。
+			tmp := make([]byte, 4096)
+			n, err := resp.Body.Read(tmp)
+			if n > 0 {
+				firstChunk = append([]byte(nil), tmp[:n]...)
+				firstWritten = true
+				ttfbMs = time.Since(res.startTime).Milliseconds()
+				break
+			}
+			cancel()
+			lastErr = err
+			if lastErr == nil {
+				lastErr = io.EOF
+			}
+			s.recordRelayError(RelayErrorRecord{
+				Route: p.route, Kind: "stream_closed",
+				Endpoint: selected.Name, EndpointID: selected.ID,
+				Model: p.model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
+				ClientIP: p.clientIP, Attempts: attempt + 1,
+				ElapsedMs: time.Since(res.startTime).Milliseconds(),
+				Error:     "upstream closed stream before first byte: " + lastErr.Error(),
+			})
+			break
+		}
+		break
+	}
+
+	res.resp = resp
+	res.lastProxy = lastProxy
+	res.firstChunk = firstChunk
+	res.firstWritten = firstWritten
+	res.ttfbMs = ttfbMs
+	res.attempt = attempt
+
+	if lastErr != nil && resp == nil {
+		res.lastErr = lastErr
+		s.recordRelayError(RelayErrorRecord{
+			Route: p.route, Kind: "bad_gateway",
+			Endpoint: selected.Name, EndpointID: selected.ID,
+			Model: p.model, Stream: stream, Proxy: hostFromProxyURL(lastProxy),
+			ClientIP: p.clientIP, Attempts: attempt + 1,
+			ElapsedMs: time.Since(res.startTime).Milliseconds(),
+			Error:     lastErr.Error(),
+		})
+		s.RecordAnalytics(ctx, p.route, selected.ID, p.model, http.StatusBadGateway, time.Since(res.startTime).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), p.viaProxy, p.clientIP, res.egressIP)
+		return res
+	}
+	// 最后一次尝试（无重试机会）返回限流：同样累计计数，供 429 熔断使用。
+	if resp != nil && isRateLimitResponse(resp, nil) {
+		s.markProxy429(selected.ID, lastProxy)
+	}
+	_, _ = p.db.ExecContext(ctx, "UPDATE openai_endpoints SET last_used = ? WHERE id = ?", time.Now().Format(time.RFC3339), selected.ID)
+	res.statusCode = resp.StatusCode
+	return res
+}
+
+// relayCancelOnCloseBody 在正文关闭时连带释放 attempt context，供正文由调用方
+// 消费的入口（/v1/messages）使用：避免在正文未读完时提前 cancel 掐断响应。
+type relayCancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *relayCancelOnCloseBody) Close() error {
+	err := b.ReadCloser.Close()
+	if b.cancel != nil {
+		b.cancel()
+	}
+	return err
+}
+
 func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestStarted := time.Now()
@@ -3301,10 +3688,6 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	isLocal := localURLRegex.MatchString(fullURL)
 
-	// 出口 IP：请求实际从哪个地址发往目标。走代理池时随循环内选中的代理更新，
-	// 直连时用网关本机出口 IP。该字段用于定位是哪个出口/代理承载了本次请求。
-	egressIP := s.egressOutbound()
-
 	if !isLocal {
 		if messages, ok := parsedBody["messages"].([]interface{}); ok {
 			for _, msg := range messages {
@@ -3351,256 +3734,41 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	upstreamBodyBytes, _ := json.Marshal(parsedBody)
 
-	startTime := time.Now()
-
-	// 代理池选择 + 限流自动切换：最多尝试 len(pool) 个代理。
-	// 代理开关未开启或池为空时只尝试一次（重试只是对同一链路的重复请求，
-	// 首字超时重发反而放大慢响应，见 effectiveProxyAttempts）。
-	maxProxyAttempts := effectiveProxyAttempts(selected)
-
-	var resp *http.Response
-	var lastErr error
-	var attempt int
-	// lastProxy 保存最终成功使用的代理（用于 TTFB 择优记录与日志）。
-	lastProxy := ""
-	// firstChunk 保存流式首字等待阶段读到的首个数据块；无切换机会时首字在循环内读取。
-	var firstChunk []byte
-	var ttfbMs int64
-	firstWritten := false
-
-	// attemptCancel 指向最近一次请求的取消函数，函数返回前统一调用（幂等），
-	// 保证所有 attempt context 均被释放。
-	var attemptCancel context.CancelFunc
-	defer func() {
-		if attemptCancel != nil {
-			attemptCancel()
-		}
-	}()
-
-	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
-		attemptCtx, cancel := context.WithCancel(ctx)
-		attemptCancel = cancel
-		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, sessionKey, selected.Protocol)
-		if clientErr != nil {
-			cancel()
-			lastErr = clientErr
-			s.recordRelayError(RelayErrorRecord{
-				Route: "chat.completions", Kind: "config",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(startTime).Milliseconds(),
-				Error:     clientErr.Error(),
-			})
-			break
-		}
-		if currentProxy != "" {
-			lastProxy = currentProxy
-			egressIP = proxyEndpointAddr(currentProxy)
-		}
-
-		httpReq, err := http.NewRequestWithContext(attemptCtx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
-		if err != nil {
-			cancel()
-			s.recordRelayError(RelayErrorRecord{
-				Route: "chat.completions", Kind: "gateway",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(requestStarted).Milliseconds(),
-				Error:     "build upstream request failed: " + err.Error(),
-			})
-			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
-			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		httpReq.Header.Set("Authorization", "Bearer "+selected.APIKey)
-		httpReq.Header.Set("Content-Type", "application/json")
-		if stream {
-			httpReq.Header.Set("Accept", "text/event-stream")
+	res := s.relayLoop(relayLoopParams{
+		route:          "chat.completions",
+		ctx:            ctx,
+		db:             db,
+		selected:       selected,
+		model:          model,
+		fullURL:        fullURL,
+		body:           upstreamBodyBytes,
+		stream:         stream,
+		sessionKey:     sessionKey,
+		clientIP:       clientIP,
+		requestStarted: requestStarted,
+		viaProxy:       viaProxy,
+	})
+	if res.lastErr != nil && res.resp == nil {
+		// 失败原因与统计已在 relayLoop 内记录，这里仅按状态码写回响应。
+		if res.statusCode == http.StatusInternalServerError {
+			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": res.lastErr.Error()})
 		} else {
-			httpReq.Header.Set("Accept", "application/json")
+			response.JSON(w, res.statusCode, map[string]interface{}{"error": map[string]string{"message": res.lastErr.Error(), "type": "proxy_error"}})
 		}
-		applyCustomHeaders(httpReq, selected.Headers)
-
-		resp, lastErr = client.Do(httpReq)
-		if lastErr != nil {
-			// 连接失败（例如该代理不可用）：标记失败，若有池则切下一个继续。
-			s.markProxyFailed(selected.ID, currentProxy)
-			s.recordRelayError(RelayErrorRecord{
-				Route: "chat.completions", Kind: "dial",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(startTime).Milliseconds(),
-				Error:     lastErr.Error(),
-			})
-			cancel()
-			if attempt+1 < maxProxyAttempts {
-				continue
-			}
-			break
-		}
-
-		// 非流式：读取正文判断限流或 5xx，失败时在循环内重试。
-		// 上游限流/5xx 不是代理的错：只切换出口重试，不惩罚代理（不冷却），
-		// 避免上游故障污染整个代理池。
-		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
-			bodyBytesRead, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			cancel()
-			if readErr != nil || isRetryableUpstreamResponse(resp, bodyBytesRead) {
-				s.clearSessionBinding(selected.ID, sessionKey)
-				s.recordRelayError(RelayErrorRecord{
-					Route: "chat.completions", Kind: "upstream",
-					Endpoint: selected.Name, EndpointID: selected.ID,
-					Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-					ClientIP: clientIP, Attempts: attempt + 1,
-					ElapsedMs:  time.Since(startTime).Milliseconds(),
-					StatusCode: resp.StatusCode,
-					Upstream:   truncateForLog(string(bodyBytesRead), relayErrorBodyLimit),
-					Error:      "retryable upstream response",
-				})
-				continue
-			}
-			// 不是限流：重建带正文的响应继续处理。
-			resp.Body = io.NopCloser(bytes.NewReader(bodyBytesRead))
-			break
-		}
-
-		// 流式：仅按状态码判断，限流或 5xx 时切换代理重试一次（同样不惩罚代理）。
-		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRetryableUpstreamResponse(resp, nil) {
-			resp.Body.Close()
-			cancel()
-			s.clearSessionBinding(selected.ID, sessionKey)
-			s.recordRelayError(RelayErrorRecord{
-				Route: "chat.completions", Kind: "upstream",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs:  time.Since(startTime).Milliseconds(),
-				StatusCode: resp.StatusCode,
-				Error:      "retryable upstream response",
-			})
-			continue
-		}
-
-		if stream {
-			// 首字等待：若还有可切换的代理，则带超时等待首个字节，
-			// 超时或上游提前断流时标记该代理失败并切换下一个。
-			waitForFirst := selected.AutoSwitch && attempt+1 < maxProxyAttempts
-			if waitForFirst {
-				type readRes struct {
-					n   int
-					err error
-				}
-				ch := make(chan readRes, 1)
-				tmp := make([]byte, 4096)
-				go func() {
-					n, err := resp.Body.Read(tmp)
-					ch <- readRes{n, err}
-				}()
-				var r readRes
-				select {
-				case r = <-ch:
-				case <-time.After(firstTokenTimeout):
-					cancel()
-					resp.Body.Close()
-					s.markProxyFailed(selected.ID, currentProxy)
-					s.recordRelayError(RelayErrorRecord{
-						Route: "chat.completions", Kind: "timeout",
-						Endpoint: selected.Name, EndpointID: selected.ID,
-						Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-						ClientIP: clientIP, Attempts: attempt + 1,
-						ElapsedMs: time.Since(startTime).Milliseconds(),
-						Error:     fmt.Sprintf("no first byte within %s", firstTokenTimeout),
-					})
-					if attempt+1 < maxProxyAttempts {
-						continue
-					}
-					lastErr = fmt.Errorf("上游首字超时（超过 %s）", firstTokenTimeout)
-					break
-				}
-				if r.n > 0 {
-					firstChunk = append([]byte(nil), tmp[:r.n]...)
-					firstWritten = true
-					ttfbMs = time.Since(startTime).Milliseconds()
-					break
-				}
-				cancel()
-				resp.Body.Close()
-				s.markProxyFailed(selected.ID, currentProxy)
-				if attempt+1 < maxProxyAttempts {
-					continue
-				}
-				if lastErr == nil {
-					lastErr = r.err
-					if lastErr == nil {
-						lastErr = io.EOF
-					}
-					s.recordRelayError(RelayErrorRecord{
-						Route: "chat.completions", Kind: "stream_closed",
-						Endpoint: selected.Name, EndpointID: selected.ID,
-						Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-						ClientIP: clientIP, Attempts: attempt + 1,
-						ElapsedMs: time.Since(startTime).Milliseconds(),
-						Error:     "upstream closed stream before first byte: " + lastErr.Error(),
-					})
-				}
-				break
-			}
-
-			// 无切换机会：直接阻塞读首块，读取结果留给下方流式循环继续消费。
-			tmp := make([]byte, 4096)
-			n, err := resp.Body.Read(tmp)
-			if n > 0 {
-				firstChunk = append([]byte(nil), tmp[:n]...)
-				firstWritten = true
-				ttfbMs = time.Since(startTime).Milliseconds()
-				break
-			}
-			cancel()
-			lastErr = err
-			if lastErr == nil {
-				lastErr = io.EOF
-			}
-			s.recordRelayError(RelayErrorRecord{
-				Route: "chat.completions", Kind: "stream_closed",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(startTime).Milliseconds(),
-				Error:     "upstream closed stream before first byte: " + lastErr.Error(),
-			})
-			break
-		}
-		break
-	}
-
-	if lastErr != nil && resp == nil {
-		s.recordRelayError(RelayErrorRecord{
-			Route: "chat.completions", Kind: "bad_gateway",
-			Endpoint: selected.Name, EndpointID: selected.ID,
-			Model: model, Stream: stream, Proxy: hostFromProxyURL(lastProxy),
-			ClientIP: clientIP, Attempts: attempt + 1,
-			ElapsedMs: time.Since(startTime).Milliseconds(),
-			Error:     lastErr.Error(),
-		})
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
-		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
 		return
 	}
-	defer resp.Body.Close()
-
-	// Update last used timestamp
-	_, _ = db.ExecContext(ctx, "UPDATE openai_endpoints SET last_used = ? WHERE id = ?", time.Now().Format(time.RFC3339), selected.ID)
+	// 正文处理完/关闭后再释放 attempt context（defer 逆序：先关 Body 再 cancel）。
+	if res.cancel != nil {
+		defer res.cancel()
+	}
+	defer res.resp.Body.Close()
 
 	if stream {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(res.resp.StatusCode)
 
 		flusher, ok := w.(http.Flusher)
 		buf := make([]byte, 4096)
@@ -3615,17 +3783,17 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 首字等待阶段已读到的数据块，直接作为流式响应的首批内容写回。
-		if firstWritten && len(firstChunk) > 0 {
+		if res.firstWritten && len(res.firstChunk) > 0 {
 			extendStreamDeadline()
-			_, _ = w.Write(firstChunk)
-			tail = append(tail, firstChunk...)
+			_, _ = w.Write(res.firstChunk)
+			tail = append(tail, res.firstChunk...)
 			if ok {
 				flusher.Flush()
 			}
 		}
 
 		for {
-			n, err := resp.Body.Read(buf)
+			n, err := res.resp.Body.Read(buf)
 			if n > 0 {
 				extendStreamDeadline()
 				_, _ = w.Write(buf[:n])
@@ -3641,7 +3809,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		latencyMs := time.Since(startTime).Milliseconds()
+		latencyMs := time.Since(res.startTime).Milliseconds()
 
 		promptTokens := 0
 		completionTokens := 0
@@ -3664,15 +3832,15 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 			cachedTokens, _ = strconv.Atoi(matches[1])
 		}
 
-		s.recordProxyTTFB(selected.ID, lastProxy, ttfbMs)
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, ttfbMs, promptTokens, completionTokens, totalTokens, cachedTokens, boolToInt(stream), viaProxy, clientIP, egressIP)
+		s.recordProxyTTFB(selected.ID, res.lastProxy, res.ttfbMs)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, res.resp.StatusCode, latencyMs, res.ttfbMs, promptTokens, completionTokens, totalTokens, cachedTokens, boolToInt(stream), viaProxy, clientIP, res.egressIP)
 		s.recordEndpointLatency(selected.ID, latencyMs)
 		if keyIdentity := gatewayKeyFromContext(ctx); keyIdentity.ID != "" {
 			s.consumeGatewayKeyTokens(ctx, keyIdentity, int64(totalTokens))
 		}
 	} else {
-		respBodyBytes, _ := io.ReadAll(resp.Body)
-		latencyMs := time.Since(startTime).Milliseconds()
+		respBodyBytes, _ := io.ReadAll(res.resp.Body)
+		latencyMs := time.Since(res.startTime).Milliseconds()
 
 		var usageInfo struct {
 			Usage struct {
@@ -3686,16 +3854,401 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(respBodyBytes, &usageInfo)
 
-		s.recordProxyTTFB(selected.ID, lastProxy, latencyMs)
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, 0, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens, usageInfo.Usage.PromptTokensDetails.CachedTokens, boolToInt(stream), viaProxy, clientIP, egressIP)
+		s.recordProxyTTFB(selected.ID, res.lastProxy, latencyMs)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, res.resp.StatusCode, latencyMs, 0, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens, usageInfo.Usage.PromptTokensDetails.CachedTokens, boolToInt(stream), viaProxy, clientIP, res.egressIP)
 		s.recordEndpointLatency(selected.ID, latencyMs)
 		if keyIdentity := gatewayKeyFromContext(ctx); keyIdentity.ID != "" {
 			s.consumeGatewayKeyTokens(ctx, keyIdentity, int64(usageInfo.Usage.TotalTokens))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(res.resp.StatusCode)
 		_, _ = w.Write(respBodyBytes)
+	}
+}
+
+// normalizeResponsesTools 为缺失 name 的工具补充 name（取值等于 type）。
+// 上游 zen 用 serde flatten 解析 tools，要求每个工具都带顶层 name；
+// OpenAI 官方的 web_search 等工具本身没有 name 字段，补齐避免反序列化失败。
+func normalizeResponsesTools(body map[string]interface{}) {
+	tools, ok := body["tools"].([]interface{})
+	if !ok {
+		return
+	}
+	for _, item := range tools {
+		tool, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if _, has := tool["name"]; has {
+			continue
+		}
+		if t, ok := tool["type"].(string); ok && t != "" {
+			tool["name"] = t
+		}
+	}
+}
+
+// normalizeResponsesInput 规范化 Responses 请求的 input 列表，兼容 zen 的转换缺陷：
+//  1. assistant 消息的 content 数组（output_text 块）在 zen 转 chat 时不被识别，
+//     需提取文本为字符串，否则报 "Invalid assistant message: content or tool_calls must be set"。
+//  2. input 以 function_call_output 结尾时，zen 转成 chat 的 tool 消息后无后续 user，
+//     报 "reasoning_content in the thinking mode must be passed back"，
+//     末尾补一条空 user 消息即可通过。
+//  3. 独立 function_call items 归并到相邻 assistant 消息的 tool_calls（chat 风格）。
+//     zen 对独立 function_call item 的归并不稳定（同样的请求时而 200 时而 400
+//     "An assistant message with 'tool_calls' must be followed by tool messages responding
+//     to each 'tool_call_id'"），显式归并后可稳定通过。
+func normalizeResponsesInput(body map[string]interface{}) {
+	input, ok := body["input"].([]interface{})
+	if !ok {
+		return
+	}
+	normalized := make([]interface{}, 0, len(input))
+	var lastAssistant map[string]interface{}
+	for _, item := range input {
+		msg, ok := item.(map[string]interface{})
+		if !ok {
+			normalized = append(normalized, item)
+			continue
+		}
+		switch msg["type"] {
+		case "function_call":
+			// 归并到相邻 assistant 消息的 tool_calls，并丢弃独立 item。
+			if lastAssistant == nil {
+				// 防御：无前驱 assistant 时原样透传，避免静默丢弃。
+				normalized = append(normalized, item)
+				continue
+			}
+			name, _ := msg["name"].(string)
+			args, _ := msg["arguments"].(string)
+			callID, _ := msg["call_id"].(string)
+			if callID == "" {
+				callID, _ = msg["id"].(string)
+			}
+			if name != "" {
+				toolCalls, _ := lastAssistant["tool_calls"].([]interface{})
+				lastAssistant["tool_calls"] = append(toolCalls, map[string]interface{}{
+					"id":   callID,
+					"type": "function",
+					"function": map[string]interface{}{
+						"name":      name,
+						"arguments": args,
+					},
+				})
+			}
+			continue
+		}
+		normalized = append(normalized, item)
+		if msg["type"] == "message" {
+			if role, _ := msg["role"].(string); role == "assistant" {
+				lastAssistant = msg
+			} else {
+				lastAssistant = nil
+			}
+		}
+	}
+
+	// assistant 消息的 content 数组提取为字符串。
+	for _, item := range normalized {
+		msg, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if msg["type"] != "message" {
+			continue
+		}
+		if role, _ := msg["role"].(string); role != "assistant" {
+			continue
+		}
+		contentArr, ok := msg["content"].([]interface{})
+		if !ok || len(contentArr) == 0 {
+			continue
+		}
+		var text strings.Builder
+		hasText := false
+		for _, part := range contentArr {
+			partMap, ok := part.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if partMap["type"] != "output_text" && partMap["type"] != "input_text" {
+				continue
+			}
+			if t, ok := partMap["text"].(string); ok {
+				if hasText {
+					text.WriteString("\n")
+				}
+				text.WriteString(t)
+				hasText = true
+			}
+		}
+		if hasText {
+			msg["content"] = text.String()
+		}
+	}
+
+	// 末尾补齐：若最后一条是 function_call_output，追加空 user 消息。
+	if len(normalized) > 0 {
+		if last, ok := normalized[len(normalized)-1].(map[string]interface{}); ok {
+			if t, _ := last["type"].(string); t == "function_call_output" {
+				normalized = append(normalized, map[string]interface{}{
+					"type":    "message",
+					"role":    "user",
+					"content": "",
+				})
+			}
+		}
+	}
+	body["input"] = normalized
+}
+
+// sseDataJSON 提取 SSE 事件块中 data: 行的内容。
+func sseDataJSON(block []byte) (string, bool) {
+	for _, line := range strings.Split(string(block), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(line, "data:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
+		}
+	}
+	return "", false
+}
+
+// responsesStreamNormalizer 把上游精简的 Responses 流式事件补全为 Codex 可解析的标准事件序列。
+// 部分上游（如 zen）直接发 output_text.delta / function_call_arguments.delta，缺少
+// output_item.added（message 前导）与 output_item.done（完整 item）事件；Codex 在
+// active item 缺失时收到文本 delta 会直接报错（OutputTextDelta without active item），
+// 且工具调用的完整 arguments 只从 output_item.done 中读取，缺失会导致调用永远不执行。
+// 网关在此补全：文本 delta 前注入 message item 的 added，item 切换与 completed 前注入 done。
+type responsesStreamNormalizer struct {
+	model      string
+	respID     string
+	createdSent bool
+	msgOpen    bool
+	msgID      string
+	msgText    strings.Builder
+	fnOpen     bool
+	fnID       string
+	fnName     string
+	fnCallID   string
+	fnArgs     strings.Builder
+}
+
+func newResponsesStreamNormalizer(model string) *responsesStreamNormalizer {
+	return &responsesStreamNormalizer{model: model}
+}
+
+// sseEventType 解析 SSE 事件块中的 data JSON 的 type 字段。
+func sseEventType(block []byte) (string, map[string]interface{}) {
+	dataJSON, ok := sseDataJSON(block)
+	if !ok {
+		return "", nil
+	}
+	var ev map[string]interface{}
+	if err := json.Unmarshal([]byte(dataJSON), &ev); err != nil {
+		return "", nil
+	}
+	t, _ := ev["type"].(string)
+	return t, ev
+}
+
+func sseEventBlock(eventType string, payload interface{}) []byte {
+	payloadJSON, _ := json.Marshal(payload)
+	out := append([]byte("event: "+eventType+"\ndata: "), payloadJSON...)
+	return append(out, []byte("\n\n")...)
+}
+
+// transform 处理一个上游事件块，返回需要写出的一个或多个事件块。
+func (n *responsesStreamNormalizer) transform(block []byte) [][]byte {
+	eventType, ev := sseEventType(block)
+	if eventType == "" {
+		return [][]byte{block}
+	}
+
+	var outs [][]byte
+
+	// 首事件前注入 response.created（若上游未发）。
+	if !n.createdSent {
+		n.createdSent = true
+		if eventType != "response.created" {
+			respID := n.respID
+			if respID == "" {
+				respID = uuid.NewString()
+			}
+			n.respID = respID
+			outs = append(outs, sseEventBlock("response.created", map[string]interface{}{
+				"type": "response.created",
+				"response": map[string]interface{}{
+					"id":         respID,
+					"object":     "response",
+					"created_at": time.Now().Unix(),
+					"status":     "in_progress",
+					"model":      n.model,
+					"output":     []interface{}{},
+					"usage":      nil,
+				},
+			}))
+		}
+	}
+
+	switch eventType {
+	case "response.created":
+		if n.respID == "" {
+			if resp, ok := ev["response"].(map[string]interface{}); ok {
+				if id, ok := resp["id"].(string); ok {
+					n.respID = id
+				}
+			}
+		}
+	case "response.output_text.delta":
+		// Codex 需要 message item 先建立（active item）才能挂文本 delta。
+		if !n.msgOpen {
+			n.msgOpen = true
+			n.msgID = "msg_" + uuid.NewString()
+			outs = append(outs, sseEventBlock("response.output_item.added", map[string]interface{}{
+				"type":        "response.output_item.added",
+				"output_index": 0,
+				"item": map[string]interface{}{
+					"id":     n.msgID,
+					"type":   "message",
+					"status": "in_progress",
+					"role":   "assistant",
+					"content": []interface{}{},
+				},
+			}))
+		}
+		if delta, ok := ev["delta"].(string); ok {
+			n.msgText.WriteString(delta)
+		}
+	case "response.output_item.added":
+		if item, ok := ev["item"].(map[string]interface{}); ok {
+			itemType, _ := item["type"].(string)
+			switch itemType {
+			case "message":
+				n.msgOpen = true
+				if id, ok := item["id"].(string); ok {
+					n.msgID = id
+				}
+			case "function_call":
+				// 切换 item 前先关闭未完成的 message 与上一个 function_call
+				// （上游并行工具调用时会连续发多个 function_call 的 added，
+				// 不关闭会导致参数拼进同一个 arguments 变成非法 JSON）。
+				outs = append(outs, n.closeMessageIfOpen()...)
+				outs = append(outs, n.closeFunctionIfOpen()...)
+				n.fnOpen = true
+				if id, ok := item["id"].(string); ok {
+					n.fnID = id
+				}
+				if name, ok := item["name"].(string); ok {
+					n.fnName = name
+				}
+				if callID, ok := item["call_id"].(string); ok {
+					n.fnCallID = callID
+				}
+			}
+		}
+	case "response.function_call_arguments.delta":
+		if delta, ok := ev["delta"].(string); ok {
+			n.fnArgs.WriteString(delta)
+		}
+	case "response.output_item.done":
+		if item, ok := ev["item"].(map[string]interface{}); ok {
+			if itemType, _ := item["type"].(string); itemType == "message" {
+				n.msgOpen = false
+				n.msgText.Reset()
+			} else if itemType == "function_call" {
+				n.fnOpen = false
+				n.fnArgs.Reset()
+			}
+		}
+	case "response.completed":
+		outs = append(outs, n.closeFunctionIfOpen()...)
+		outs = append(outs, n.closeMessageIfOpen()...)
+	}
+
+	outs = append(outs, block)
+	return outs
+}
+
+// closeMessageIfOpen 关闭未完成的 message item（补齐 output_item.done）。
+func (n *responsesStreamNormalizer) closeMessageIfOpen() [][]byte {
+	if !n.msgOpen {
+		return nil
+	}
+	n.msgOpen = false
+	content := []interface{}{}
+	if n.msgText.Len() > 0 {
+		content = append(content, map[string]interface{}{
+			"type": "output_text",
+			"text": n.msgText.String(),
+		})
+	}
+	done := sseEventBlock("response.output_item.done", map[string]interface{}{
+		"type":        "response.output_item.done",
+		"output_index": 0,
+		"item": map[string]interface{}{
+			"id":      n.msgID,
+			"type":    "message",
+			"status":  "completed",
+			"role":    "assistant",
+			"content": content,
+		},
+	})
+	n.msgText.Reset()
+	return [][]byte{done}
+}
+
+// closeFunctionIfOpen 关闭未完成的 function_call item（补齐 output_item.done 与完整 arguments）。
+func (n *responsesStreamNormalizer) closeFunctionIfOpen() [][]byte {
+	if !n.fnOpen {
+		return nil
+	}
+	n.fnOpen = false
+	callID := n.fnCallID
+	if callID == "" {
+		callID = n.fnID
+	}
+	done := sseEventBlock("response.output_item.done", map[string]interface{}{
+		"type":        "response.output_item.done",
+		"output_index": 0,
+		"item": map[string]interface{}{
+			"id":        n.fnID,
+			"type":      "function_call",
+			"status":    "completed",
+			"name":      n.fnName,
+			"arguments": n.fnArgs.String(),
+			"call_id":   callID,
+		},
+	})
+	n.fnArgs.Reset()
+	return [][]byte{done}
+}
+
+// readSSEBlock 从流中读取一个完整 SSE 事件块（到空行结束，含结尾空行）。
+func readSSEBlock(br *bufio.Reader) ([]byte, error) {
+	var buf bytes.Buffer
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) > 0 {
+			trimmed := strings.TrimRight(line, "\r\n")
+			if trimmed == "" {
+				if buf.Len() > 0 {
+					buf.WriteString(line)
+					return buf.Bytes(), nil
+				}
+				if err != nil {
+					return nil, err
+				}
+				continue
+			}
+			buf.WriteString(line)
+		}
+		if err != nil {
+			if buf.Len() > 0 {
+				return buf.Bytes(), nil
+			}
+			return nil, err
+		}
 	}
 }
 
@@ -3798,290 +4351,92 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	fullURL += "/responses"
 
-	egressIP := s.egressOutbound()
-
 	// 若请求模型名是对外别名，转发到上游时还原为真实模型名。
 	if selectedModel != model && selectedModel != "" {
 		parsedBody["model"] = selectedModel
 	}
+	normalizeResponsesTools(parsedBody)
+	normalizeResponsesInput(parsedBody)
 	upstreamBodyBytes, _ := json.Marshal(parsedBody)
 
-	startTime := time.Now()
-
-	maxProxyAttempts := effectiveProxyAttempts(selected)
-
-	var resp *http.Response
-	var lastErr error
-	var attempt int
-	lastProxy := ""
-	var firstChunk []byte
-	var ttfbMs int64
-	firstWritten := false
-
-	var attemptCancel context.CancelFunc
-	defer func() {
-		if attemptCancel != nil {
-			attemptCancel()
-		}
-	}()
-
-	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
-		attemptCtx, cancel := context.WithCancel(ctx)
-		attemptCancel = cancel
-		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, sessionKey, selected.Protocol)
-		if clientErr != nil {
-			cancel()
-			lastErr = clientErr
-			s.recordRelayError(RelayErrorRecord{
-				Route: "responses", Kind: "config",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(startTime).Milliseconds(),
-				Error:     clientErr.Error(),
-			})
-			break
-		}
-		if currentProxy != "" {
-			lastProxy = currentProxy
-			egressIP = proxyEndpointAddr(currentProxy)
-		}
-
-		httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, fullURL, bytes.NewReader(upstreamBodyBytes))
-		if err != nil {
-			cancel()
-			s.recordRelayError(RelayErrorRecord{
-				Route: "responses", Kind: "gateway",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(requestStarted).Milliseconds(),
-				Error:     "build upstream request failed: " + err.Error(),
-			})
-			s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
-			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		httpReq.Header.Set("Authorization", "Bearer "+selected.APIKey)
-		httpReq.Header.Set("Content-Type", "application/json")
-		if stream {
-			httpReq.Header.Set("Accept", "text/event-stream")
+	res := s.relayLoop(relayLoopParams{
+		route:          "responses",
+		ctx:            ctx,
+		db:             db,
+		selected:       selected,
+		model:          model,
+		fullURL:        fullURL,
+		body:           upstreamBodyBytes,
+		stream:         stream,
+		sessionKey:     sessionKey,
+		clientIP:       clientIP,
+		requestStarted: requestStarted,
+		viaProxy:       viaProxy,
+	})
+	if res.lastErr != nil && res.resp == nil {
+		// 失败原因与统计已在 relayLoop 内记录，这里仅按状态码写回响应。
+		if res.statusCode == http.StatusInternalServerError {
+			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": res.lastErr.Error()})
 		} else {
-			httpReq.Header.Set("Accept", "application/json")
+			response.JSON(w, res.statusCode, map[string]interface{}{"error": map[string]string{"message": res.lastErr.Error(), "type": "proxy_error"}})
 		}
-		applyCustomHeaders(httpReq, selected.Headers)
-
-		resp, lastErr = client.Do(httpReq)
-		if lastErr != nil {
-			s.markProxyFailed(selected.ID, currentProxy)
-			s.recordRelayError(RelayErrorRecord{
-				Route: "responses", Kind: "dial",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(startTime).Milliseconds(),
-				Error:     lastErr.Error(),
-			})
-			cancel()
-			if attempt+1 < maxProxyAttempts {
-				continue
-			}
-			break
-		}
-
-		// 非流式：读取正文判断限流或 5xx，失败时切换代理重试（上游限流/5xx 不惩罚代理）。
-		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
-			bodyBytesRead, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			cancel()
-			if readErr != nil || isRetryableUpstreamResponse(resp, bodyBytesRead) {
-				s.clearSessionBinding(selected.ID, sessionKey)
-				s.recordRelayError(RelayErrorRecord{
-					Route: "responses", Kind: "upstream",
-					Endpoint: selected.Name, EndpointID: selected.ID,
-					Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-					ClientIP: clientIP, Attempts: attempt + 1,
-					ElapsedMs:  time.Since(startTime).Milliseconds(),
-					StatusCode: resp.StatusCode,
-					Upstream:   truncateForLog(string(bodyBytesRead), relayErrorBodyLimit),
-					Error:      "retryable upstream response",
-				})
-				continue
-			}
-			resp.Body = io.NopCloser(bytes.NewReader(bodyBytesRead))
-			break
-		}
-
-		// 流式：仅按状态码判断，限流或 5xx 时切换代理重试（同样不惩罚代理）。
-		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRetryableUpstreamResponse(resp, nil) {
-			resp.Body.Close()
-			cancel()
-			s.clearSessionBinding(selected.ID, sessionKey)
-			s.recordRelayError(RelayErrorRecord{
-				Route: "responses", Kind: "upstream",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs:  time.Since(startTime).Milliseconds(),
-				StatusCode: resp.StatusCode,
-				Error:      "retryable upstream response",
-			})
-			continue
-		}
-
-		if stream {
-			waitForFirst := selected.AutoSwitch && attempt+1 < maxProxyAttempts
-			if waitForFirst {
-				type readRes struct {
-					n   int
-					err error
-				}
-				ch := make(chan readRes, 1)
-				tmp := make([]byte, 4096)
-				go func() {
-					n, err := resp.Body.Read(tmp)
-					ch <- readRes{n, err}
-				}()
-				var r readRes
-				select {
-				case r = <-ch:
-				case <-time.After(firstTokenTimeout):
-					cancel()
-					resp.Body.Close()
-					s.markProxyFailed(selected.ID, currentProxy)
-					s.recordRelayError(RelayErrorRecord{
-						Route: "responses", Kind: "timeout",
-						Endpoint: selected.Name, EndpointID: selected.ID,
-						Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-						ClientIP: clientIP, Attempts: attempt + 1,
-						ElapsedMs: time.Since(startTime).Milliseconds(),
-						Error:     fmt.Sprintf("no first byte within %s", firstTokenTimeout),
-					})
-					if attempt+1 < maxProxyAttempts {
-						continue
-					}
-					lastErr = fmt.Errorf("上游首字超时（超过 %s）", firstTokenTimeout)
-					break
-				}
-				if r.n > 0 {
-					firstChunk = append([]byte(nil), tmp[:r.n]...)
-					firstWritten = true
-					ttfbMs = time.Since(startTime).Milliseconds()
-					break
-				}
-				cancel()
-				resp.Body.Close()
-				s.markProxyFailed(selected.ID, currentProxy)
-				if attempt+1 < maxProxyAttempts {
-					continue
-				}
-				if lastErr == nil {
-					lastErr = r.err
-					if lastErr == nil {
-						lastErr = io.EOF
-					}
-					s.recordRelayError(RelayErrorRecord{
-						Route: "responses", Kind: "stream_closed",
-						Endpoint: selected.Name, EndpointID: selected.ID,
-						Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-						ClientIP: clientIP, Attempts: attempt + 1,
-						ElapsedMs: time.Since(startTime).Milliseconds(),
-						Error:     "upstream closed stream before first byte: " + lastErr.Error(),
-					})
-				}
-				break
-			}
-
-			tmp := make([]byte, 4096)
-			n, err := resp.Body.Read(tmp)
-			if n > 0 {
-				firstChunk = append([]byte(nil), tmp[:n]...)
-				firstWritten = true
-				ttfbMs = time.Since(startTime).Milliseconds()
-				break
-			}
-			cancel()
-			lastErr = err
-			if lastErr == nil {
-				lastErr = io.EOF
-			}
-			s.recordRelayError(RelayErrorRecord{
-				Route: "responses", Kind: "stream_closed",
-				Endpoint: selected.Name, EndpointID: selected.ID,
-				Model: model, Stream: stream, Proxy: hostFromProxyURL(currentProxy),
-				ClientIP: clientIP, Attempts: attempt + 1,
-				ElapsedMs: time.Since(startTime).Milliseconds(),
-				Error:     "upstream closed stream before first byte: " + lastErr.Error(),
-			})
-			break
-		}
-		break
-	}
-
-	if lastErr != nil && resp == nil {
-		s.recordRelayError(RelayErrorRecord{
-			Route: "responses", Kind: "bad_gateway",
-			Endpoint: selected.Name, EndpointID: selected.ID,
-			Model: model, Stream: stream, Proxy: hostFromProxyURL(lastProxy),
-			ClientIP: clientIP, Attempts: attempt + 1,
-			ElapsedMs: time.Since(startTime).Milliseconds(),
-			Error:     lastErr.Error(),
-		})
-		s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
-		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
 		return
 	}
-	defer resp.Body.Close()
-
-	_, _ = db.ExecContext(ctx, "UPDATE openai_endpoints SET last_used = ? WHERE id = ?", time.Now().Format(time.RFC3339), selected.ID)
+	// 正文处理完/关闭后再释放 attempt context（defer 逆序：先关 Body 再 cancel）。
+	if res.cancel != nil {
+		defer res.cancel()
+	}
+	defer res.resp.Body.Close()
 
 	if stream {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(res.resp.StatusCode)
 
 		flusher, ok := w.(http.Flusher)
-		buf := make([]byte, 4096)
 		// 每次写前延长写超时，避免 http.Server.WriteTimeout 掐断长流式响应。
 		extendStreamDeadline := func() {
 			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(streamWriteDeadline))
 		}
-		if firstWritten && len(firstChunk) > 0 {
-			extendStreamDeadline()
-			_, _ = w.Write(firstChunk)
-			if ok {
-				flusher.Flush()
-			}
+		// 部分上游（如 zen）的 Responses 流缺少 response.created / output_item 容器事件，
+		// Codex 等 SDK 依赖它们初始化响应与挂载文本/工具参数，缺失会导致空白回。
+		// 用状态机逐事件补全后转发。
+		normalizer := newResponsesStreamNormalizer(model)
+		streamReader := bufio.NewReader(res.resp.Body)
+		if res.firstWritten && len(res.firstChunk) > 0 {
+			streamReader = bufio.NewReader(io.MultiReader(bytes.NewReader(res.firstChunk), res.resp.Body))
 		}
 		for {
-			n, err := resp.Body.Read(buf)
-			if n > 0 {
-				extendStreamDeadline()
-				_, _ = w.Write(buf[:n])
-				if ok {
-					flusher.Flush()
+			block, readErr := readSSEBlock(streamReader)
+			if len(block) > 0 {
+				for _, out := range normalizer.transform(block) {
+					extendStreamDeadline()
+					_, _ = w.Write(out)
+					if ok {
+						flusher.Flush()
+					}
 				}
 			}
-			if err != nil {
+			if readErr != nil {
 				break
 			}
 		}
-		latencyMs := time.Since(startTime).Milliseconds()
+		latencyMs := time.Since(res.startTime).Milliseconds()
 
-		s.recordProxyTTFB(selected.ID, lastProxy, ttfbMs)
-		s.RecordAnalytics(ctx, "responses", selected.ID, model, resp.StatusCode, latencyMs, ttfbMs, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
+		s.recordProxyTTFB(selected.ID, res.lastProxy, res.ttfbMs)
+		s.RecordAnalytics(ctx, "responses", selected.ID, model, res.resp.StatusCode, latencyMs, res.ttfbMs, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, res.egressIP)
 	} else {
-		respBodyBytes, _ := io.ReadAll(resp.Body)
-		latencyMs := time.Since(startTime).Milliseconds()
+		respBodyBytes, _ := io.ReadAll(res.resp.Body)
+		latencyMs := time.Since(res.startTime).Milliseconds()
 
-		s.recordProxyTTFB(selected.ID, lastProxy, latencyMs)
-		s.RecordAnalytics(ctx, "responses", selected.ID, model, resp.StatusCode, latencyMs, 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
+		s.recordProxyTTFB(selected.ID, res.lastProxy, latencyMs)
+		s.RecordAnalytics(ctx, "responses", selected.ID, model, res.resp.StatusCode, latencyMs, 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, res.egressIP)
 		s.recordEndpointLatency(selected.ID, latencyMs)
 
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(res.resp.StatusCode)
 		_, _ = w.Write(respBodyBytes)
 	}
 }

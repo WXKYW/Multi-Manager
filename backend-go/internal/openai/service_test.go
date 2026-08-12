@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1366,7 +1367,7 @@ func TestRelayErrorsBufferCap(t *testing.T) {
 
 // setupTwoProxyEndpoint 创建一个带两个 mock 代理的端点，返回 service 与端点 id。
 // proxyHandler 负责两个代理的响应行为；hitCounters 可选记录每个代理的命中次数。
-func setupTwoProxyEndpoint(t *testing.T, proxy1Handler, proxy2Handler http.HandlerFunc) (*Service, string) {
+func setupTwoProxyEndpoint(t *testing.T, proxy1Handler, proxy2Handler http.HandlerFunc) (*Service, string, string, string) {
 	t.Helper()
 	var proxy1Hits, proxy2Hits int32
 	proxy1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1419,7 +1420,7 @@ func setupTwoProxyEndpoint(t *testing.T, proxy1Handler, proxy2Handler http.Handl
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service, createRes.Endpoint.ID
+	return service, createRes.Endpoint.ID, proxy1.URL, proxy2.URL
 }
 
 func chatRequest(t *testing.T, service *Service, endpointID string, stream bool, sessionID string) *httptest.ResponseRecorder {
@@ -1451,7 +1452,7 @@ func TestSessionProxyRotatesAfterRequestLimit(t *testing.T) {
 	sessionProxyRequestLimit = 2
 	defer func() { sessionProxyRequestLimit = oldLimit }()
 
-	service, endpointID := setupTwoProxyEndpoint(t, okHandler, okHandler)
+	service, endpointID, _, _ := setupTwoProxyEndpoint(t, okHandler, okHandler)
 
 	for i := 0; i < 2; i++ {
 		w := chatRequest(t, service, endpointID, false, "sess-sticky")
@@ -1474,8 +1475,9 @@ func TestSessionProxyRotatesAfterRequestLimit(t *testing.T) {
 }
 
 func TestUpstream429DoesNotCoolProxy(t *testing.T) {
-	// 上游 429 是上游限额，不是代理故障：切换出口后不应惩罚代理（无冷却记录）。
-	service, endpointID := setupTwoProxyEndpoint(t,
+	// 上游 429 是上游限额，不是代理故障：单次 429 不惩罚代理（无冷却、无失败计数），
+	// 只切换出口；但 429 会累计计数，达到阈值后触发禁用（见 TestProxy429BannedAfterThreshold）。
+	service, endpointID, proxy1URL, _ := setupTwoProxyEndpoint(t,
 		func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusTooManyRequests)
 			w.Write([]byte(`{"error":{"message":"rate limit"}}`))
@@ -1492,9 +1494,55 @@ func TestUpstream429DoesNotCoolProxy(t *testing.T) {
 	state := service.proxyStateByEndpoint[endpointID]
 	cooldownCount := len(state.cooldown)
 	failureCount := len(state.failures)
+	rateCount := state.rate429[proxy1URL]
+	limitedCount := len(state.rateLimited)
 	service.proxyMu.Unlock()
 	if cooldownCount != 0 || failureCount != 0 {
 		t.Fatalf("429 must not penalize proxies: cooldown=%d failures=%d", cooldownCount, failureCount)
+	}
+	if rateCount != 1 {
+		t.Fatalf("single 429 should count once toward ban, got %d", rateCount)
+	}
+	if limitedCount != 0 {
+		t.Fatalf("single 429 must not ban the proxy yet, got %d limited", limitedCount)
+	}
+}
+
+func TestProxy429BannedAfterThreshold(t *testing.T) {
+	// 同一代理累计 3 次 429 后禁用 30 分钟；禁用期内选择逻辑跳过它，
+	// 到期后自动释放（时间判断，无需主动清理）。
+	service, endpointID, proxy1URL, _ := setupTwoProxyEndpoint(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+		},
+		okHandler,
+	)
+
+	for i := 0; i < proxy429BanThreshold; i++ {
+		w := chatRequest(t, service, endpointID, false, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("attempt %d failed: %d %s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	service.proxyMu.Lock()
+	state := service.proxyStateByEndpoint[endpointID]
+	until, banned := state.rateLimited[proxy1URL]
+	service.proxyMu.Unlock()
+	if !banned {
+		t.Fatal("expected proxy1 banned after 3×429")
+	}
+	expect := time.Now().Add(proxy429BanDuration)
+	if until.Before(expect.Add(-5*time.Second)) || until.After(expect.Add(5*time.Second)) {
+		t.Fatalf("ban expiry = %v, want ~%v", until, expect)
+	}
+	// 禁用期内：选择应跳过 proxy1（此时 state.cursor 已推进，proxy2 可正常服务）。
+	if !proxyRateLimited(state, proxy1URL, time.Now()) {
+		t.Fatal("proxyRateLimited should report banned while within duration")
+	}
+	if proxyRateLimited(state, proxy1URL, until.Add(time.Second)) {
+		t.Fatal("proxyRateLimited should release after expiry")
 	}
 }
 
@@ -1544,5 +1592,215 @@ func TestMarkProxyFailedExponentialBackoff(t *testing.T) {
 	service.proxyMu.Unlock()
 	if hasCooldown || hasFailures {
 		t.Fatalf("markProxySuccess should clear cooldown and failures")
+	}
+}
+
+func TestNormalizeResponsesTools(t *testing.T) {
+	body := map[string]interface{}{
+		"model": "m",
+		"tools": []interface{}{
+			map[string]interface{}{"type": "function", "name": "shell", "description": "d"},
+			map[string]interface{}{"type": "web_search", "external_web_access": false},
+			map[string]interface{}{"type": "namespace", "name": "ns"},
+			map[string]interface{}{"type": "web_search"},
+			"not-a-tool",
+		},
+	}
+	normalizeResponsesTools(body)
+	tools := body["tools"].([]interface{})
+	if tools[0].(map[string]interface{})["name"] != "shell" {
+		t.Errorf("function tool name changed unexpectedly")
+	}
+	if tools[1].(map[string]interface{})["name"] != "web_search" {
+		t.Errorf("web_search tool should get name=web_search, got %v", tools[1].(map[string]interface{})["name"])
+	}
+	if tools[2].(map[string]interface{})["name"] != "ns" {
+		t.Errorf("namespace tool name should be preserved")
+	}
+	if tools[3].(map[string]interface{})["name"] != "web_search" {
+		t.Errorf("bare web_search tool should get name=web_search")
+	}
+	if len(body["tools"].([]interface{})) != 5 {
+		t.Errorf("tool list length should stay the same")
+	}
+
+	empty := map[string]interface{}{"model": "m"}
+	normalizeResponsesTools(empty)
+	if _, ok := empty["tools"]; ok {
+		t.Errorf("tools should not be added when absent")
+	}
+}
+
+func TestResponsesStreamNormalizer(t *testing.T) {
+	norm := newResponsesStreamNormalizer("m")
+	var out []byte
+	var events []string
+	write := func(blocks [][]byte) {
+		for _, b := range blocks {
+			out = append(out, b...)
+		}
+	}
+
+	// 文本 delta：应注入 created + message added，然后透传 delta。
+	write(norm.transform([]byte("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n")))
+	// 第二个 delta：不重复注入。
+	write(norm.transform([]byte("event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ya\"}\n\n")))
+	// function_call added：先关闭 message，再透传。
+	write(norm.transform([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"shell_command\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n")))
+	// arguments delta。
+	write(norm.transform([]byte("event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"command\\\":\\\"echo hi\\\"}\"}\n\n")))
+	// completed：先关闭 function_call，再透传。
+	write(norm.transform([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"usage\":{}}}\n\n")))
+
+	data := string(out)
+	if !strings.Contains(data, "event: response.created") {
+		t.Errorf("missing created event")
+	}
+	if !strings.Contains(data, "response.output_item.added") {
+		t.Errorf("missing message item added")
+	}
+	if !strings.Contains(data, "event: response.output_item.done") {
+		t.Errorf("missing output_item.done")
+	}
+	if !strings.Contains(data, "event: response.function_call_arguments.delta") {
+		t.Errorf("function args delta lost")
+	}
+
+	// 校验 message done 内容聚合了全部文本。
+	for _, line := range strings.Split(data, "\n") {
+		if strings.Contains(line, "output_item.done") {
+			t.Logf("done event line: %s", line)
+		}
+	}
+	if !strings.Contains(data, "hiya") {
+		t.Errorf("message done should aggregate text deltas, got:\n%s", data)
+	}
+	if !strings.Contains(data, "\\\"command\\\":\\\"echo hi\\\"") {
+		t.Errorf("function_call done should carry full arguments, got:\n%s", data)
+	}
+
+	// 事件计数：created+added+delta+delta+done(message)+added(fn)+delta+done(fn)+completed
+	events = nil
+	for _, line := range strings.Split(data, "\n") {
+		if strings.HasPrefix(line, "event: ") {
+			events = append(events, strings.TrimPrefix(line, "event: "))
+		}
+	}
+	t.Logf("event sequence: %v", events)
+}
+
+func TestReadSSEBlock(t *testing.T) {
+	br := bufio.NewReader(strings.NewReader("event: a\ndata: {\"x\":1}\n\nevent: b\ndata: {\"x\":2}\n\n"))
+	first, err := readSSEBlock(br)
+	if err != nil || !strings.Contains(string(first), "\"x\":1") {
+		t.Errorf("first block wrong: %q err=%v", first, err)
+	}
+	second, err := readSSEBlock(br)
+	if err != nil || !strings.Contains(string(second), "\"x\":2") {
+		t.Errorf("second block wrong: %q err=%v", second, err)
+	}
+	if _, err := readSSEBlock(br); err == nil {
+		t.Errorf("expect EOF on exhausted stream")
+	}
+}
+
+
+func TestNormalizeResponsesInput(t *testing.T) {
+	body := map[string]interface{}{
+		"input": []interface{}{
+			map[string]interface{}{"type": "message", "role": "user", "content": "hi"},
+			map[string]interface{}{"type": "message", "role": "assistant", "content": []interface{}{
+				map[string]interface{}{"type": "output_text", "text": "hello"},
+			}},
+			map[string]interface{}{"type": "function_call", "id": "c1", "call_id": "c1", "name": "get_goal", "arguments": "{}"},
+			map[string]interface{}{"type": "function_call", "id": "c2", "call_id": "c2", "name": "get_goal", "arguments": "{\"x\":1}"},
+			map[string]interface{}{"type": "function_call_output", "call_id": "c1", "output": "done"},
+		},
+	}
+	normalizeResponsesInput(body)
+	input := body["input"].([]interface{})
+	if len(input) != 4 {
+		t.Fatalf("should have user, assistant, output, trailing user = 4 items, got %d", len(input))
+	}
+	assistant := input[1].(map[string]interface{})
+	if assistant["content"] != "hello" {
+		t.Errorf("assistant content should be extracted to string, got %v", assistant["content"])
+	}
+	toolCalls, ok := assistant["tool_calls"].([]interface{})
+	if !ok || len(toolCalls) != 2 {
+		t.Fatalf("assistant should have 2 merged tool_calls, got %#v", assistant["tool_calls"])
+	}
+	fc0 := toolCalls[0].(map[string]interface{})
+	if fc0["id"] != "c1" || fc0["type"] != "function" {
+		t.Errorf("tool_call[0] malformed: %#v", fc0)
+	}
+	fn0 := fc0["function"].(map[string]interface{})
+	if fn0["name"] != "get_goal" || fn0["arguments"] != "{}" {
+		t.Errorf("tool_call[0].function malformed: %#v", fn0)
+	}
+	trailing := input[3].(map[string]interface{})
+	if trailing["type"] != "message" || trailing["role"] != "user" {
+		t.Errorf("trailing message should be empty user, got %v", trailing)
+	}
+
+	// 多 output_text 块拼接。
+	body2 := map[string]interface{}{
+		"input": []interface{}{
+			map[string]interface{}{"type": "message", "role": "assistant", "content": []interface{}{
+				map[string]interface{}{"type": "output_text", "text": "a"},
+				map[string]interface{}{"type": "output_text", "text": "b"},
+			}},
+		},
+	}
+	normalizeResponsesInput(body2)
+	if got := body2["input"].([]interface{})[0].(map[string]interface{})["content"]; got != "a\nb" {
+		t.Errorf("multi output_text should join with newline, got %q", got)
+	}
+
+	// 末尾不是 function_call_output 时不追加。
+	body3 := map[string]interface{}{
+		"input": []interface{}{
+			map[string]interface{}{"type": "message", "role": "user", "content": "hi"},
+		},
+	}
+	normalizeResponsesInput(body3)
+	if len(body3["input"].([]interface{})) != 1 {
+		t.Errorf("should not append when last is user")
+	}
+
+	// 无 input 时不动。
+	body4 := map[string]interface{}{"model": "m"}
+	normalizeResponsesInput(body4)
+	if _, ok := body4["input"]; ok {
+		t.Errorf("input should not be added when absent")
+	}
+}
+
+func TestResponsesStreamNormalizerParallelTools(t *testing.T) {
+	norm := newResponsesStreamNormalizer("m")
+	var out []byte
+	write := func(blocks [][]byte) {
+		for _, b := range blocks {
+			out = append(out, b...)
+		}
+	}
+	write(norm.transform([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"call_1\",\"name\":\"get_goal\",\"call_id\":\"call_1\",\"arguments\":\"\"}}\n\n")))
+	write(norm.transform([]byte("event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"a\\\":1}\"}\n\n")))
+	write(norm.transform([]byte("event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"function_call\",\"id\":\"call_2\",\"name\":\"get_goal\",\"call_id\":\"call_2\",\"arguments\":\"\"}}\n\n")))
+	write(norm.transform([]byte("event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"b\\\":2}\"}\n\n")))
+	write(norm.transform([]byte("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"usage\":{}}}\n\n")))
+
+	data := string(out)
+	if !strings.Contains(data, "{\\\"a\\\":1}") || !strings.Contains(data, "{\\\"b\\\":2}") {
+		t.Errorf("each tool should keep its own arguments, got:\n%s", data)
+	}
+	if strings.Contains(data, "{\\\"a\\\":1}{\\\"b\\\":2}") {
+		t.Errorf("arguments of different tools must not be concatenated:\n%s", data)
+	}
+	if strings.Count(data, "event: response.output_item.done") != 2 {
+		t.Errorf("should emit done for both function calls, got:\n%s", data)
+	}
+	if strings.Count(data, "call_2") == 0 {
+		t.Errorf("call_2 missing")
 	}
 }
